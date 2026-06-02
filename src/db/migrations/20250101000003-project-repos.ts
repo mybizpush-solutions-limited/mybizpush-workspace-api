@@ -1,5 +1,6 @@
 import { DataTypes } from "sequelize";
 import type { Migration } from "../umzug";
+import { ignoreDuplicate } from "../migration-helpers";
 
 // Repositories linked to a project (a project can span several repos).
 export const up: Migration = async ({ context: qi }) => {
@@ -21,12 +22,14 @@ export const up: Migration = async ({ context: qi }) => {
     added_by: { type: DataTypes.UUID, allowNull: true, references: { model: "users", key: "id" }, onDelete: "SET NULL" },
     created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: now },
   });
-  await qi.addIndex("project_repos", ["project_id"]);
-  await qi.addIndex("project_repos", {
-    fields: ["project_id", "full_name"],
-    unique: true,
-    name: "project_repos_project_full_name_uq",
-  });
+  await ignoreDuplicate(qi.addIndex("project_repos", ["project_id"]));
+  await ignoreDuplicate(
+    qi.addIndex("project_repos", {
+      fields: ["project_id", "full_name"],
+      unique: true,
+      name: "project_repos_project_full_name_uq",
+    }),
+  );
 };
 
 export const down: Migration = async ({ context: qi }) => {

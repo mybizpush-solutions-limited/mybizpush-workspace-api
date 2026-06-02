@@ -1,5 +1,6 @@
 import { DataTypes } from "sequelize";
 import type { Migration } from "../umzug";
+import { ignoreDuplicate } from "../migration-helpers";
 
 // Per-user Google OAuth tokens + a link from meetings to their Calendar event.
 export const up: Migration = async ({ context: qi }) => {
@@ -21,7 +22,9 @@ export const up: Migration = async ({ context: qi }) => {
     updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: now },
   });
 
-  await qi.addColumn("meetings", "google_event_id", { type: DataTypes.STRING, allowNull: true });
+  await ignoreDuplicate(
+    qi.addColumn("meetings", "google_event_id", { type: DataTypes.STRING, allowNull: true }),
+  );
 };
 
 export const down: Migration = async ({ context: qi }) => {

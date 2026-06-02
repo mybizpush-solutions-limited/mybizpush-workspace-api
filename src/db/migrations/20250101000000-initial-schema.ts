@@ -1,5 +1,6 @@
 import { DataTypes } from "sequelize";
 import type { Migration } from "../umzug";
+import { ignoreDuplicate } from "../migration-helpers";
 
 // Initial schema. Column names are snake_case to match the models' underscored
 // mapping. Enum types are created with the same names Sequelize models expect.
@@ -189,16 +190,16 @@ export const up: Migration = async ({ context: qi }) => {
     user_id: { type: DataTypes.UUID, primaryKey: true, references: { model: "users", key: "id" }, onDelete: "CASCADE" },
   });
 
-  // ---- Indexes ----
-  await qi.addIndex("projects", ["department_id"]);
-  await qi.addIndex("tasks", ["project_id"]);
-  await qi.addIndex("tasks", ["status"]);
-  await qi.addIndex("issues", ["project_id"]);
-  await qi.addIndex("issues", ["status"]);
-  await qi.addIndex("comments", ["item_id"]);
-  await qi.addIndex("activity", ["item_id"]);
-  await qi.addIndex("activity", ["created_at"]);
-  await qi.addIndex("notifications", ["user_id", "read"]);
+  // ---- Indexes (idempotent: skip if already created by a partial run) ----
+  await ignoreDuplicate(qi.addIndex("projects", ["department_id"]));
+  await ignoreDuplicate(qi.addIndex("tasks", ["project_id"]));
+  await ignoreDuplicate(qi.addIndex("tasks", ["status"]));
+  await ignoreDuplicate(qi.addIndex("issues", ["project_id"]));
+  await ignoreDuplicate(qi.addIndex("issues", ["status"]));
+  await ignoreDuplicate(qi.addIndex("comments", ["item_id"]));
+  await ignoreDuplicate(qi.addIndex("activity", ["item_id"]));
+  await ignoreDuplicate(qi.addIndex("activity", ["created_at"]));
+  await ignoreDuplicate(qi.addIndex("notifications", ["user_id", "read"]));
 };
 
 export const down: Migration = async ({ context: qi }) => {
