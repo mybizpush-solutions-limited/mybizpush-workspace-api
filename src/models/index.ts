@@ -340,6 +340,35 @@ Meeting.init(
   { sequelize, tableName: "meetings", updatedAt: false },
 );
 
+// ---- ProjectRepo (GitHub repos linked to a project) ------------------------
+export class ProjectRepo extends Model<InferAttributes<ProjectRepo>, InferCreationAttributes<ProjectRepo>> {
+  declare id: CreationOptional<string>;
+  declare projectId: string;
+  declare owner: string;
+  declare repo: string;
+  declare fullName: string;
+  declare htmlUrl: CreationOptional<string | null>;
+  declare description: CreationOptional<string | null>;
+  declare isPrivate: CreationOptional<boolean>;
+  declare addedBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+}
+ProjectRepo.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    projectId: { type: DataTypes.UUID, allowNull: false },
+    owner: { type: DataTypes.STRING, allowNull: false },
+    repo: { type: DataTypes.STRING, allowNull: false },
+    fullName: { type: DataTypes.STRING, allowNull: false },
+    htmlUrl: { type: DataTypes.STRING, allowNull: true },
+    description: { type: DataTypes.TEXT, allowNull: true },
+    isPrivate: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    addedBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "project_repos", updatedAt: false },
+);
+
 // ---- GoogleAccount (per-user OAuth tokens) ---------------------------------
 export class GoogleAccount extends Model<
   InferAttributes<GoogleAccount>,
@@ -449,10 +478,13 @@ NotificationPreference.belongsTo(User, { foreignKey: "userId" });
 User.hasOne(GoogleAccount, { as: "googleAccount", foreignKey: "userId" });
 GoogleAccount.belongsTo(User, { foreignKey: "userId" });
 
+Project.hasMany(ProjectRepo, { as: "repos", foreignKey: "projectId" });
+ProjectRepo.belongsTo(Project, { foreignKey: "projectId" });
+
 Notification.belongsTo(User, { as: "recipient", foreignKey: "userId" });
 Notification.belongsTo(User, { as: "fromUser", foreignKey: "fromUserId" });
 
 export const models = {
   User, Department, Project, Label, Task, Issue, Comment, Activity,
-  PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount,
+  PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount, ProjectRepo,
 };

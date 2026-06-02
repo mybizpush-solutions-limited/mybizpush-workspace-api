@@ -38,6 +38,8 @@ const schema = z.object({
   // GitHub PR enrichment (optional token for private repos / higher rate limits).
   GITHUB_TOKEN: z.string().optional().default(""),
   GITHUB_API_URL: z.string().url().default("https://api.github.com"),
+  // Shared secret for verifying inbound GitHub webhooks (X-Hub-Signature-256).
+  GITHUB_WEBHOOK_SECRET: z.string().optional().default(""),
 
   // Digest scheduler (cron expressions; toggle off in tests/CI).
   ENABLE_DIGEST_SCHEDULER: z

@@ -21,6 +21,7 @@ import { attachmentsRouter } from "./modules/attachments/attachments.routes";
 import { aiRouter } from "./modules/ai/ai.routes";
 import { digestsRouter } from "./modules/digests/digests.routes";
 import { googleRouter } from "./modules/google/google.routes";
+import { githubRouter } from "./modules/github/github.routes";
 import { healthRouter } from "./modules/health/health.routes";
 
 // All versioned business endpoints live under this prefix.
@@ -36,7 +37,14 @@ export function createApp() {
       credentials: true, // allow the refresh-token cookie
     }),
   );
-  app.use(express.json());
+  // Capture the raw body so the GitHub webhook can verify its HMAC signature.
+  app.use(
+    express.json({
+      verify: (req, _res, buf) => {
+        (req as unknown as { rawBody?: Buffer }).rawBody = buf;
+      },
+    }),
+  );
   app.use(cookieParser());
   if (!isProd) app.use(morgan("dev"));
 
@@ -62,6 +70,7 @@ export function createApp() {
   v1.use("/ai", aiRouter);
   v1.use("/digests", digestsRouter);
   v1.use("/google", googleRouter);
+  v1.use("/github", githubRouter);
   app.use(API_PREFIX, v1);
 
   // Fallbacks

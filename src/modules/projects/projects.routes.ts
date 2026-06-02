@@ -4,6 +4,7 @@ import { asyncHandler } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { projectsService } from "./projects.service";
+import { projectReposService } from "./repos.service";
 
 export const projectsRouter = Router();
 projectsRouter.use(requireAuth);
@@ -52,5 +53,38 @@ projectsRouter.patch(
   validateBody(updateSchema),
   asyncHandler(async (req, res) => {
     res.json({ project: await projectsService.update(req.params.id!, req.body) });
+  }),
+);
+
+// ---- Linked GitHub repositories -------------------------------------------
+const addRepoSchema = z.object({ repo: z.string().trim().min(1).max(300) });
+
+projectsRouter.get(
+  "/:id/repos",
+  asyncHandler(async (req, res) => {
+    res.json({ repos: await projectReposService.list(req.params.id!) });
+  }),
+);
+
+projectsRouter.post(
+  "/:id/repos",
+  validateBody(addRepoSchema),
+  asyncHandler(async (req, res) => {
+    res.status(201).json({ repo: await projectReposService.add(req.params.id!, req.body.repo, req.auth!.sub) });
+  }),
+);
+
+projectsRouter.delete(
+  "/:id/repos/:repoId",
+  asyncHandler(async (req, res) => {
+    await projectReposService.remove(req.params.id!, req.params.repoId!);
+    res.status(204).end();
+  }),
+);
+
+projectsRouter.get(
+  "/:id/pull-requests",
+  asyncHandler(async (req, res) => {
+    res.json({ pullRequests: await projectReposService.pullRequests(req.params.id!) });
   }),
 );

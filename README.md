@@ -83,6 +83,8 @@ Versioned business endpoints live under `/api/v1`. The infra health check stays 
 | GET    | `/api/v1/projects/:id`       | Bearer          | one project                            |
 | POST   | `/api/v1/projects`           | Bearer          | create project                         |
 | PATCH  | `/api/v1/projects/:id`       | Bearer          | update (name/manager/progress/members) |
+| GET/POST/DELETE | `/api/v1/projects/:id/repos` | Bearer    | list / link (`{ repo }`) / unlink GitHub repos |
+| GET    | `/api/v1/projects/:id/pull-requests` | Bearer  | open PRs across the project's repos (live) |
 | GET    | `/api/v1/tasks`              | Bearer          | list (`?projectId=`)                   |
 | GET    | `/api/v1/tasks/:id`          | Bearer          | one task                               |
 | POST   | `/api/v1/tasks`              | Bearer          | create task                            |
@@ -109,6 +111,20 @@ Versioned business endpoints live under `/api/v1`. The infra health check stays 
 | GET    | `/api/v1/google/callback`    | — (OAuth state) | Google redirect target → stores tokens |
 | GET    | `/api/v1/google/status`      | Bearer          | `{ connected, email }`                 |
 | POST   | `/api/v1/google/disconnect`  | Bearer          | remove the stored Google tokens        |
+| POST   | `/api/v1/github/webhook`     | HMAC signature  | GitHub events → auto-updates linked PR status |
+
+### GitHub setup
+
+- **PR enrichment / project repos:** set `GITHUB_TOKEN` (a fine-grained PAT with **Pull requests: Read-only** on the relevant repos). Link repos to a project from **Project → Repos**.
+- **Webhook (auto-update PR status):** in each repo (or the org) → **Settings → Webhooks → Add webhook**. Payload URL `https://<api-host>/api/v1/github/webhook`, content type `application/json`, secret = `GITHUB_WEBHOOK_SECRET`, events: **Pull requests**. When a PR is merged/closed/reopened, any linked PR (on a task/issue) updates automatically.
+
+## Docker
+
+```bash
+cp .env.example .env   # fill JWT secrets (required) + any integration keys
+docker compose up --build
+```
+Brings up Postgres + Redis + the API (which runs pending migrations on start, then listens on `:4000`). The compose file overrides `DATABASE_URL`/`REDIS_URL` to point at the bundled services; everything else comes from `.env`.
 
 ### Google Calendar / Meet setup
 
