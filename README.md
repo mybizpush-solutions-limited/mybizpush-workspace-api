@@ -111,11 +111,16 @@ Versioned business endpoints live under `/api/v1`. The infra health check stays 
 | GET    | `/api/v1/google/callback`    | — (OAuth state) | Google redirect target → stores tokens |
 | GET    | `/api/v1/google/status`      | Bearer          | `{ connected, email }`                 |
 | POST   | `/api/v1/google/disconnect`  | Bearer          | remove the stored Google tokens        |
+| GET    | `/api/v1/github/auth-url`    | Bearer          | start the GitHub connect flow          |
+| GET    | `/api/v1/github/callback`    | — (OAuth state) | GitHub redirect target → stores token + identity |
+| GET    | `/api/v1/github/status`      | Bearer          | `{ connected, login, avatarUrl, orgMember, org }` |
+| POST   | `/api/v1/github/disconnect`  | Bearer          | remove the stored GitHub account       |
 | POST   | `/api/v1/github/webhook`     | HMAC signature  | GitHub events → auto-updates linked PR status |
 
 ### GitHub setup
 
 - **PR enrichment / project repos:** set `GITHUB_TOKEN` (a fine-grained PAT with **Pull requests: Read-only** on the relevant repos). Link repos to a project from **Project → Repos**.
+- **Per-user OAuth (connect account + verify org membership):** create a **GitHub OAuth App** (Settings → Developer settings → OAuth Apps). Set the **Authorization callback URL** to `GITHUB_OAUTH_REDIRECT_URI` (default `http://localhost:4000/api/v1/github/callback`), then put `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` in `.env`. Set `GITHUB_ORG` to the org whose membership should be verified on connect (the requested scopes are `read:user` + `read:org`; leave `GITHUB_ORG` empty to skip the check). Users connect from the onboarding wizard's **Connect your tools** step or later from **Profile → GitHub**.
 - **Webhook (auto-update PR status):** in each repo (or the org) → **Settings → Webhooks → Add webhook**. Payload URL `https://<api-host>/api/v1/github/webhook`, content type `application/json`, secret = `GITHUB_WEBHOOK_SECRET`, events: **Pull requests**. When a PR is merged/closed/reopened, any linked PR (on a task/issue) updates automatically.
 
 ## Docker

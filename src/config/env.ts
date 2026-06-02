@@ -41,6 +41,16 @@ const schema = z.object({
   // Shared secret for verifying inbound GitHub webhooks (X-Hub-Signature-256).
   GITHUB_WEBHOOK_SECRET: z.string().optional().default(""),
 
+  // GitHub per-user OAuth (connect account + verify org membership). The
+  // redirect URI must match the GitHub OAuth App's "Authorization callback URL".
+  GITHUB_CLIENT_ID: z.string().optional().default(""),
+  GITHUB_CLIENT_SECRET: z.string().optional().default(""),
+  GITHUB_OAUTH_REDIRECT_URI: z.string().url().default("http://localhost:4000/api/v1/github/callback"),
+  // Org whose membership we verify on connect (e.g. "mybizpush"). Empty = skip.
+  GITHUB_ORG: z.string().optional().default(""),
+  // OAuth authorize/token endpoints (override for GitHub Enterprise).
+  GITHUB_OAUTH_BASE_URL: z.string().url().default("https://github.com/login/oauth"),
+
   // Digest scheduler (cron expressions; toggle off in tests/CI).
   ENABLE_DIGEST_SCHEDULER: z
     .string()

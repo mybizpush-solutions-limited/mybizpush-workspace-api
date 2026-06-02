@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "../config/env";
+import { AppError } from "./errors";
+import { GithubAccount } from "../models";
 
 export type PrStatus = "open" | "merged" | "closed" | "draft";
 
@@ -145,4 +147,115 @@ export function verifyWebhookSignature(raw: Buffer, signature: string | undefine
   const a = Buffer.from(digest);
   const b = Buffer.from(signature);
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// ---- Per-user OAuth --------------------------------------------------------
+// read:user → profile; read:org → verify membership of the configured org.
+export const GITHUB_OAUTH_SCOPES = ["read:user", "read:org"];
+
+export function isOAuthConfigured(): boolean {
+  return Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
+}
+
+function assertOAuthConfigured(): void {
+  if (!isOAuthConfigured()) {
+    throw new AppError(503, "GitHub integration is not configured", "github_unconfigured");
+  }
+}
+
+// Build the GitHub consent URL for the connect flow.
+export function getOAuthUrl(state: string): string {
+  assertOAuthConfigured();
+  const params = new URLSearchParams({
+    client_id: env.GITHUB_CLIENT_ID,
+    redirect_uri: env.GITHUB_OAUTH_REDIRECT_URI,
+    scope: GITHUB_OAUTH_SCOPES.join(" "),
+    state,
+    allow_signup: "false",
+  });
+  return `${env.GITHUB_OAUTH_BASE_URL}/authorize?${params.toString()}`;
+}
+
+function userHeaders(token: string): Record<string, string> {
+  return {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "mybizpush-dev-space",
+    Authorization: `Bearer ${token}`,
+  };
+}
+
+// Check whether the token's owner is an active member of the configured org.
+// Returns false if no org is configured or the user isn't a member.
+async function checkOrgMembership(token: string): Promise<boolean> {
+  if (!env.GITHUB_ORG) return false;
+  try {
+    const res = await fetch(`${env.GITHUB_API_URL}/user/memberships/orgs/${env.GITHUB_ORG}`, {
+      headers: userHeaders(token),
+    });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { state?: string };
+    return data.state === "active";
+  } catch {
+    return false;
+  }
+}
+
+// Exchange the auth code for an access token, resolve the GitHub identity +
+// org membership, and persist it all for the user.
+export async function exchangeOAuthCodeAndStore(userId: string, code: string): Promise<void> {
+  assertOAuthConfigured();
+
+  const tokenRes = await fetch(`${env.GITHUB_OAUTH_BASE_URL}/access_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      client_id: env.GITHUB_CLIENT_ID,
+      client_secret: env.GITHUB_CLIENT_SECRET,
+      code,
+      redirect_uri: env.GITHUB_OAUTH_REDIRECT_URI,
+    }),
+  });
+  const token = (await tokenRes.json()) as {
+    access_token?: string;
+    scope?: string;
+    token_type?: string;
+    error?: string;
+    error_description?: string;
+  };
+  if (!tokenRes.ok || !token.access_token) {
+    throw new AppError(502, token.error_description ?? "GitHub token exchange failed", "github_oauth_failed");
+  }
+
+  // Resolve the connected identity (login, id, name, avatar).
+  let githubId: string | null = null;
+  let login: string | null = null;
+  let name: string | null = null;
+  let avatarUrl: string | null = null;
+  try {
+    const meRes = await fetch(`${env.GITHUB_API_URL}/user`, { headers: userHeaders(token.access_token) });
+    if (meRes.ok) {
+      const me = (await meRes.json()) as { id?: number; login?: string; name?: string; avatar_url?: string };
+      githubId = me.id != null ? String(me.id) : null;
+      login = me.login ?? null;
+      name = me.name ?? null;
+      avatarUrl = me.avatar_url ?? null;
+    }
+  } catch {
+    /* non-fatal — store the connection without identity details */
+  }
+
+  const orgMember = await checkOrgMembership(token.access_token);
+
+  await GithubAccount.upsert({
+    userId,
+    githubId,
+    login,
+    name,
+    avatarUrl,
+    accessToken: token.access_token,
+    scope: token.scope ?? null,
+    tokenType: token.token_type ?? null,
+    orgMember,
+  });
 }

@@ -408,6 +408,40 @@ GoogleAccount.init(
   { sequelize, tableName: "google_accounts" },
 );
 
+// ---- GithubAccount (per-user OAuth token + identity) -----------------------
+export class GithubAccount extends Model<
+  InferAttributes<GithubAccount>,
+  InferCreationAttributes<GithubAccount>
+> {
+  declare userId: string;
+  declare githubId: CreationOptional<string | null>;
+  declare login: CreationOptional<string | null>;
+  declare name: CreationOptional<string | null>;
+  declare avatarUrl: CreationOptional<string | null>;
+  declare accessToken: CreationOptional<string | null>;
+  declare scope: CreationOptional<string | null>;
+  declare tokenType: CreationOptional<string | null>;
+  declare orgMember: CreationOptional<boolean>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+GithubAccount.init(
+  {
+    userId: { type: DataTypes.UUID, primaryKey: true },
+    githubId: { type: DataTypes.STRING, allowNull: true },
+    login: { type: DataTypes.STRING, allowNull: true },
+    name: { type: DataTypes.STRING, allowNull: true },
+    avatarUrl: { type: DataTypes.STRING, allowNull: true },
+    accessToken: { type: DataTypes.TEXT, allowNull: true },
+    scope: { type: DataTypes.TEXT, allowNull: true },
+    tokenType: { type: DataTypes.STRING, allowNull: true },
+    orgMember: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "github_accounts" },
+);
+
 // ---- NotificationPreference -----------------------------------------------
 export class NotificationPreference extends Model<
   InferAttributes<NotificationPreference>,
@@ -488,6 +522,9 @@ NotificationPreference.belongsTo(User, { foreignKey: "userId" });
 User.hasOne(GoogleAccount, { as: "googleAccount", foreignKey: "userId" });
 GoogleAccount.belongsTo(User, { foreignKey: "userId" });
 
+User.hasOne(GithubAccount, { as: "githubAccount", foreignKey: "userId" });
+GithubAccount.belongsTo(User, { foreignKey: "userId" });
+
 Project.hasMany(ProjectRepo, { as: "repos", foreignKey: "projectId" });
 ProjectRepo.belongsTo(Project, { foreignKey: "projectId" });
 
@@ -496,5 +533,5 @@ Notification.belongsTo(User, { as: "fromUser", foreignKey: "fromUserId" });
 
 export const models = {
   User, Department, Project, Label, Task, Issue, Comment, Activity,
-  PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount, ProjectRepo,
+  PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount, GithubAccount, ProjectRepo,
 };
