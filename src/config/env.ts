@@ -29,7 +29,7 @@ const schema = z.object({
   EMAIL_FROM: z.string().default("MyBizPush Dev Space <no-reply@mybizpush.com>"),
 
   OPENROUTER_API_KEY: z.string().optional().default(""),
-  OPENROUTER_MODEL: z.string().default("anthropic/claude-3.5-sonnet"),
+  OPENROUTER_MODEL: z.string().default("openai/gpt-oss-20b"),
   OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
 
   // Public URL of the UI (used in emails, e.g. the password-reset link).
