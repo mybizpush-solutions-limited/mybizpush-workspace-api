@@ -1,4 +1,4 @@
-import { Department, NotificationPreference, User } from "../../models";
+import { Department, NotificationPreference, Project, User } from "../../models";
 
 // Public shape returned to clients — mirrors ui/src/types/index.ts `User`.
 export interface PublicUser {
@@ -6,28 +6,38 @@ export interface PublicUser {
   name: string;
   email: string;
   avatarColor: string;
+  avatarUrl: string | null;
   roles: string[];
   accessLevel: "member" | "admin" | "executive_admin";
+  onboarded: boolean;
   departmentIds: string[];
+  projectIds: string[];
 }
 
-// Serialize a User model (optionally with its `departments` association loaded)
-// into the public API shape.
+// Serialize a User model (optionally with its `departments`/`projects`
+// associations loaded) into the public API shape.
 export function toPublicUser(user: User): PublicUser {
   const departments = (user.get("departments") as Department[] | undefined) ?? [];
+  const projects = (user.get("projects") as Project[] | undefined) ?? [];
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     avatarColor: user.avatarColor,
+    avatarUrl: user.avatarUrl ?? null,
     roles: user.roles,
     accessLevel: user.accessLevel,
+    onboarded: user.onboarded,
     departmentIds: departments.map((d) => d.id),
+    projectIds: projects.map((p) => p.id),
   };
 }
 
-const withDepartments = {
-  include: [{ model: Department, as: "departments", attributes: ["id"], through: { attributes: [] } }],
+const withMemberships = {
+  include: [
+    { model: Department, as: "departments", attributes: ["id"], through: { attributes: [] } },
+    { model: Project, as: "projects", attributes: ["id"], through: { attributes: [] } },
+  ],
 };
 
 export const usersRepo = {
@@ -35,12 +45,12 @@ export const usersRepo = {
     User.findOne({ where: { email: email.toLowerCase() } }),
 
   publicById: async (id: string): Promise<PublicUser | undefined> => {
-    const user = await User.findByPk(id, withDepartments);
+    const user = await User.findByPk(id, withMemberships);
     return user ? toPublicUser(user) : undefined;
   },
 
   list: async (): Promise<PublicUser[]> => {
-    const users = await User.findAll({ ...withDepartments, order: [["name", "ASC"]] });
+    const users = await User.findAll({ ...withMemberships, order: [["name", "ASC"]] });
     return users.map(toPublicUser);
   },
 

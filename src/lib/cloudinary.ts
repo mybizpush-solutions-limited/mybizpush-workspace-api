@@ -65,6 +65,7 @@ export interface UploadOptions {
   resourceType?: ResourceType;
   tags?: string[];
   filename?: string; // used to derive the public id
+  publicId?: string; // explicit public id (stable per entity, e.g. avatars)
 }
 
 // Upload an in-memory buffer to a structured Cloudinary folder with tags.
@@ -75,7 +76,7 @@ export function uploadBuffer(buffer: Buffer, options: UploadOptions = {}): Promi
       {
         folder: options.folder ?? env.CLOUDINARY_UPLOAD_FOLDER,
         resource_type: options.resourceType ?? "auto",
-        public_id: options.filename ? buildPublicId(options.filename) : undefined,
+        public_id: options.publicId ?? (options.filename ? buildPublicId(options.filename) : undefined),
         tags: options.tags,
         overwrite: true,
         unique_filename: false,

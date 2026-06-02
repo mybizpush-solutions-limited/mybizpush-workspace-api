@@ -22,6 +22,11 @@ export const NOTIFICATION_KINDS = [
 ] as const;
 export const PR_STATUSES = ["open", "merged", "closed", "draft"] as const;
 export const DIGEST_FREQUENCIES = ["off", "daily", "weekly"] as const;
+// Selectable team roles (kept in sync with ui/src/types/index.ts `Role`).
+export const ROLES = [
+  "Frontend", "Backend", "DevOps", "SMM", "Graphics Designer", "UI/UX Designer",
+  "Video Editor", "CEO", "CTO", "CIO", "CSO", "CMO",
+] as const;
 
 export type AccessLevel = (typeof ACCESS_LEVELS)[number];
 export type WorkStatus = (typeof WORK_STATUSES)[number];
@@ -35,8 +40,10 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   declare email: string;
   declare passwordHash: string;
   declare avatarColor: CreationOptional<string>;
+  declare avatarUrl: CreationOptional<string | null>;
   declare accessLevel: CreationOptional<AccessLevel>;
   declare roles: CreationOptional<string[]>;
+  declare onboarded: CreationOptional<boolean>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -47,8 +54,10 @@ User.init(
     email: { type: DataTypes.STRING, allowNull: false, unique: true },
     passwordHash: { type: DataTypes.STRING, allowNull: false },
     avatarColor: { type: DataTypes.STRING, allowNull: false, defaultValue: "#960095" },
+    avatarUrl: { type: DataTypes.STRING, allowNull: true },
     accessLevel: { type: DataTypes.ENUM(...ACCESS_LEVELS), allowNull: false, defaultValue: "member" },
     roles: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
+    onboarded: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },
@@ -447,6 +456,7 @@ Project.belongsTo(Department, { foreignKey: "departmentId" });
 Department.hasMany(Project, { as: "projects", foreignKey: "departmentId" });
 Project.belongsTo(User, { as: "manager", foreignKey: "managerId" });
 Project.belongsToMany(User, { through: ProjectMembers, as: "members", foreignKey: "projectId", otherKey: "userId" });
+User.belongsToMany(Project, { through: ProjectMembers, as: "projects", foreignKey: "userId", otherKey: "projectId" });
 
 Task.belongsTo(Project, { foreignKey: "projectId" });
 Project.hasMany(Task, { as: "tasks", foreignKey: "projectId" });

@@ -32,7 +32,8 @@ async function seed() {
   for (const spec of userSpecs) {
     const [user] = await User.findOrCreate({
       where: { email: spec.email },
-      defaults: { ...spec, passwordHash },
+      // Seeded demo accounts are already set up — skip the onboarding wizard.
+      defaults: { ...spec, passwordHash, onboarded: true },
     });
     await NotificationPreference.findOrCreate({ where: { userId: user.id }, defaults: { userId: user.id } });
     users[spec.email] = user as Seeded<User>;
