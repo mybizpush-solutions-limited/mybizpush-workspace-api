@@ -50,4 +50,13 @@ export const emails = {
 <p>If you didn't request this, you can safely ignore this email.</p>`,
       text: `Reset your password: ${resetLink} (expires in 30 minutes)`,
     }),
+  verifyOtp: (to: string, code: string) =>
+    sendEmail({
+      to,
+      subject: `${code} is your MyBizPush Dev Space verification code`,
+      html: `<p>Welcome to MyBizPush Dev Space! Use this code to finish creating your account:</p>
+<p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:12px 0">${code}</p>
+<p>This code expires in 10 minutes. If you didn't request it, you can ignore this email.</p>`,
+      text: `Your MyBizPush Dev Space verification code is ${code} (expires in 10 minutes).`,
+    }),
 };

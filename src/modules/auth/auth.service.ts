@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { env } from "../../config/env";
 import { badRequest, conflict, unauthorized } from "../../lib/errors";
 import { hashPassword, verifyPassword } from "../../lib/password";
@@ -19,6 +19,21 @@ import type { LoginInput, RegisterInput } from "./auth.schemas";
 const RESET_PREFIX = "pwreset:";
 const RESET_TTL_SECONDS = 30 * 60;
 
+const REG_PREFIX = "reg:";
+const REG_TTL_SECONDS = 10 * 60;
+const OTP_MAX_ATTEMPTS = 5;
+
+interface PendingRegistration {
+  name: string;
+  passwordHash: string;
+  otp: string;
+  attempts: number;
+}
+
+function generateOtp(): string {
+  return randomInt(0, 1_000_000).toString().padStart(6, "0");
+}
+
 // Enforce the company email policy: only @<ALLOWED_EMAIL_DOMAIN> addresses.
 function assertAllowedDomain(email: string): void {
   const domain = `@${env.ALLOWED_EMAIL_DOMAIN}`.toLowerCase();
@@ -34,14 +49,58 @@ async function buildTokens(user: User): Promise<{ accessToken: string; refreshTo
 }
 
 export const authService = {
-  async register(input: RegisterInput): Promise<{ user: PublicUser; accessToken: string; refreshToken: string }> {
+  // Step 1: validate, stash a pending registration in Redis, and email a 6-digit OTP.
+  async startRegistration(input: RegisterInput): Promise<void> {
     assertAllowedDomain(input.email);
     const existing = await usersRepo.rawByEmail(input.email);
     if (existing) throw conflict("An account with this email already exists");
 
     const passwordHash = await hashPassword(input.password);
-    const user = await usersRepo.create({ name: input.name, email: input.email, passwordHash });
+    const pending: PendingRegistration = { name: input.name, passwordHash, otp: generateOtp(), attempts: 0 };
+    await redis.set(`${REG_PREFIX}${input.email}`, JSON.stringify(pending), "EX", REG_TTL_SECONDS);
+    await emails.verifyOtp(input.email, pending.otp).catch(() => undefined);
+  },
 
+  // Resend a fresh code for an in-progress signup (preserves the pending data).
+  async resendOtp(email: string): Promise<void> {
+    const raw = await redis.get(`${REG_PREFIX}${email}`);
+    if (!raw) throw badRequest("Your sign-up session expired — please start again");
+    const pending = JSON.parse(raw) as PendingRegistration;
+    pending.otp = generateOtp();
+    pending.attempts = 0;
+    await redis.set(`${REG_PREFIX}${email}`, JSON.stringify(pending), "EX", REG_TTL_SECONDS);
+    await emails.verifyOtp(email, pending.otp).catch(() => undefined);
+  },
+
+  // Step 2: verify the OTP and create the account.
+  async verifyRegistration(
+    email: string,
+    otp: string,
+  ): Promise<{ user: PublicUser; accessToken: string; refreshToken: string }> {
+    const key = `${REG_PREFIX}${email}`;
+    const raw = await redis.get(key);
+    if (!raw) throw badRequest("Your code has expired — please start sign up again");
+    const pending = JSON.parse(raw) as PendingRegistration;
+
+    if (pending.otp !== otp) {
+      pending.attempts += 1;
+      if (pending.attempts >= OTP_MAX_ATTEMPTS) {
+        await redis.del(key);
+        throw badRequest("Too many incorrect codes — please start sign up again");
+      }
+      await redis.set(key, JSON.stringify(pending), "KEEPTTL");
+      throw badRequest("That code isn't right");
+    }
+
+    // Guard against a race where the account was created in the meantime.
+    const existing = await usersRepo.rawByEmail(email);
+    if (existing) {
+      await redis.del(key);
+      throw conflict("An account with this email already exists");
+    }
+
+    const user = await usersRepo.create({ name: pending.name, email, passwordHash: pending.passwordHash });
+    await redis.del(key);
     void emails.welcome(user.email, user.name).catch(() => undefined);
 
     const tokens = await buildTokens(user);

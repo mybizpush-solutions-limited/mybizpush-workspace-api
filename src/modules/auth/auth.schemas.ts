@@ -11,6 +11,15 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Password is required"),
 });
 
+export const verifyRegistrationSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Enter a valid email"),
+  otp: z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code"),
+});
+
+export const resendOtpSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Enter a valid email"),
+});
+
 export const forgotPasswordSchema = z.object({
   email: z.string().trim().toLowerCase().email("Enter a valid email"),
 });

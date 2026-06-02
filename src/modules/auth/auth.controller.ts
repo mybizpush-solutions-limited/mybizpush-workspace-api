@@ -17,8 +17,23 @@ function setRefreshCookie(res: Response, token: string) {
 }
 
 export const authController = {
-  async register(req: Request, res: Response) {
-    const { user, accessToken, refreshToken } = await authService.register(req.body);
+  // Step 1 — email a verification code.
+  async registerStart(req: Request, res: Response) {
+    await authService.startRegistration(req.body);
+    res.json({ ok: true });
+  },
+
+  async resendOtp(req: Request, res: Response) {
+    await authService.resendOtp(req.body.email);
+    res.json({ ok: true });
+  },
+
+  // Step 2 — verify the code, create the account, and sign in.
+  async registerVerify(req: Request, res: Response) {
+    const { user, accessToken, refreshToken } = await authService.verifyRegistration(
+      req.body.email,
+      req.body.otp,
+    );
     setRefreshCookie(res, refreshToken);
     res.status(201).json({ user, accessToken });
   },
