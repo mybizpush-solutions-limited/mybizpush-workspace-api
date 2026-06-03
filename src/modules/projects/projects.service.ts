@@ -1,4 +1,17 @@
-import { Department, Project, User } from "../../models";
+import {
+  Activity,
+  Attachment,
+  Comment,
+  Department,
+  GithubIssueLink,
+  Issue,
+  Notification,
+  Project,
+  ProjectRepo,
+  PullRequest,
+  Task,
+  User,
+} from "../../models";
 import { notFound } from "../../lib/errors";
 import { env } from "../../config/env";
 import { uploadAvatarImage, type UploadFile } from "../../lib/avatar";
@@ -101,6 +114,30 @@ export const projectsService = {
     if (!project) throw notFound("Project not found");
     await (project as any).removeMember(userId);
     return reload(id);
+  },
+
+  // Delete a project and everything hanging off it (tasks, issues, their
+  // comments/activity/PRs/attachments/notifications, and linked repos).
+  async delete(id: string) {
+    const project = await Project.findByPk(id);
+    if (!project) throw notFound("Project not found");
+
+    const tasks = await Task.findAll({ where: { projectId: id }, attributes: ["id"] });
+    const issues = await Issue.findAll({ where: { projectId: id }, attributes: ["id"] });
+    const itemIds = [...tasks.map((t) => t.id), ...issues.map((i) => i.id)];
+    if (itemIds.length) {
+      await Comment.destroy({ where: { itemId: itemIds } });
+      await Activity.destroy({ where: { itemId: itemIds } });
+      await PullRequest.destroy({ where: { itemId: itemIds } });
+      await GithubIssueLink.destroy({ where: { itemId: itemIds } });
+      await Attachment.destroy({ where: { itemId: itemIds } });
+      await Notification.destroy({ where: { itemId: itemIds } });
+    }
+    await Task.destroy({ where: { projectId: id } });
+    await Issue.destroy({ where: { projectId: id } });
+    await ProjectRepo.destroy({ where: { projectId: id } });
+    await (project as any).setMembers([]); // clear the project_members join
+    await project.destroy(); // project_departments cascade via FK
   },
 
   async setAvatar(id: string, file: UploadFile) {

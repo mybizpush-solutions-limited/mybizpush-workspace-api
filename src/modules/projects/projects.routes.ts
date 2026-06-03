@@ -85,6 +85,18 @@ projectsRouter.patch(
   }),
 );
 
+// Only executive admins can delete a project.
+projectsRouter.delete(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    if (req.auth!.accessLevel !== "executive_admin") {
+      throw forbidden("Only an executive admin can delete a project");
+    }
+    await projectsService.delete(req.params.id!);
+    res.status(204).end();
+  }),
+);
+
 // Add / remove a department "lane" on a project (PM / head / exec).
 projectsRouter.post(
   "/:id/departments",

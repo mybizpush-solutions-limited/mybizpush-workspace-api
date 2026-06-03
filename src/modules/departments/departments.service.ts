@@ -1,4 +1,13 @@
-import { Department, DepartmentJoinRequest, User, type AccessLevel } from "../../models";
+import {
+  Department,
+  DepartmentJoinRequest,
+  Issue,
+  Project,
+  ProjectRepo,
+  Task,
+  User,
+  type AccessLevel,
+} from "../../models";
 import { badRequest, notFound, forbidden } from "../../lib/errors";
 import { env } from "../../config/env";
 import { uploadAvatarImage, type UploadFile } from "../../lib/avatar";
@@ -176,6 +185,19 @@ export const departmentsService = {
       { where: { departmentId, userId, status: "pending" } },
     );
     return this.bySlug(dept.slug);
+  },
+
+  // Delete a department. Projects stay (they may have other departments); we
+  // just detach this department's "lane" from any tasks/issues/repos/projects.
+  async delete(id: string) {
+    const dept = await Department.findByPk(id);
+    if (!dept) throw notFound("Department not found");
+    await Task.update({ departmentId: null }, { where: { departmentId: id } });
+    await Issue.update({ departmentId: null }, { where: { departmentId: id } });
+    await ProjectRepo.update({ departmentId: null }, { where: { departmentId: id } });
+    await Project.update({ departmentId: null }, { where: { departmentId: id } }); // legacy home
+    await (dept as unknown as { setMembers(ids: string[]): Promise<void> }).setMembers([]);
+    await dept.destroy(); // project_departments + join requests cascade via FK
   },
 
   async setAvatar(departmentId: string, file: UploadFile, viewer: Viewer) {

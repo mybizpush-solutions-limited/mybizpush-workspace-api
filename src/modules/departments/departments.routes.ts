@@ -73,6 +73,15 @@ departmentsRouter.patch(
   }),
 );
 
+departmentsRouter.delete(
+  "/:id",
+  requireAccessLevel("executive_admin"),
+  asyncHandler(async (req, res) => {
+    await departmentsService.delete(req.params.id!);
+    res.status(204).end();
+  }),
+);
+
 // ---- Join-request management (department head or executive admin) ----------
 departmentsRouter.get(
   "/:id/requests",
