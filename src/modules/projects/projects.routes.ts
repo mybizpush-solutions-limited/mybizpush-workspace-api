@@ -1,14 +1,28 @@
 import { Router } from "express";
 import { z } from "zod";
-import { asyncHandler } from "../../lib/errors";
+import { asyncHandler, forbidden } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
+import { Department } from "../../models";
 import { projectsService } from "./projects.service";
 import { projectReposService } from "./repos.service";
 import { githubSyncService } from "../github/github.sync.service";
 
 export const projectsRouter = Router();
 projectsRouter.use(requireAuth);
+
+// Creating/structuring projects is limited to a department's head or an
+// executive admin.
+async function assertCanManageDept(
+  departmentId: string,
+  auth: { sub: string; accessLevel: string },
+): Promise<void> {
+  if (auth.accessLevel === "executive_admin") return;
+  const dept = await Department.findByPk(departmentId);
+  if (!dept || dept.headId !== auth.sub) {
+    throw forbidden("Only the department head or an executive admin can do this");
+  }
+}
 
 const importIssueSchema = z.object({
   repoFullName: z.string().trim().min(3),
@@ -50,6 +64,7 @@ projectsRouter.post(
   "/",
   validateBody(createSchema),
   asyncHandler(async (req, res) => {
+    await assertCanManageDept(req.body.departmentId, req.auth!);
     res.status(201).json({ project: await projectsService.create(req.body) });
   }),
 );
