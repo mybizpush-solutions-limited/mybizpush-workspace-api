@@ -23,11 +23,13 @@ const iso = (d: Date | null | undefined): string | undefined => (d ? d.toISOStri
 // derived: the manager plus everyone in the involved departments.
 export function serializeProject(p: Project) {
   const departments = (p.get("departments") as Department[] | undefined) ?? [];
+  const guests = (p.get("members") as User[] | undefined) ?? []; // explicit guests
   const memberSet = new Set<string>();
   if (p.managerId) memberSet.add(p.managerId);
   for (const d of departments) {
     for (const m of (d.get("members") as User[] | undefined) ?? []) memberSet.add(m.id);
   }
+  for (const g of guests) memberSet.add(g.id);
   return {
     id: p.id,
     departmentId: p.departmentId ?? null, // legacy "home" department
@@ -35,7 +37,8 @@ export function serializeProject(p: Project) {
     name: p.name,
     description: p.description,
     managerId: p.managerId ?? null,
-    memberIds: [...memberSet],
+    memberIds: [...memberSet], // everyone: PM + involved-dept members + guests
+    guestIds: guests.map((g) => g.id), // individuals added on top of the departments
     progress: p.progress,
     avatarUrl: p.avatarUrl ?? null,
     createdAt: p.createdAt.toISOString(),

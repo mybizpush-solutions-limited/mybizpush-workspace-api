@@ -15,6 +15,8 @@ const withDepartments = {
       through: { attributes: [] },
       include: [{ model: User, as: "members", attributes: ["id"], through: { attributes: [] } }],
     },
+    // Explicit "guest" members added on top of the involved departments.
+    { model: User, as: "members", attributes: ["id"], through: { attributes: [] } },
   ],
 };
 
@@ -83,6 +85,21 @@ export const projectsService = {
     const project = await Project.findByPk(id);
     if (!project) throw notFound("Project not found");
     await (project as any).removeDepartment(departmentId);
+    return reload(id);
+  },
+
+  // Add / remove an explicit "guest" member (someone not in an involved department).
+  async addMember(id: string, userId: string) {
+    const project = await Project.findByPk(id);
+    if (!project) throw notFound("Project not found");
+    await (project as any).addMember(userId);
+    return reload(id);
+  },
+
+  async removeMember(id: string, userId: string) {
+    const project = await Project.findByPk(id);
+    if (!project) throw notFound("Project not found");
+    await (project as any).removeMember(userId);
     return reload(id);
   },
 

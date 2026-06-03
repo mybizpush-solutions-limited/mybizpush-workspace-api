@@ -103,6 +103,24 @@ projectsRouter.delete(
   }),
 );
 
+// Explicit "guest" members (someone not in an involved department).
+projectsRouter.post(
+  "/:id/members",
+  validateBody(z.object({ userId: z.string().uuid() })),
+  asyncHandler(async (req, res) => {
+    await assertCanManageProject(req.params.id!, req.auth!);
+    res.json({ project: await projectsService.addMember(req.params.id!, req.body.userId) });
+  }),
+);
+
+projectsRouter.delete(
+  "/:id/members/:userId",
+  asyncHandler(async (req, res) => {
+    await assertCanManageProject(req.params.id!, req.auth!);
+    res.json({ project: await projectsService.removeMember(req.params.id!, req.params.userId!) });
+  }),
+);
+
 projectsRouter.post(
   "/:id/avatar",
   avatarUpload.single("file"),
