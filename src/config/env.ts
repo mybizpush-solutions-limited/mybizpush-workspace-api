@@ -48,8 +48,6 @@ const schema = z.object({
   // RSA private key (PEM). Paste with literal "\n" newlines or base64-encode it.
   GITHUB_APP_PRIVATE_KEY: z.string().optional().default(""),
   GITHUB_APP_INSTALLATION_ID: z.string().optional().default(""),
-  // Legacy PAT fallback for PR reads when the App isn't configured yet.
-  GITHUB_TOKEN: z.string().optional().default(""),
 
   // User authorization (connect account + verify org membership) uses the same
   // GitHub App's client credentials. Redirect URI must match the App's

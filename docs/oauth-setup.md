@@ -116,8 +116,8 @@ GITHUB_APP_PRIVATE_KEY=LS0tLS1CRUdJTiBSU0Eg...
 ### Notes
 
 - **Installation token, not a PAT.** The App mints a short-lived (~1h) installation token from
-  a signed JWT and caches it; you never manage a personal access token. `GITHUB_TOKEN` remains
-  only as a legacy fallback for PR reads before the App is configured.
+  a signed JWT and caches it; you never manage a personal access token. Until the App is
+  configured, PR reads fall back to unauthenticated github.com (public repos only, low rate limit).
 - **Server-side membership check.** With **Members: Read-only**, the App confirms membership via
   the installation token (`GET /orgs/<org>/members/<login>`) — it doesn't depend on the scopes a
   user grants, and works even for users with *Private* org visibility.

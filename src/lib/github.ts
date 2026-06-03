@@ -111,17 +111,16 @@ async function getInstallationToken(): Promise<string | null> {
   }
 }
 
-// Headers for org-wide reads: prefer the App installation token, fall back to a
-// legacy PAT, else go unauthenticated (public repos / low rate limit).
+// Headers for org-wide reads: authenticate with the App installation token when
+// available, else go unauthenticated (public repos / low rate limit).
 async function readHeaders(): Promise<Record<string, string>> {
   const h: Record<string, string> = { ...BASE_HEADERS };
   let token: string | null = null;
   try {
     token = await getInstallationToken();
   } catch {
-    token = null; // fall through to PAT / unauthenticated
+    token = null; // App not configured / unreachable — fall back to unauthenticated
   }
-  if (!token && env.GITHUB_TOKEN) token = env.GITHUB_TOKEN;
   if (token) h.Authorization = `Bearer ${token}`;
   return h;
 }
