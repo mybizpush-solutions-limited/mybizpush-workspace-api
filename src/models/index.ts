@@ -275,6 +275,38 @@ PullRequest.init(
   { sequelize, tableName: "pull_requests", timestamps: false },
 );
 
+// ---- GithubIssueLink (mirror between an app issue and a GitHub issue) ------
+export class GithubIssueLink extends Model<
+  InferAttributes<GithubIssueLink>,
+  InferCreationAttributes<GithubIssueLink>
+> {
+  declare id: CreationOptional<string>;
+  declare itemId: string;
+  declare itemType: ItemType;
+  declare owner: string;
+  declare repo: string;
+  declare fullName: string;
+  declare number: number;
+  declare url: string;
+  declare state: CreationOptional<string>;
+  declare createdAt: CreationOptional<Date>;
+}
+GithubIssueLink.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    itemId: { type: DataTypes.UUID, allowNull: false },
+    itemType: { type: DataTypes.ENUM(...ITEM_TYPES), allowNull: false },
+    owner: { type: DataTypes.STRING, allowNull: false },
+    repo: { type: DataTypes.STRING, allowNull: false },
+    fullName: { type: DataTypes.STRING, allowNull: false },
+    number: { type: DataTypes.INTEGER, allowNull: false },
+    url: { type: DataTypes.STRING, allowNull: false },
+    state: { type: DataTypes.STRING, allowNull: false, defaultValue: "open" },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "github_issue_links", updatedAt: false },
+);
+
 // ---- Attachment -----------------------------------------------------------
 export class Attachment extends Model<InferAttributes<Attachment>, InferCreationAttributes<Attachment>> {
   declare id: CreationOptional<string>;
@@ -514,8 +546,10 @@ Issue.belongsToMany(Label, { through: IssueLabels, as: "labels", foreignKey: "is
 // Polymorphic (scoped) — attachments & pull requests hang off either item type.
 Task.hasMany(Attachment, { as: "attachments", foreignKey: "itemId", constraints: false, scope: { itemType: "task" } });
 Task.hasMany(PullRequest, { as: "pullRequests", foreignKey: "itemId", constraints: false, scope: { itemType: "task" } });
+Task.hasOne(GithubIssueLink, { as: "githubIssue", foreignKey: "itemId", constraints: false, scope: { itemType: "task" } });
 Issue.hasMany(Attachment, { as: "attachments", foreignKey: "itemId", constraints: false, scope: { itemType: "issue" } });
 Issue.hasMany(PullRequest, { as: "pullRequests", foreignKey: "itemId", constraints: false, scope: { itemType: "issue" } });
+Issue.hasOne(GithubIssueLink, { as: "githubIssue", foreignKey: "itemId", constraints: false, scope: { itemType: "issue" } });
 
 Comment.belongsTo(User, { as: "author", foreignKey: "authorId" });
 Comment.belongsToMany(User, { through: CommentMentions, as: "mentions", foreignKey: "commentId", otherKey: "userId" });

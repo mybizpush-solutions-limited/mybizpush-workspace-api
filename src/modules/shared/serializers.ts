@@ -1,6 +1,7 @@
 import {
   Attachment,
   Comment,
+  GithubIssueLink,
   Label,
   Project,
   PullRequest,
@@ -55,6 +56,7 @@ export function serializeWorkItem(item: Task | Issue, type: ItemType) {
   const labels = (item.get("labels") as Label[] | undefined) ?? [];
   const attachments = (item.get("attachments") as Attachment[] | undefined) ?? [];
   const pullRequests = (item.get("pullRequests") as PullRequest[] | undefined) ?? [];
+  const githubIssue = item.get("githubIssue") as GithubIssueLink | undefined;
 
   const base = {
     id: item.id,
@@ -69,6 +71,14 @@ export function serializeWorkItem(item: Task | Issue, type: ItemType) {
     labelIds: labels.map((l) => l.id),
     attachments: attachments.map(serializeAttachment),
     pullRequests: pullRequests.map(serializePullRequest),
+    githubIssue: githubIssue
+      ? {
+          number: githubIssue.number,
+          url: githubIssue.url,
+          repoFullName: githubIssue.fullName,
+          state: githubIssue.state,
+        }
+      : null,
     feedback: {
       awaitingFrom: item.feedbackAwaitingFrom ?? null,
       requestedById: item.feedbackRequestedBy ?? undefined,
@@ -167,4 +177,5 @@ export const workItemInclude = [
   { model: Label, as: "labels", attributes: ["id"], through: { attributes: [] } },
   { model: Attachment, as: "attachments" },
   { model: PullRequest, as: "pullRequests" },
+  { model: GithubIssueLink, as: "githubIssue", required: false },
 ];

@@ -1,7 +1,8 @@
 import type { ModelStatic } from "sequelize";
-import { Comment, Issue, PullRequest, Task, type ItemType } from "../../models";
+import { Comment, GithubIssueLink, Issue, PullRequest, Task, type ItemType } from "../../models";
 import { notFound } from "../../lib/errors";
 import { fetchPullRequest } from "../../lib/github";
+import { setIssueState } from "../../lib/github.features";
 import { githubService } from "../github/github.service";
 import { serializeWorkItem, workItemInclude } from "../shared/serializers";
 import { logActivity, notify } from "../shared/events";
@@ -104,6 +105,18 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
       const from = item.status;
       if (from === status) return reload(id);
       await item.update({ status });
+      // Mirror to GitHub when this issue is linked to a GitHub issue.
+      if (type === "issue") {
+        const link = await GithubIssueLink.findOne({ where: { itemId: id } });
+        if (link) {
+          const desired = status === "done" ? "closed" : "open";
+          if (link.state !== desired) {
+            await setIssueState(link.owner, link.repo, link.number, desired).catch(() => false);
+            link.state = desired;
+            await link.save();
+          }
+        }
+      }
       await logActivity({ itemId: id, itemType: type, actorId, kind: "status_changed", data: { from, to: status } });
       if (item.reporterId) {
         await notify({ userId: item.reporterId, fromUserId: actorId, kind: "status_changed", itemId: id, itemType: type, message: `${item.title} moved to ${status}` });

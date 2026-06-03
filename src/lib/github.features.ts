@@ -427,3 +427,18 @@ export async function createIssue(
   if (!res.ok) return null;
   return mapIssue((await res.json()) as RawIssue);
 }
+
+// Open or close a GitHub issue (used to push app-issue status back to GitHub).
+export async function setIssueState(
+  owner: string,
+  repo: string,
+  number: number,
+  state: "open" | "closed",
+): Promise<boolean> {
+  const res = await ghFetch(`/repos/${owner}/${repo}/issues/${number}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ state }),
+  });
+  return res.ok;
+}

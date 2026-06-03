@@ -5,9 +5,15 @@ import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { projectsService } from "./projects.service";
 import { projectReposService } from "./repos.service";
+import { githubSyncService } from "../github/github.sync.service";
 
 export const projectsRouter = Router();
 projectsRouter.use(requireAuth);
+
+const importIssueSchema = z.object({
+  repoFullName: z.string().trim().min(3),
+  number: z.number().int().positive(),
+});
 
 const createSchema = z.object({
   departmentId: z.string().uuid(),
@@ -107,5 +113,20 @@ projectsRouter.get(
   "/:id/deployments",
   asyncHandler(async (req, res) => {
     res.json({ deployments: await projectReposService.deployments(req.params.id!) });
+  }),
+);
+
+// Import a GitHub issue into this project as a synced app issue.
+projectsRouter.post(
+  "/:id/github-issues/import",
+  validateBody(importIssueSchema),
+  asyncHandler(async (req, res) => {
+    const item = await githubSyncService.importIssue(
+      req.params.id!,
+      req.body.repoFullName,
+      req.body.number,
+      req.auth!.sub,
+    );
+    res.status(201).json({ item });
   }),
 );

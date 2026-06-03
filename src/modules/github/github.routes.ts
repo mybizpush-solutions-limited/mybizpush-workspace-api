@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler, badRequest } from "../../lib/errors";
-import { requireAuth } from "../../middleware/auth";
+import { requireAuth, requireAccessLevel } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { env } from "../../config/env";
 import { verifyWebhookSignature } from "../../lib/github";
@@ -19,6 +19,7 @@ import {
 import { GithubAccount } from "../../models";
 import { githubService } from "./github.service";
 import { githubOauthService } from "./github.oauth.service";
+import { githubSyncService } from "./github.sync.service";
 
 export const githubRouter = Router();
 
@@ -83,6 +84,16 @@ githubRouter.get(
   requireAuth,
   asyncHandler(async (_req, res) => {
     res.json({ teams: await listTeams() });
+  }),
+);
+
+// Provision departments + members from org teams (executive admins only).
+githubRouter.post(
+  "/sync-teams",
+  requireAuth,
+  requireAccessLevel("executive_admin"),
+  asyncHandler(async (_req, res) => {
+    res.json(await githubSyncService.syncTeams());
   }),
 );
 
@@ -182,8 +193,10 @@ githubRouter.post(
       case "check_suite":
       case "status":
         return res.json({ ok: true, updated: await githubService.handleCheckEvent(req.body) });
+      case "issues":
+        return res.json({ ok: true, updated: await githubSyncService.handleIssueWebhook(req.body) });
       default:
-        // push / issues / issue_comment / release / deployment / member / team
+        // push / issue_comment / release / deployment / member / team
         // are surfaced through live-read endpoints, so we just acknowledge them.
         return res.json({ ok: true, ignored: event });
     }
