@@ -9,6 +9,7 @@ import { logActivity, notify } from "../shared/events";
 
 export interface WorkItemCreateInput {
   projectId: string;
+  departmentId?: string | null; // the department "lane" within the project
   title: string;
   description?: string;
   status?: "todo" | "in_progress" | "in_review" | "blocked" | "done";
@@ -22,6 +23,7 @@ export interface WorkItemCreateInput {
 export interface WorkItemUpdateInput {
   title?: string;
   description?: string;
+  departmentId?: string | null;
   priority?: WorkItemCreateInput["priority"];
   assigneeIds?: string[];
   labelIds?: string[];
@@ -42,9 +44,10 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
   }
 
   return {
-    async list(filter: { projectId?: string; assigneeId?: string } = {}) {
+    async list(filter: { projectId?: string; departmentId?: string; assigneeId?: string } = {}) {
       const where: Record<string, unknown> = {};
       if (filter.projectId) where.projectId = filter.projectId;
+      if (filter.departmentId) where.departmentId = filter.departmentId;
       const rows = await M.findAll({
         where,
         include: workItemInclude,
@@ -58,6 +61,7 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
     async create(input: WorkItemCreateInput, reporterId: string) {
       const item = await M.create({
         projectId: input.projectId,
+        departmentId: input.departmentId ?? null,
         title: input.title.trim(),
         description: input.description?.trim() ?? "",
         status: input.status ?? "todo",
@@ -82,6 +86,7 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
       await item.update({
         ...(patch.title !== undefined ? { title: patch.title.trim() } : {}),
         ...(patch.description !== undefined ? { description: patch.description.trim() } : {}),
+        ...(patch.departmentId !== undefined ? { departmentId: patch.departmentId } : {}),
         ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
         ...(patch.dueDate !== undefined ? { dueDate: patch.dueDate ? new Date(patch.dueDate) : null } : {}),
         ...(type === "issue" && patch.severity !== undefined ? { severity: patch.severity } : {}),

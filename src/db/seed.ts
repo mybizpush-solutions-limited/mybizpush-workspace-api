@@ -85,6 +85,10 @@ async function seed() {
         progress: spec.progress,
       },
     });
+    // The project's "home" department is also its first involved department (lane).
+    await (project as unknown as { setDepartments(ids: string[]): Promise<void> }).setDepartments([
+      depts[spec.dept]!.id,
+    ]);
     projects[spec.name] = project as Seeded<Project>;
   }
 

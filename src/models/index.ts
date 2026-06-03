@@ -119,7 +119,9 @@ DepartmentJoinRequest.init(
 // ---- Project --------------------------------------------------------------
 export class Project extends Model<InferAttributes<Project>, InferCreationAttributes<Project>> {
   declare id: CreationOptional<string>;
-  declare departmentId: string;
+  // Legacy "home" department. Projects are now independent and worked on by many
+  // departments (the project_departments join); kept nullable for back-compat.
+  declare departmentId: CreationOptional<string | null>;
   declare name: string;
   declare description: CreationOptional<string>;
   declare managerId: CreationOptional<string | null>;
@@ -131,7 +133,7 @@ export class Project extends Model<InferAttributes<Project>, InferCreationAttrib
 Project.init(
   {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-    departmentId: { type: DataTypes.UUID, allowNull: false },
+    departmentId: { type: DataTypes.UUID, allowNull: true },
     name: { type: DataTypes.STRING, allowNull: false },
     description: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
     managerId: { type: DataTypes.UUID, allowNull: true },
@@ -162,6 +164,7 @@ Label.init(
 export class Task extends Model<InferAttributes<Task>, InferCreationAttributes<Task>> {
   declare id: CreationOptional<string>;
   declare projectId: string;
+  declare departmentId: CreationOptional<string | null>; // which department "lane"
   declare title: string;
   declare description: CreationOptional<string>;
   declare status: CreationOptional<WorkStatus>;
@@ -178,6 +181,7 @@ Task.init(
   {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     projectId: { type: DataTypes.UUID, allowNull: false },
+    departmentId: { type: DataTypes.UUID, allowNull: true },
     title: { type: DataTypes.STRING, allowNull: false },
     description: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
     status: { type: DataTypes.ENUM(...WORK_STATUSES), allowNull: false, defaultValue: "todo" },
@@ -197,6 +201,7 @@ Task.init(
 export class Issue extends Model<InferAttributes<Issue>, InferCreationAttributes<Issue>> {
   declare id: CreationOptional<string>;
   declare projectId: string;
+  declare departmentId: CreationOptional<string | null>; // which department "lane"
   declare title: string;
   declare description: CreationOptional<string>;
   declare status: CreationOptional<WorkStatus>;
@@ -214,6 +219,7 @@ Issue.init(
   {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     projectId: { type: DataTypes.UUID, allowNull: false },
+    departmentId: { type: DataTypes.UUID, allowNull: true },
     title: { type: DataTypes.STRING, allowNull: false },
     description: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
     status: { type: DataTypes.ENUM(...WORK_STATUSES), allowNull: false, defaultValue: "todo" },
@@ -427,6 +433,7 @@ Meeting.init(
 export class ProjectRepo extends Model<InferAttributes<ProjectRepo>, InferCreationAttributes<ProjectRepo>> {
   declare id: CreationOptional<string>;
   declare projectId: string;
+  declare departmentId: CreationOptional<string | null>; // which department "lane"
   declare owner: string;
   declare repo: string;
   declare fullName: string;
@@ -440,6 +447,7 @@ ProjectRepo.init(
   {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     projectId: { type: DataTypes.UUID, allowNull: false },
+    departmentId: { type: DataTypes.UUID, allowNull: true },
     owner: { type: DataTypes.STRING, allowNull: false },
     repo: { type: DataTypes.STRING, allowNull: false },
     fullName: { type: DataTypes.STRING, allowNull: false },
@@ -548,6 +556,7 @@ NotificationPreference.init(
 const through = (tableName: string) => sequelize.define(tableName, {}, { tableName, timestamps: false });
 const DepartmentMembers = through("department_members");
 const ProjectMembers = through("project_members");
+const ProjectDepartments = through("project_departments");
 const TaskAssignees = through("task_assignees");
 const TaskLabels = through("task_labels");
 const IssueAssignees = through("issue_assignees");
@@ -564,6 +573,9 @@ DepartmentJoinRequest.belongsTo(Department, { as: "department", foreignKey: "dep
 
 Project.belongsTo(Department, { foreignKey: "departmentId" });
 Department.hasMany(Project, { as: "projects", foreignKey: "departmentId" });
+// Many-to-many: the departments working on a project (the "lanes").
+Project.belongsToMany(Department, { through: ProjectDepartments, as: "departments", foreignKey: "projectId", otherKey: "departmentId" });
+Department.belongsToMany(Project, { through: ProjectDepartments, as: "workingProjects", foreignKey: "departmentId", otherKey: "projectId" });
 Project.belongsTo(User, { as: "manager", foreignKey: "managerId" });
 Project.belongsToMany(User, { through: ProjectMembers, as: "members", foreignKey: "projectId", otherKey: "userId" });
 User.belongsToMany(Project, { through: ProjectMembers, as: "projects", foreignKey: "userId", otherKey: "projectId" });

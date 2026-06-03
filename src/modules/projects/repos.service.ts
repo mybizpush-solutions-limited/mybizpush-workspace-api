@@ -6,6 +6,7 @@ import { listCommits, listDeployments, listIssues, listReleases } from "../../li
 function serialize(r: ProjectRepo) {
   return {
     id: r.id,
+    departmentId: r.departmentId ?? null,
     owner: r.owner,
     repo: r.repo,
     fullName: r.fullName,
@@ -22,8 +23,9 @@ export const projectReposService = {
     return rows.map(serialize);
   },
 
-  // Link a repo (by URL or "owner/repo"). Validated against GitHub before saving.
-  async add(projectId: string, input: string, userId: string) {
+  // Link a repo (by URL or "owner/repo") to a project, optionally tagged to a
+  // department "lane". Validated against GitHub before saving.
+  async add(projectId: string, input: string, userId: string, departmentId?: string | null) {
     const parsed = parseRepoInput(input);
     if (!parsed) throw badRequest("Enter a GitHub repo URL or owner/repo");
 
@@ -33,10 +35,17 @@ export const projectReposService = {
     }
 
     const existing = await ProjectRepo.findOne({ where: { projectId, fullName: meta.fullName } });
-    if (existing) return serialize(existing);
+    if (existing) {
+      if (departmentId !== undefined && existing.departmentId !== departmentId) {
+        existing.departmentId = departmentId;
+        await existing.save();
+      }
+      return serialize(existing);
+    }
 
     const created = await ProjectRepo.create({
       projectId,
+      departmentId: departmentId ?? null,
       owner: meta.owner,
       repo: meta.repo,
       fullName: meta.fullName,

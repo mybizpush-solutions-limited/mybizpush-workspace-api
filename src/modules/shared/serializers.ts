@@ -1,6 +1,7 @@
 import {
   Attachment,
   Comment,
+  Department,
   GithubIssueLink,
   Label,
   Project,
@@ -18,15 +19,23 @@ import {
 const iso = (d: Date | null | undefined): string | undefined => (d ? d.toISOString() : undefined);
 
 // ---- Project --------------------------------------------------------------
+// A project is worked on by many departments (the "lanes"). The people on it are
+// derived: the manager plus everyone in the involved departments.
 export function serializeProject(p: Project) {
-  const members = (p.get("members") as User[] | undefined) ?? [];
+  const departments = (p.get("departments") as Department[] | undefined) ?? [];
+  const memberSet = new Set<string>();
+  if (p.managerId) memberSet.add(p.managerId);
+  for (const d of departments) {
+    for (const m of (d.get("members") as User[] | undefined) ?? []) memberSet.add(m.id);
+  }
   return {
     id: p.id,
-    departmentId: p.departmentId,
+    departmentId: p.departmentId ?? null, // legacy "home" department
+    departmentIds: departments.map((d) => d.id), // involved departments (lanes)
     name: p.name,
     description: p.description,
     managerId: p.managerId ?? null,
-    memberIds: members.map((m) => m.id),
+    memberIds: [...memberSet],
     progress: p.progress,
     avatarUrl: p.avatarUrl ?? null,
     createdAt: p.createdAt.toISOString(),
@@ -63,6 +72,7 @@ export function serializeWorkItem(item: Task | Issue, type: ItemType) {
     id: item.id,
     type,
     projectId: item.projectId,
+    departmentId: item.departmentId ?? null,
     title: item.title,
     description: item.description,
     status: item.status,

@@ -14,30 +14,20 @@ projectsRouter.use(requireAuth);
 
 const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
-// Creating a project under a department: the department's head or an exec admin.
-async function assertCanManageDept(
-  departmentId: string,
-  auth: { sub: string; accessLevel: string },
-): Promise<void> {
-  if (auth.accessLevel === "executive_admin") return;
-  const dept = await Department.findByPk(departmentId);
-  if (!dept || dept.headId !== auth.sub) {
-    throw forbidden("Only the department head or an executive admin can do this");
-  }
-}
-
-// Editing an existing project: its manager, the department head, or an exec admin.
+// Editing a project: its manager, the head of any involved department, or an exec.
 async function assertCanManageProject(
   projectId: string,
   auth: { sub: string; accessLevel: string },
 ): Promise<void> {
   if (auth.accessLevel === "executive_admin") return;
-  const project = await Project.findByPk(projectId);
+  const project = await Project.findByPk(projectId, {
+    include: [{ model: Department, as: "departments", attributes: ["headId"], through: { attributes: [] } }],
+  });
   if (!project) throw notFound("Project not found");
   if (project.managerId === auth.sub) return;
-  const dept = await Department.findByPk(project.departmentId);
-  if (dept?.headId === auth.sub) return;
-  throw forbidden("Only the project manager, department head, or an executive admin can do this");
+  const depts = (project.get("departments") as Department[] | undefined) ?? [];
+  if (depts.some((d) => d.headId === auth.sub)) return;
+  throw forbidden("Only the project manager, a department head, or an executive admin can do this");
 }
 
 const importIssueSchema = z.object({
@@ -46,11 +36,10 @@ const importIssueSchema = z.object({
 });
 
 const createSchema = z.object({
-  departmentId: z.string().uuid(),
   name: z.string().trim().min(1).max(160),
   description: z.string().trim().max(4000).optional(),
   managerId: z.string().uuid().optional(),
-  memberIds: z.array(z.string().uuid()).optional(),
+  departmentIds: z.array(z.string().uuid()).optional(),
 });
 
 const updateSchema = z.object({
@@ -58,7 +47,6 @@ const updateSchema = z.object({
   description: z.string().trim().max(4000).optional(),
   managerId: z.string().uuid().optional(),
   progress: z.number().int().min(0).max(100).optional(),
-  memberIds: z.array(z.string().uuid()).optional(),
 });
 
 projectsRouter.get(
@@ -76,11 +64,14 @@ projectsRouter.get(
   }),
 );
 
+// Projects are top-level — only executive admins create them (and assign a PM).
 projectsRouter.post(
   "/",
   validateBody(createSchema),
   asyncHandler(async (req, res) => {
-    await assertCanManageDept(req.body.departmentId, req.auth!);
+    if (req.auth!.accessLevel !== "executive_admin") {
+      throw forbidden("Only an executive admin can create a project");
+    }
     res.status(201).json({ project: await projectsService.create(req.body) });
   }),
 );
@@ -91,6 +82,24 @@ projectsRouter.patch(
   asyncHandler(async (req, res) => {
     await assertCanManageProject(req.params.id!, req.auth!);
     res.json({ project: await projectsService.update(req.params.id!, req.body) });
+  }),
+);
+
+// Add / remove a department "lane" on a project (PM / head / exec).
+projectsRouter.post(
+  "/:id/departments",
+  validateBody(z.object({ departmentId: z.string().uuid() })),
+  asyncHandler(async (req, res) => {
+    await assertCanManageProject(req.params.id!, req.auth!);
+    res.json({ project: await projectsService.addDepartment(req.params.id!, req.body.departmentId) });
+  }),
+);
+
+projectsRouter.delete(
+  "/:id/departments/:deptId",
+  asyncHandler(async (req, res) => {
+    await assertCanManageProject(req.params.id!, req.auth!);
+    res.json({ project: await projectsService.removeDepartment(req.params.id!, req.params.deptId!) });
   }),
 );
 
@@ -112,7 +121,10 @@ projectsRouter.post(
 );
 
 // ---- Linked GitHub repositories -------------------------------------------
-const addRepoSchema = z.object({ repo: z.string().trim().min(1).max(300) });
+const addRepoSchema = z.object({
+  repo: z.string().trim().min(1).max(300),
+  departmentId: z.string().uuid().nullable().optional(),
+});
 
 projectsRouter.get(
   "/:id/repos",
@@ -125,7 +137,9 @@ projectsRouter.post(
   "/:id/repos",
   validateBody(addRepoSchema),
   asyncHandler(async (req, res) => {
-    res.status(201).json({ repo: await projectReposService.add(req.params.id!, req.body.repo, req.auth!.sub) });
+    res.status(201).json({
+      repo: await projectReposService.add(req.params.id!, req.body.repo, req.auth!.sub, req.body.departmentId),
+    });
   }),
 );
 

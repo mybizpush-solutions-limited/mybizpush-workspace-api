@@ -12,6 +12,7 @@ const SEVERITY = z.enum(["minor", "major", "critical"]);
 function buildSchemas(withSeverity: boolean) {
   const create = z.object({
     projectId: z.string().uuid(),
+    departmentId: z.string().uuid().nullable().optional(),
     title: z.string().trim().min(1).max(200),
     description: z.string().trim().max(8000).optional(),
     status: STATUS.optional(),
@@ -24,6 +25,7 @@ function buildSchemas(withSeverity: boolean) {
   const update = z.object({
     title: z.string().trim().min(1).max(200).optional(),
     description: z.string().trim().max(8000).optional(),
+    departmentId: z.string().uuid().nullable().optional(),
     priority: PRIORITY.optional(),
     assigneeIds: z.array(z.string().uuid()).optional(),
     labelIds: z.array(z.string().uuid()).optional(),
@@ -53,7 +55,8 @@ function makeWorkItemRouter(service: ReturnType<typeof makeWorkItemService>, wit
     "/",
     asyncHandler(async (req, res) => {
       const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
-      res.json({ items: await service.list({ projectId }) });
+      const departmentId = typeof req.query.departmentId === "string" ? req.query.departmentId : undefined;
+      res.json({ items: await service.list({ projectId, departmentId }) });
     }),
   );
 
