@@ -1,7 +1,9 @@
-import { Department, Project, ROLES, User } from "../../models";
+import { Department, GithubAccount, GoogleAccount, Project, ROLES, User } from "../../models";
 import { badRequest, notFound } from "../../lib/errors";
 import { env } from "../../config/env";
 import { uploadBuffer } from "../../lib/cloudinary";
+import { isOAuthConfigured } from "../../lib/github";
+import { isGoogleConfigured } from "../../lib/google";
 import { usersRepo, type PublicUser } from "../users/users.repo";
 
 const ALLOWED_AVATAR_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
@@ -67,9 +69,38 @@ export const profileService = {
     return publicUser(userId);
   },
 
+  // Onboarding is all-or-nothing: a profile picture, at least one department and
+  // project, and (when those integrations are configured) a connected GitHub
+  // account that's a verified org member, plus a connected Google account.
   async completeOnboarding(userId: string): Promise<PublicUser> {
     const user = await User.findByPk(userId);
     if (!user) throw notFound("User not found");
+
+    const me = await publicUser(userId);
+    const missing: string[] = [];
+    if (!me.avatarUrl) missing.push("a profile picture");
+    if (me.departmentIds.length === 0) missing.push("at least one department");
+    if (me.projectIds.length === 0) missing.push("at least one project");
+
+    if (isOAuthConfigured()) {
+      const gh = await GithubAccount.findByPk(userId);
+      if (!gh?.accessToken) {
+        missing.push("your GitHub account");
+      } else if (env.GITHUB_ORG && !gh.orgMember) {
+        throw badRequest(
+          `Your connected GitHub account (@${gh.login ?? "unknown"}) isn't a member of the ${env.GITHUB_ORG} organization. Ask an admin for an invite, then reconnect.`,
+        );
+      }
+    }
+    if (isGoogleConfigured()) {
+      const g = await GoogleAccount.findByPk(userId);
+      if (!g) missing.push("your Google account");
+    }
+
+    if (missing.length) {
+      throw badRequest(`Finish onboarding first — still need: ${missing.join(", ")}.`);
+    }
+
     user.onboarded = true;
     await user.save();
     return publicUser(userId);

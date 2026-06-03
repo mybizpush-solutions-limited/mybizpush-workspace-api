@@ -11,8 +11,12 @@ export const GOOGLE_SCOPES = [
   "email",
 ];
 
+export function isGoogleConfigured(): boolean {
+  return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+}
+
 function assertConfigured() {
-  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+  if (!isGoogleConfigured()) {
     throw new AppError(503, "Google integration is not configured", "google_unconfigured");
   }
 }
