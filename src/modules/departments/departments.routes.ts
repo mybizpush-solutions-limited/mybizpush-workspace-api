@@ -69,3 +69,33 @@ departmentsRouter.patch(
     res.json({ department: await departmentsService.update(req.params.id!, req.body) });
   }),
 );
+
+// ---- Join-request management (department head or executive admin) ----------
+departmentsRouter.get(
+  "/:id/requests",
+  asyncHandler(async (req, res) => {
+    res.json({ requests: await departmentsService.listRequests(req.params.id!, viewerOf(req)) });
+  }),
+);
+
+departmentsRouter.post(
+  "/:id/requests/:reqId/approve",
+  asyncHandler(async (req, res) => {
+    res.json(await departmentsService.decideRequest(req.params.reqId!, true, viewerOf(req)));
+  }),
+);
+
+departmentsRouter.post(
+  "/:id/requests/:reqId/reject",
+  asyncHandler(async (req, res) => {
+    res.json(await departmentsService.decideRequest(req.params.reqId!, false, viewerOf(req)));
+  }),
+);
+
+departmentsRouter.post(
+  "/:id/members",
+  validateBody(z.object({ userId: z.string().uuid() })),
+  asyncHandler(async (req, res) => {
+    res.json({ department: await departmentsService.addMember(req.params.id!, req.body.userId, viewerOf(req)) });
+  }),
+);

@@ -7,6 +7,7 @@ import { validateBody } from "../../middleware/validate";
 import { ROLES } from "../../models";
 import { meService } from "./me.service";
 import { profileService } from "./profile.service";
+import { departmentsService } from "../departments/departments.service";
 
 // "My work" aggregations backing the dashboard and the My Queue view, plus the
 // caller's own self-service profile / membership / onboarding actions.
@@ -76,6 +77,21 @@ meRouter.post(
   "/departments/:id",
   asyncHandler(async (req, res) => {
     res.json({ user: await profileService.joinDepartment(req.auth!.sub, req.params.id!) });
+  }),
+);
+
+// Request to join a department (after onboarding) — needs head/admin approval.
+meRouter.post(
+  "/departments/:id/request",
+  asyncHandler(async (req, res) => {
+    res.status(201).json({ request: await departmentsService.requestToJoin(req.auth!.sub, req.params.id!) });
+  }),
+);
+
+meRouter.get(
+  "/department-requests",
+  asyncHandler(async (req, res) => {
+    res.json({ requests: await departmentsService.myRequests(req.auth!.sub) });
   }),
 );
 

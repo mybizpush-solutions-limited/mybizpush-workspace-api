@@ -87,6 +87,33 @@ Department.init(
   { sequelize, tableName: "departments" },
 );
 
+// ---- DepartmentJoinRequest (request → approve/reject by head/exec admin) ----
+export const JOIN_REQUEST_STATUSES = ["pending", "approved", "rejected"] as const;
+export class DepartmentJoinRequest extends Model<
+  InferAttributes<DepartmentJoinRequest>,
+  InferCreationAttributes<DepartmentJoinRequest>
+> {
+  declare id: CreationOptional<string>;
+  declare userId: string;
+  declare departmentId: string;
+  declare status: CreationOptional<(typeof JOIN_REQUEST_STATUSES)[number]>;
+  declare decidedBy: CreationOptional<string | null>;
+  declare decidedAt: CreationOptional<Date | null>;
+  declare createdAt: CreationOptional<Date>;
+}
+DepartmentJoinRequest.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    userId: { type: DataTypes.UUID, allowNull: false },
+    departmentId: { type: DataTypes.UUID, allowNull: false },
+    status: { type: DataTypes.ENUM(...JOIN_REQUEST_STATUSES), allowNull: false, defaultValue: "pending" },
+    decidedBy: { type: DataTypes.UUID, allowNull: true },
+    decidedAt: { type: DataTypes.DATE, allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "department_join_requests", updatedAt: false },
+);
+
 // ---- Project --------------------------------------------------------------
 export class Project extends Model<InferAttributes<Project>, InferCreationAttributes<Project>> {
   declare id: CreationOptional<string>;
@@ -528,6 +555,8 @@ const MeetingAttendees = through("meeting_attendees");
 Department.belongsTo(User, { as: "head", foreignKey: "headId" });
 Department.belongsToMany(User, { through: DepartmentMembers, as: "members", foreignKey: "departmentId", otherKey: "userId" });
 User.belongsToMany(Department, { through: DepartmentMembers, as: "departments", foreignKey: "userId", otherKey: "departmentId" });
+DepartmentJoinRequest.belongsTo(User, { as: "user", foreignKey: "userId" });
+DepartmentJoinRequest.belongsTo(Department, { as: "department", foreignKey: "departmentId" });
 
 Project.belongsTo(Department, { foreignKey: "departmentId" });
 Department.hasMany(Project, { as: "projects", foreignKey: "departmentId" });

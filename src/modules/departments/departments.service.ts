@@ -1,5 +1,23 @@
-import { Department, User, type AccessLevel } from "../../models";
-import { notFound, forbidden } from "../../lib/errors";
+import { Department, DepartmentJoinRequest, User, type AccessLevel } from "../../models";
+import { badRequest, notFound, forbidden } from "../../lib/errors";
+
+// A user can manage a department if they're its head or an executive admin.
+function canManage(dept: Department, viewer: Viewer): boolean {
+  return viewer.accessLevel === "executive_admin" || dept.headId === viewer.id;
+}
+
+function serializeRequest(r: DepartmentJoinRequest) {
+  const u = r.get("user") as User | undefined;
+  return {
+    id: r.id,
+    userId: r.userId,
+    departmentId: r.departmentId,
+    status: r.status,
+    createdAt: r.createdAt.toISOString(),
+    decidedAt: r.decidedAt ? r.decidedAt.toISOString() : null,
+    user: u ? { id: u.id, name: u.name, email: u.email, avatarUrl: u.avatarUrl ?? null } : null,
+  };
+}
 
 export interface PublicDepartment {
   id: string;
@@ -89,5 +107,76 @@ export const departmentsService = {
     // Keep a newly-assigned head in the member list.
     if (patch.headId) await (dept as any).addMember(patch.headId);
     return this.bySlug(dept.slug);
+  },
+
+  // ---- Join requests -------------------------------------------------------
+  // A user asks to join a department; a head/exec admin approves or rejects.
+  async requestToJoin(userId: string, departmentId: string) {
+    const dept = await Department.findByPk(departmentId);
+    if (!dept) throw notFound("Department not found");
+    if (await (dept as any).hasMember(userId)) throw badRequest("You're already in this department");
+    const pending = await DepartmentJoinRequest.findOne({
+      where: { userId, departmentId, status: "pending" },
+    });
+    if (pending) return serializeRequest(pending);
+    const created = await DepartmentJoinRequest.create({ userId, departmentId });
+    return serializeRequest(created);
+  },
+
+  // The caller's own requests (with department names), newest first.
+  async myRequests(userId: string) {
+    const rows = await DepartmentJoinRequest.findAll({
+      where: { userId },
+      include: [{ model: Department, as: "department", attributes: ["id", "name"] }],
+      order: [["createdAt", "DESC"]],
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      departmentId: r.departmentId,
+      departmentName: (r.get("department") as Department | undefined)?.name ?? null,
+      status: r.status,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  },
+
+  // Pending requests for a department (head / exec admin only).
+  async listRequests(departmentId: string, viewer: Viewer) {
+    const dept = await Department.findByPk(departmentId);
+    if (!dept) throw notFound("Department not found");
+    if (!canManage(dept, viewer)) throw forbidden("Only the department head or an admin can do this");
+    const rows = await DepartmentJoinRequest.findAll({
+      where: { departmentId, status: "pending" },
+      include: [{ model: User, as: "user", attributes: ["id", "name", "email", "avatarUrl"] }],
+      order: [["createdAt", "ASC"]],
+    });
+    return rows.map(serializeRequest);
+  },
+
+  async decideRequest(requestId: string, approve: boolean, viewer: Viewer) {
+    const req = await DepartmentJoinRequest.findByPk(requestId);
+    if (!req) throw notFound("Request not found");
+    const dept = await Department.findByPk(req.departmentId);
+    if (!dept) throw notFound("Department not found");
+    if (!canManage(dept, viewer)) throw forbidden("Only the department head or an admin can do this");
+    if (req.status !== "pending") throw badRequest("This request was already decided");
+
+    if (approve) await (dept as any).addMember(req.userId);
+    await req.update({ status: approve ? "approved" : "rejected", decidedBy: viewer.id, decidedAt: new Date() });
+    return { id: req.id, status: req.status };
+  },
+
+  // Directly add a member (head / exec admin) — resolves any pending request.
+  async addMember(departmentId: string, userId: string, viewer: Viewer) {
+    const dept = await Department.findByPk(departmentId);
+    if (!dept) throw notFound("Department not found");
+    if (!canManage(dept, viewer)) throw forbidden("Only the department head or an admin can do this");
+    const user = await User.findByPk(userId);
+    if (!user) throw notFound("User not found");
+    await (dept as any).addMember(userId);
+    await DepartmentJoinRequest.update(
+      { status: "approved", decidedBy: viewer.id, decidedAt: new Date() },
+      { where: { departmentId, userId, status: "pending" } },
+    );
+    return this.bySlug(dept.slug, viewer);
   },
 };
