@@ -103,82 +103,119 @@ function appJwt(): string {
   });
 }
 
-let installationId: string | null = env.GITHUB_APP_INSTALLATION_ID || null;
+// ---- Multiple installations (one App, many orgs) ---------------------------
+// The App can be installed on several orgs; each installation has its own id and
+// its own token. We resolve the right installation by repo owner (org login).
 
-// Resolve the installation id from the org (cached after first lookup).
-async function resolveInstallationId(appToken: string): Promise<string> {
-  if (installationId) return installationId;
-  if (!env.GITHUB_ORG) {
-    throw new AppError(503, "Set GITHUB_ORG or GITHUB_APP_INSTALLATION_ID for the GitHub App", "github_app_unconfigured");
-  }
-  const res = await fetch(`${env.GITHUB_API_URL}/orgs/${env.GITHUB_ORG}/installation`, {
+let installationsByOrg: Map<string, number> | null = null; // lowercased org → installation id
+let installationsLoaded = 0; // unix secs of last load
+
+// List the App's installations and map each org login → installation id.
+async function loadInstallations(appToken: string): Promise<Map<string, number>> {
+  const now = Math.floor(Date.now() / 1000);
+  // Re-list at most every 10 min so newly-added org installs are picked up.
+  if (installationsByOrg && installationsLoaded + 600 > now) return installationsByOrg;
+  const res = await fetch(`${env.GITHUB_API_URL}/app/installations?per_page=100`, {
     headers: { ...BASE_HEADERS, Authorization: `Bearer ${appToken}` },
   });
-  if (!res.ok) {
-    throw new AppError(502, "GitHub App is not installed on the org", "github_app_not_installed");
+  if (!res.ok) throw new AppError(502, "Couldn't list GitHub App installations", "github_app_installations_failed");
+  const arr = (await res.json()) as Array<{ id: number; account?: { login?: string } }>;
+  const map = new Map<string, number>();
+  for (const inst of arr) {
+    if (inst.account?.login) map.set(inst.account.login.toLowerCase(), inst.id);
   }
-  const data = (await res.json()) as { id?: number };
-  installationId = String(data.id);
-  return installationId;
+  // Honour a pinned id for the primary org if discovery is unavailable.
+  if (env.GITHUB_APP_INSTALLATION_ID && env.GITHUB_ORG && !map.has(env.GITHUB_ORG.toLowerCase())) {
+    map.set(env.GITHUB_ORG.toLowerCase(), Number(env.GITHUB_APP_INSTALLATION_ID));
+  }
+  installationsByOrg = map;
+  installationsLoaded = now;
+  return map;
 }
 
-let cachedToken: { token: string; expiresAt: number } | null = null;
-let inFlight: Promise<string> | null = null;
+// The orgs this App is installed on (for cross-org repo discovery / search).
+export async function listInstalledOrgs(): Promise<string[]> {
+  if (!isAppConfigured()) return [];
+  try {
+    const map = await loadInstallations(appJwt());
+    return [...map.keys()];
+  } catch {
+    return [];
+  }
+}
 
-// Mint (and cache) an installation access token. ~1h lifetime; refreshed with a
-// 60s safety margin. A single in-flight promise prevents a request stampede.
-async function getInstallationToken(): Promise<string | null> {
+const tokenCache = new Map<string, { token: string; expiresAt: number }>();
+const inFlightByOrg = new Map<string, Promise<string>>();
+
+// Mint (and cache, ~1h) an installation token for a specific org. Falls back to
+// the primary GITHUB_ORG when no owner is given.
+async function getInstallationToken(owner?: string): Promise<string | null> {
   if (!isAppConfigured()) return null;
-  const now = Math.floor(Date.now() / 1000);
-  if (cachedToken && cachedToken.expiresAt - 60 > now) return cachedToken.token;
-  if (inFlight) return inFlight;
+  const org = (owner || env.GITHUB_ORG || "").toLowerCase();
+  if (!org) return null;
 
-  inFlight = (async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const cached = tokenCache.get(org);
+  if (cached && cached.expiresAt - 60 > now) return cached.token;
+  const pending = inFlightByOrg.get(org);
+  if (pending) return pending;
+
+  const job = (async () => {
     const appToken = appJwt();
-    const id = await resolveInstallationId(appToken);
+    const map = await loadInstallations(appToken);
+    const id = map.get(org);
+    if (!id) throw new AppError(502, `GitHub App is not installed on ${org}`, "github_app_not_installed");
     const res = await fetch(`${env.GITHUB_API_URL}/app/installations/${id}/access_tokens`, {
       method: "POST",
       headers: { ...BASE_HEADERS, Authorization: `Bearer ${appToken}` },
     });
-    if (!res.ok) {
-      throw new AppError(502, "Failed to mint a GitHub App installation token", "github_app_token_failed");
-    }
+    if (!res.ok) throw new AppError(502, "Failed to mint a GitHub App installation token", "github_app_token_failed");
     const data = (await res.json()) as { token: string; expires_at: string };
-    cachedToken = { token: data.token, expiresAt: Math.floor(Date.parse(data.expires_at) / 1000) };
+    tokenCache.set(org, { token: data.token, expiresAt: Math.floor(Date.parse(data.expires_at) / 1000) });
     return data.token;
   })();
 
+  inFlightByOrg.set(org, job);
   try {
-    return await inFlight;
+    return await job;
   } finally {
-    inFlight = null;
+    inFlightByOrg.delete(org);
   }
 }
 
-// Headers for org-wide reads: authenticate with the App installation token when
-// available, else go unauthenticated (public repos / low rate limit).
-async function readHeaders(): Promise<Record<string, string>> {
+// Headers for reads against `owner`'s org (its installation token), else
+// unauthenticated (public repos / low rate limit).
+async function readHeaders(owner?: string): Promise<Record<string, string>> {
   const h: Record<string, string> = { ...BASE_HEADERS };
   let token: string | null = null;
   try {
-    token = await getInstallationToken();
+    token = await getInstallationToken(owner);
   } catch {
-    token = null; // App not configured / unreachable — fall back to unauthenticated
+    token = null; // not installed / unreachable — degrade to unauthenticated
   }
   if (token) h.Authorization = `Bearer ${token}`;
   return h;
 }
 
-// Generic authed request against the GitHub REST API (installation token).
-export async function ghFetch(path: string, init?: RequestInit): Promise<Response> {
-  const headers = { ...(await readHeaders()), ...((init?.headers as Record<string, string>) ?? {}) };
+// Pull the org from a REST path so we pick the right installation token:
+//   /repos/{owner}/...  and  /orgs/{org}/...  → that org. Else the primary org.
+function orgFromPath(path: string): string | undefined {
+  const m = path.match(/^\/(?:repos|orgs)\/([^/]+)/);
+  return m?.[1];
+}
+
+// Generic authed request. The org installation token is chosen from `owner`, or
+// inferred from the path (multi-org), falling back to the primary org.
+export async function ghFetch(path: string, init?: RequestInit, owner?: string): Promise<Response> {
+  const org = owner ?? orgFromPath(path);
+  const headers = { ...(await readHeaders(org)), ...((init?.headers as Record<string, string>) ?? {}) };
   return fetch(`${env.GITHUB_API_URL}${path}`, { ...init, headers });
 }
 
 // GET + parse JSON, or null on any non-2xx / error (callers degrade gracefully).
-export async function ghJson<T>(path: string, init?: RequestInit): Promise<T | null> {
+export async function ghJson<T>(path: string, init?: RequestInit, owner?: string): Promise<T | null> {
   try {
-    const res = await ghFetch(path, init);
+    const res = await ghFetch(path, init, owner);
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
@@ -219,7 +256,7 @@ export async function fetchPullRequest(url: string): Promise<GithubPr | null> {
   try {
     const res = await fetch(
       `${env.GITHUB_API_URL}/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.number}`,
-      { headers: await readHeaders() },
+      { headers: await readHeaders(parsed.owner) },
     );
     if (!res.ok) return null;
     const pr = (await res.json()) as {
@@ -242,7 +279,7 @@ export async function fetchPullRequest(url: string): Promise<GithubPr | null> {
 // Look up repo metadata (used to validate a repo before linking it to a project).
 export async function getRepo(owner: string, repo: string): Promise<GithubRepo | null> {
   try {
-    const res = await fetch(`${env.GITHUB_API_URL}/repos/${owner}/${repo}`, { headers: await readHeaders() });
+    const res = await fetch(`${env.GITHUB_API_URL}/repos/${owner}/${repo}`, { headers: await readHeaders(owner) });
     if (!res.ok) return null;
     const r = (await res.json()) as {
       name: string; full_name: string; html_url: string; description: string | null;
@@ -267,7 +304,7 @@ export async function listOpenPullRequests(owner: string, repo: string): Promise
   try {
     const res = await fetch(
       `${env.GITHUB_API_URL}/repos/${owner}/${repo}/pulls?state=open&per_page=30&sort=updated&direction=desc`,
-      { headers: await readHeaders() },
+      { headers: await readHeaders(owner) },
     );
     if (!res.ok) return [];
     const arr = (await res.json()) as Array<{

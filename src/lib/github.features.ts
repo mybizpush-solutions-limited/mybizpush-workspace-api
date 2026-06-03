@@ -3,7 +3,7 @@
 // members/teams, and bot write actions. All authenticate with the org
 // installation token via ghFetch/ghJson and degrade gracefully (null/[]).
 import { env } from "../config/env";
-import { ghFetch, ghJson } from "./github";
+import { ghFetch, ghJson, listInstalledOrgs } from "./github";
 
 const ORG = () => env.GITHUB_ORG;
 
@@ -46,13 +46,13 @@ function mapRepo(r: RawRepo): OrgRepo {
   };
 }
 
-// Every repo the installation can see (for the link-a-repo picker).
+// Every repo the App can see across all installed orgs (for the link picker).
 export async function listOrgRepos(): Promise<OrgRepo[]> {
-  if (!ORG()) return [];
-  const arr = await ghJson<RawRepo[]>(
-    `/orgs/${ORG()}/repos?per_page=100&sort=pushed&direction=desc`,
+  const orgs = await listInstalledOrgs();
+  const lists = await Promise.all(
+    orgs.map((org) => ghJson<RawRepo[]>(`/orgs/${org}/repos?per_page=100&sort=pushed&direction=desc`)),
   );
-  return (arr ?? []).map(mapRepo);
+  return lists.flatMap((arr) => arr ?? []).map(mapRepo);
 }
 
 // ---- Branches & commits ----------------------------------------------------
@@ -320,27 +320,48 @@ export interface SearchPr {
   updatedAt: string | null;
 }
 
+interface RawSearchPr {
+  number: number;
+  title: string;
+  html_url: string;
+  repository_url: string;
+  draft?: boolean;
+  updated_at?: string;
+}
+
 export async function searchUserOpenPrs(login: string): Promise<SearchPr[]> {
   if (!login) return [];
-  const orgQ = ORG() ? `+org:${ORG()}` : "";
-  const data = await ghJson<{
-    items: Array<{
-      number: number;
-      title: string;
-      html_url: string;
-      repository_url: string;
-      draft?: boolean;
-      updated_at?: string;
-    }>;
-  }>(`/search/issues?q=is:pr+is:open+author:${encodeURIComponent(login)}${orgQ}&per_page=30&sort=updated`);
-  return (data?.items ?? []).map((i) => ({
-    number: i.number,
-    title: i.title,
-    url: i.html_url,
-    repoFullName: i.repository_url.replace(/^.*\/repos\//, ""),
-    draft: Boolean(i.draft),
-    updatedAt: i.updated_at ?? null,
-  }));
+  // Search each installed org with that org's installation token, then merge —
+  // the Search API is scoped to repos the token can see, so one token won't span
+  // multiple orgs.
+  const orgs = await listInstalledOrgs();
+  const targets = orgs.length ? orgs : ORG() ? [ORG()] : [];
+  const lists = await Promise.all(
+    targets.map((org) =>
+      ghJson<{ items: RawSearchPr[] }>(
+        `/search/issues?q=is:pr+is:open+author:${encodeURIComponent(login)}+org:${org}&per_page=30&sort=updated`,
+        undefined,
+        org,
+      ),
+    ),
+  );
+  const seen = new Set<string>();
+  const out: SearchPr[] = [];
+  for (const data of lists) {
+    for (const i of data?.items ?? []) {
+      if (seen.has(i.html_url)) continue;
+      seen.add(i.html_url);
+      out.push({
+        number: i.number,
+        title: i.title,
+        url: i.html_url,
+        repoFullName: i.repository_url.replace(/^.*\/repos\//, ""),
+        draft: Boolean(i.draft),
+        updatedAt: i.updated_at ?? null,
+      });
+    }
+  }
+  return out.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
 }
 
 // ---- Org members & teams ---------------------------------------------------

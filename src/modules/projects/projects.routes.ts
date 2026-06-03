@@ -155,6 +155,7 @@ projectsRouter.post(
   "/:id/repos",
   validateBody(addRepoSchema),
   asyncHandler(async (req, res) => {
+    await assertCanManageProject(req.params.id!, req.auth!);
     res.status(201).json({
       repo: await projectReposService.add(req.params.id!, req.body.repo, req.auth!.sub, req.body.departmentId),
     });
@@ -164,6 +165,7 @@ projectsRouter.post(
 projectsRouter.delete(
   "/:id/repos/:repoId",
   asyncHandler(async (req, res) => {
+    await assertCanManageProject(req.params.id!, req.auth!);
     await projectReposService.remove(req.params.id!, req.params.repoId!);
     res.status(204).end();
   }),
