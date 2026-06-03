@@ -106,12 +106,19 @@ export const profileService = {
     return publicUser(userId);
   },
 
+  // Self-join is only for onboarding, where the user picks exactly one
+  // department. After onboarding, joining another goes through a request that a
+  // department head or executive admin approves.
   async joinDepartment(userId: string, departmentId: string): Promise<PublicUser> {
     const dept = await Department.findByPk(departmentId);
     if (!dept) throw notFound("Department not found");
     const user = await User.findByPk(userId);
     if (!user) throw notFound("User not found");
-    await (user as any).addDepartment(departmentId);
+    if (user.onboarded) {
+      throw badRequest("Request to join — a department head or admin will add you.");
+    }
+    // Onboarding: this is the user's single department, so it replaces any prior pick.
+    await (user as any).setDepartments([departmentId]);
     return publicUser(userId);
   },
 

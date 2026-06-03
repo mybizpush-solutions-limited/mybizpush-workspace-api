@@ -35,6 +35,15 @@ departmentsRouter.get(
   }),
 );
 
+// Name-only directory of all departments (for joining / requesting to join).
+// Registered before /:slug so it isn't captured as a slug.
+departmentsRouter.get(
+  "/directory",
+  asyncHandler(async (_req, res) => {
+    res.json({ departments: await departmentsService.directory() });
+  }),
+);
+
 departmentsRouter.get(
   "/:slug",
   asyncHandler(async (req, res) => {

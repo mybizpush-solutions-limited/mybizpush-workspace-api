@@ -44,6 +44,14 @@ export const departmentsService = {
     return rows.map(serialize).filter((d) => canSee(d, viewer));
   },
 
+  // A name-only directory of every department — used so anyone can pick a
+  // department to join (onboarding) or request to join, without exposing the
+  // member lists / contents that the visibility rule guards.
+  async directory(): Promise<Array<{ id: string; slug: string; name: string; description: string; headId: string | null }>> {
+    const rows = await Department.findAll({ order: [["name", "ASC"]] });
+    return rows.map((d) => ({ id: d.id, slug: d.slug, name: d.name, description: d.description, headId: d.headId ?? null }));
+  },
+
   async bySlug(slug: string, viewer?: Viewer): Promise<PublicDepartment> {
     const dept = await Department.findOne({ where: { slug }, ...withMembers });
     if (!dept) throw notFound("Department not found");
