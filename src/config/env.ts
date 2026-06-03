@@ -35,14 +35,25 @@ const schema = z.object({
   // Public URL of the UI (used in emails, e.g. the password-reset link).
   APP_URL: z.string().url().default("http://localhost:3000"),
 
-  // GitHub PR enrichment (optional token for private repos / higher rate limits).
-  GITHUB_TOKEN: z.string().optional().default(""),
   GITHUB_API_URL: z.string().url().default("https://api.github.com"),
   // Shared secret for verifying inbound GitHub webhooks (X-Hub-Signature-256).
   GITHUB_WEBHOOK_SECRET: z.string().optional().default(""),
 
-  // GitHub per-user OAuth (connect account + verify org membership). The
-  // redirect URI must match the GitHub OAuth App's "Authorization callback URL".
+  // ---- GitHub App (org-wide integration) ----
+  // The App authenticates org-wide via a signed JWT → installation token (no
+  // personal access token needed). Create the App under the org, install it,
+  // and supply its ID + private key (PEM). The installation ID is optional —
+  // we auto-discover it from GITHUB_ORG when omitted.
+  GITHUB_APP_ID: z.string().optional().default(""),
+  // RSA private key (PEM). Paste with literal "\n" newlines or base64-encode it.
+  GITHUB_APP_PRIVATE_KEY: z.string().optional().default(""),
+  GITHUB_APP_INSTALLATION_ID: z.string().optional().default(""),
+  // Legacy PAT fallback for PR reads when the App isn't configured yet.
+  GITHUB_TOKEN: z.string().optional().default(""),
+
+  // User authorization (connect account + verify org membership) uses the same
+  // GitHub App's client credentials. Redirect URI must match the App's
+  // "Callback URL". GitHub App user tokens need no scopes.
   GITHUB_CLIENT_ID: z.string().optional().default(""),
   GITHUB_CLIENT_SECRET: z.string().optional().default(""),
   GITHUB_OAUTH_REDIRECT_URI: z.string().url().default("http://localhost:4000/api/v1/github/callback"),

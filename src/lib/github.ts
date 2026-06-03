@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import jwt from "jsonwebtoken";
 import { env } from "../config/env";
 import { AppError } from "./errors";
 import { GithubAccount } from "../models";
@@ -24,13 +25,104 @@ export interface GithubRepo {
   defaultBranch: string;
 }
 
-function headers(): Record<string, string> {
-  const h: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "mybizpush-dev-space",
-  };
-  if (env.GITHUB_TOKEN) h.Authorization = `Bearer ${env.GITHUB_TOKEN}`;
+const BASE_HEADERS = {
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+  "User-Agent": "mybizpush-dev-space",
+} as const;
+
+// ---- GitHub App authentication (org-wide installation token) ---------------
+// The App proves its identity with a short-lived RS256 JWT, which it exchanges
+// for an installation access token scoped to the org install. That token reads
+// every repo the App can see — no personal access token required.
+
+export function isAppConfigured(): boolean {
+  return Boolean(env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY);
+}
+
+// Accept a PEM with literal "\n" escapes (single-line .env) or a base64 blob.
+function appPrivateKey(): string {
+  const raw = env.GITHUB_APP_PRIVATE_KEY;
+  if (raw.includes("BEGIN")) return raw.replace(/\\n/g, "\n");
+  try {
+    return Buffer.from(raw, "base64").toString("utf8");
+  } catch {
+    return raw;
+  }
+}
+
+// Sign the App JWT (max 10 min; we use ~9 with a 60s backdated iat for clock skew).
+function appJwt(): string {
+  const now = Math.floor(Date.now() / 1000);
+  return jwt.sign({ iat: now - 60, exp: now + 540, iss: env.GITHUB_APP_ID }, appPrivateKey(), {
+    algorithm: "RS256",
+  });
+}
+
+let installationId: string | null = env.GITHUB_APP_INSTALLATION_ID || null;
+
+// Resolve the installation id from the org (cached after first lookup).
+async function resolveInstallationId(appToken: string): Promise<string> {
+  if (installationId) return installationId;
+  if (!env.GITHUB_ORG) {
+    throw new AppError(503, "Set GITHUB_ORG or GITHUB_APP_INSTALLATION_ID for the GitHub App", "github_app_unconfigured");
+  }
+  const res = await fetch(`${env.GITHUB_API_URL}/orgs/${env.GITHUB_ORG}/installation`, {
+    headers: { ...BASE_HEADERS, Authorization: `Bearer ${appToken}` },
+  });
+  if (!res.ok) {
+    throw new AppError(502, "GitHub App is not installed on the org", "github_app_not_installed");
+  }
+  const data = (await res.json()) as { id?: number };
+  installationId = String(data.id);
+  return installationId;
+}
+
+let cachedToken: { token: string; expiresAt: number } | null = null;
+let inFlight: Promise<string> | null = null;
+
+// Mint (and cache) an installation access token. ~1h lifetime; refreshed with a
+// 60s safety margin. A single in-flight promise prevents a request stampede.
+async function getInstallationToken(): Promise<string | null> {
+  if (!isAppConfigured()) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (cachedToken && cachedToken.expiresAt - 60 > now) return cachedToken.token;
+  if (inFlight) return inFlight;
+
+  inFlight = (async () => {
+    const appToken = appJwt();
+    const id = await resolveInstallationId(appToken);
+    const res = await fetch(`${env.GITHUB_API_URL}/app/installations/${id}/access_tokens`, {
+      method: "POST",
+      headers: { ...BASE_HEADERS, Authorization: `Bearer ${appToken}` },
+    });
+    if (!res.ok) {
+      throw new AppError(502, "Failed to mint a GitHub App installation token", "github_app_token_failed");
+    }
+    const data = (await res.json()) as { token: string; expires_at: string };
+    cachedToken = { token: data.token, expiresAt: Math.floor(Date.parse(data.expires_at) / 1000) };
+    return data.token;
+  })();
+
+  try {
+    return await inFlight;
+  } finally {
+    inFlight = null;
+  }
+}
+
+// Headers for org-wide reads: prefer the App installation token, fall back to a
+// legacy PAT, else go unauthenticated (public repos / low rate limit).
+async function readHeaders(): Promise<Record<string, string>> {
+  const h: Record<string, string> = { ...BASE_HEADERS };
+  let token: string | null = null;
+  try {
+    token = await getInstallationToken();
+  } catch {
+    token = null; // fall through to PAT / unauthenticated
+  }
+  if (!token && env.GITHUB_TOKEN) token = env.GITHUB_TOKEN;
+  if (token) h.Authorization = `Bearer ${token}`;
   return h;
 }
 
@@ -67,7 +159,7 @@ export async function fetchPullRequest(url: string): Promise<GithubPr | null> {
   try {
     const res = await fetch(
       `${env.GITHUB_API_URL}/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.number}`,
-      { headers: headers() },
+      { headers: await readHeaders() },
     );
     if (!res.ok) return null;
     const pr = (await res.json()) as {
@@ -90,7 +182,7 @@ export async function fetchPullRequest(url: string): Promise<GithubPr | null> {
 // Look up repo metadata (used to validate a repo before linking it to a project).
 export async function getRepo(owner: string, repo: string): Promise<GithubRepo | null> {
   try {
-    const res = await fetch(`${env.GITHUB_API_URL}/repos/${owner}/${repo}`, { headers: headers() });
+    const res = await fetch(`${env.GITHUB_API_URL}/repos/${owner}/${repo}`, { headers: await readHeaders() });
     if (!res.ok) return null;
     const r = (await res.json()) as {
       name: string; full_name: string; html_url: string; description: string | null;
@@ -115,7 +207,7 @@ export async function listOpenPullRequests(owner: string, repo: string): Promise
   try {
     const res = await fetch(
       `${env.GITHUB_API_URL}/repos/${owner}/${repo}/pulls?state=open&per_page=30&sort=updated&direction=desc`,
-      { headers: headers() },
+      { headers: await readHeaders() },
     );
     if (!res.ok) return [];
     const arr = (await res.json()) as Array<{
@@ -149,9 +241,10 @@ export function verifyWebhookSignature(raw: Buffer, signature: string | undefine
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-// ---- Per-user OAuth --------------------------------------------------------
-// read:user → profile; read:org → verify membership of the configured org.
-export const GITHUB_OAUTH_SCOPES = ["read:user", "read:org"];
+// ---- User authorization (GitHub App "Connect GitHub") ----------------------
+// The GitHub App also acts as the identity provider for the per-user connect
+// flow. User-to-server tokens carry no classic scopes — access is governed by
+// the App's configured user permissions — so the authorize URL omits `scope`.
 
 export function isOAuthConfigured(): boolean {
   return Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
@@ -163,13 +256,12 @@ function assertOAuthConfigured(): void {
   }
 }
 
-// Build the GitHub consent URL for the connect flow.
+// Build the GitHub App user-authorization URL for the connect flow.
 export function getOAuthUrl(state: string): string {
   assertOAuthConfigured();
   const params = new URLSearchParams({
     client_id: env.GITHUB_CLIENT_ID,
     redirect_uri: env.GITHUB_OAUTH_REDIRECT_URI,
-    scope: GITHUB_OAUTH_SCOPES.join(" "),
     state,
     allow_signup: "false",
   });
@@ -177,21 +269,28 @@ export function getOAuthUrl(state: string): string {
 }
 
 function userHeaders(token: string): Record<string, string> {
-  return {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "mybizpush-dev-space",
-    Authorization: `Bearer ${token}`,
-  };
+  return { ...BASE_HEADERS, Authorization: `Bearer ${token}` };
 }
 
-// Check whether the token's owner is an active member of the configured org.
-// Returns false if no org is configured or the user isn't a member.
-async function checkOrgMembership(token: string): Promise<boolean> {
+// Is `login` an active member of the configured org? With the App installed we
+// check via the installation token (org Members: read) — independent of what
+// the user granted. Falls back to the user token's own membership endpoint.
+async function checkOrgMembership(login: string | null, userToken: string): Promise<boolean> {
   if (!env.GITHUB_ORG) return false;
   try {
+    const appToken = await getInstallationToken();
+    if (appToken && login) {
+      const res = await fetch(`${env.GITHUB_API_URL}/orgs/${env.GITHUB_ORG}/members/${login}`, {
+        headers: { ...BASE_HEADERS, Authorization: `Bearer ${appToken}` },
+      });
+      return res.status === 204; // 204 = member, 404 = not, 302 = requester not a member
+    }
+  } catch {
+    /* fall through to the user-token check */
+  }
+  try {
     const res = await fetch(`${env.GITHUB_API_URL}/user/memberships/orgs/${env.GITHUB_ORG}`, {
-      headers: userHeaders(token),
+      headers: userHeaders(userToken),
     });
     if (!res.ok) return false;
     const data = (await res.json()) as { state?: string };
@@ -201,7 +300,7 @@ async function checkOrgMembership(token: string): Promise<boolean> {
   }
 }
 
-// Exchange the auth code for an access token, resolve the GitHub identity +
+// Exchange the auth code for a user token, resolve the GitHub identity +
 // org membership, and persist it all for the user.
 export async function exchangeOAuthCodeAndStore(userId: string, code: string): Promise<void> {
   assertOAuthConfigured();
@@ -245,7 +344,7 @@ export async function exchangeOAuthCodeAndStore(userId: string, code: string): P
     /* non-fatal — store the connection without identity details */
   }
 
-  const orgMember = await checkOrgMembership(token.access_token);
+  const orgMember = await checkOrgMembership(login, token.access_token);
 
   await GithubAccount.upsert({
     userId,

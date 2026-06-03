@@ -28,7 +28,7 @@ export const projectReposService = {
 
     const meta = await getRepo(parsed.owner, parsed.repo);
     if (!meta) {
-      throw badRequest("Repo not found or not accessible (set GITHUB_TOKEN for private repos)");
+      throw badRequest("Repo not found or not accessible (install the GitHub App on this repo)");
     }
 
     const existing = await ProjectRepo.findOne({ where: { projectId, fullName: meta.fullName } });

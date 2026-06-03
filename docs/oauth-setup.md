@@ -1,15 +1,16 @@
 # OAuth setup — GitHub & Google
 
 A step-by-step guide to creating the credentials MyBizPush Dev Space needs for its
-two per-user integrations:
+two integrations:
 
-- **GitHub** — connect a teammate's GitHub account, verify they're in your org, and link their pull requests.
+- **GitHub** — a **GitHub App** installed on your org: reads PRs/repos org-wide, lets each
+  teammate connect their account, verifies they're in your org, and receives one webhook.
 - **Google** — Calendar + Meet, so meetings scheduled in the app create real Calendar events with Meet links.
 
-Both are **per-user OAuth** flows: each teammate clicks "Connect" (in the onboarding
-wizard's *Connect your tools* step, or later from **Profile**) and authorizes the app
-for their own account. You, the admin, only create the app credentials **once** and put
-them in `api/.env`.
+Both expose a per-user "Connect" button (in the onboarding wizard's *Connect your tools*
+step, or later from **Profile**). You, the admin, create the credentials **once** and put
+them in `api/.env`; the GitHub App is additionally installed on the org so it can read
+org data server-side.
 
 > All env vars below live in `api/.env` (copy from `api/.env.example`). They're optional —
 > the API boots without them — but the relevant "Connect" button returns a *"not configured"*
@@ -21,9 +22,9 @@ them in `api/.env`.
 
 | Integration | Env vars you'll set | Where you get them |
 | --- | --- | --- |
-| GitHub (connect + org check) | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_OAUTH_REDIRECT_URI`, `GITHUB_ORG` | GitHub → Settings → Developer settings → **OAuth Apps** |
-| GitHub (PR enrichment, optional) | `GITHUB_TOKEN` | GitHub → Settings → Developer settings → **Personal access tokens** |
-| GitHub (webhook, optional) | `GITHUB_WEBHOOK_SECRET` | A random secret you invent, set on the repo/org webhook |
+| GitHub App (org reads + identity) | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_ORG` | Org → Settings → Developer settings → **GitHub Apps** |
+| GitHub App (user connect + org check) | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_OAUTH_REDIRECT_URI` | Same App's settings page |
+| GitHub App (webhook) | `GITHUB_WEBHOOK_SECRET` | A random secret you set on the App's webhook |
 | Google (Calendar + Meet) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Google Cloud Console → **APIs & Services → Credentials** |
 
 **Default callback URLs (local dev):**
@@ -36,89 +37,96 @@ For a deployed API, swap `http://localhost:4000` for your API's public origin (e
 
 ---
 
-## 1. GitHub OAuth App (per-user connect + org verification)
+## 1. GitHub App (org integration — reads, identity, webhook)
 
-This is the integration we just built. It uses a classic **OAuth App** (not a GitHub App).
-Requested scopes: `read:user` (profile) and `read:org` (to confirm org membership).
+One **GitHub App**, installed on the org, powers everything: it reads PRs/repos org-wide
+via an installation token (no personal access token), provides the identity for the
+per-user "Connect GitHub" flow, verifies org membership, and delivers one org-wide webhook.
 
-### Steps
+### 1a. Create the App
 
-1. Go to **GitHub → your avatar → Settings → Developer settings → OAuth Apps → New OAuth App**.
-   (Direct link: https://github.com/settings/developers)
-   - To register it under your **organization** instead of your personal account, use
-     **Org → Settings → Developer settings → OAuth Apps → New OAuth App**. Either works;
-     org-owned is tidier for a team tool.
-2. Fill in:
-   - **Application name:** `MyBizPush Dev Space` (whatever your team will recognize on the consent screen)
+1. Go to **Org → Settings → Developer settings → GitHub Apps → New GitHub App**.
+   (Direct link: `https://github.com/organizations/<org>/settings/apps` — or your personal
+   **Settings → Developer settings → GitHub Apps** if you don't own the org yet; you can
+   transfer it later.)
+2. **Basics:**
+   - **GitHub App name:** `MyBizPush Dev Space`
    - **Homepage URL:** your UI URL — `http://localhost:3000` for local dev (this is `APP_URL`).
-   - **Authorization callback URL:** **must exactly match** `GITHUB_OAUTH_REDIRECT_URI` →
+3. **Identifying and authorizing users** (this drives the "Connect GitHub" button):
+   - **Callback URL:** **must exactly match** `GITHUB_OAUTH_REDIRECT_URI` →
      `http://localhost:4000/api/v1/github/callback`
-   - Leave "Enable Device Flow" unchecked.
-3. Click **Register application**.
-4. On the app page, copy the **Client ID**.
-5. Click **Generate a new client secret**, then copy it **immediately** (GitHub only shows it once).
-6. Put both in `api/.env`:
+   - Leave **"Request user authorization (OAuth) during installation"** unchecked, and
+     **"Expire user authorization tokens"** unchecked (so connected accounts stay connected).
+4. **Webhook:**
+   - **Active:** checked. **Webhook URL:** `https://<your-api-host>/api/v1/github/webhook`
+     (for local dev, expose `:4000` with a tunnel, e.g. `cloudflared`/`ngrok`, or leave the
+     webhook inactive and rely on the live PR fetch).
+   - **Webhook secret:** invent one (`openssl rand -hex 32`) → this is `GITHUB_WEBHOOK_SECRET`.
+5. **Permissions:**
+   - **Repository permissions → Pull requests: Read-only**, **Contents: Read-only** (or
+     **Metadata: Read-only** at minimum for public repos).
+   - **Organization permissions → Members: Read-only** (lets the App verify org membership
+     server-side, independent of what each user grants).
+   - **Account permissions → Email addresses: Read-only** (optional — resolves the connected
+     user's profile).
+6. **Subscribe to events:** **Pull request**.
+7. **Where can this App be installed?** *Only on this account*.
+8. **Create GitHub App.**
+
+### 1b. Get the credentials
+
+On the new App's settings page:
+
+- Copy the **App ID** → `GITHUB_APP_ID`.
+- Copy the **Client ID** → `GITHUB_CLIENT_ID`.
+- **Generate a new client secret** → `GITHUB_CLIENT_SECRET` (copy immediately).
+- Scroll to **Private keys → Generate a private key** → downloads a `.pem` → `GITHUB_APP_PRIVATE_KEY`.
+
+The private key is multi-line PEM. Two ways to put it in a single-line `.env`:
+
+```env
+# Option A — paste with literal \n between the lines:
+GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n...\n-----END RSA PRIVATE KEY-----\n"
+
+# Option B — base64 the whole file (the API auto-detects and decodes it):
+#   base64 -i your-app.private-key.pem | tr -d '\n'
+GITHUB_APP_PRIVATE_KEY=LS0tLS1CRUdJTiBSU0Eg...
+```
+
+### 1c. Install it on the org
+
+1. App settings → **Install App** → choose the org → **All repositories** (or select the ones
+   you'll link to projects) → **Install**.
+2. Set the rest of `.env`:
    ```env
-   GITHUB_CLIENT_ID=Iv1.xxxxxxxxxxxx
+   GITHUB_APP_ID=123456
+   GITHUB_APP_PRIVATE_KEY=...            # from 1b
+   GITHUB_CLIENT_ID=Iv23xxxxxxxxxxxx
    GITHUB_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
    GITHUB_OAUTH_REDIRECT_URI=http://localhost:4000/api/v1/github/callback
    GITHUB_ORG=mybizpush
-   GITHUB_OAUTH_BASE_URL=https://github.com/login/oauth
+   GITHUB_WEBHOOK_SECRET=<the-secret-from-step-4>
+   # GITHUB_APP_INSTALLATION_ID is auto-discovered from GITHUB_ORG; pin it only if needed.
    ```
-   - `GITHUB_ORG` is the org login slug whose membership is checked on connect (the bit in
-     `github.com/<org>`). Leave it **empty** to skip the check — users still connect, they
-     just won't get the green "Verified member" badge.
-   - `GITHUB_OAUTH_BASE_URL` only changes for **GitHub Enterprise Server** (`https://<host>/login/oauth`).
-     Leave the default for github.com.
-7. Restart the API.
+   - `GITHUB_ORG` is the org login slug (the bit in `github.com/<org>`). It's used both to
+     auto-discover the installation **and** as the org whose membership is verified on connect.
+     Leave it empty to skip the membership badge.
+3. Restart the API.
 
 ### Notes
 
-- **No verification / publishing needed.** OAuth Apps work for anyone immediately; there's
-  no "test users" list or review like Google has.
-- **Tokens don't expire.** Classic OAuth-App tokens stay valid until the user disconnects or
-  revokes them — so there's no weekly-reconnect problem (unlike Google in Testing mode, below).
-- **Org membership visibility:** the `read:org` scope lets the app read the user's org
-  memberships. If a member's org visibility is *Private*, the membership check still works
-  because it queries *their own* memberships with *their* token — they just have to be an
-  actual member of `GITHUB_ORG`.
+- **Installation token, not a PAT.** The App mints a short-lived (~1h) installation token from
+  a signed JWT and caches it; you never manage a personal access token. `GITHUB_TOKEN` remains
+  only as a legacy fallback for PR reads before the App is configured.
+- **Server-side membership check.** With **Members: Read-only**, the App confirms membership via
+  the installation token (`GET /orgs/<org>/members/<login>`) — it doesn't depend on the scopes a
+  user grants, and works even for users with *Private* org visibility.
+- **One webhook for the whole org**, configured on the App — no per-repo webhook setup.
+- **No public review/verification** needed while it's installed on *Only this account*.
 
 ---
 
-## 2. (Optional) GitHub PAT for PR enrichment + webhook secret
-
-These are **separate** from the OAuth App above and only needed for the project-repos / PR
-features — not for the per-user "Connect GitHub" button.
-
-### `GITHUB_TOKEN` — read PR/repo metadata
-
-Used to fetch PR titles/status and validate repos when linking them to a project.
-
-1. **GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.**
-2. Scope it to the repos you'll link, with **Repository permissions → Pull requests: Read-only**
-   (and **Contents: Read-only** if the repos are private).
-3. Copy the token and set:
-   ```env
-   GITHUB_TOKEN=github_pat_xxxxxxxx
-   ```
-   Without it, public repos still work at a lower rate limit; private repos won't.
-
-### `GITHUB_WEBHOOK_SECRET` — auto-update linked PR status
-
-1. Invent a random secret (e.g. `openssl rand -hex 32`).
-2. In each repo (or the org) → **Settings → Webhooks → Add webhook**:
-   - **Payload URL:** `https://<your-api-host>/api/v1/github/webhook`
-   - **Content type:** `application/json`
-   - **Secret:** the value you generated
-   - **Events:** *Let me select individual events* → **Pull requests**
-3. Set the same value in `.env`:
-   ```env
-   GITHUB_WEBHOOK_SECRET=<the-same-secret>
-   ```
-
----
-
-## 3. Google OAuth (Calendar + Meet)
+## 2. Google OAuth (Calendar + Meet)
 
 Scopes requested: `https://www.googleapis.com/auth/calendar.events`, `openid`, `email`.
 
@@ -130,7 +138,7 @@ Scopes requested: `https://www.googleapis.com/auth/calendar.events`, `openid`, `
 3. **Configure the OAuth consent screen** (APIs & Services → **OAuth consent screen**):
    - **User type: External.** (We are **not** on Google Workspace, so Internal isn't available.)
      External apps start in **Testing** status, which revokes refresh tokens after 7 days — not
-     acceptable for us, so we **publish + verify** the app (see [§3a](#3a-getting-the-google-app-approved-production--verification) below).
+     acceptable for us, so we **publish + verify** the app (see [§2a](#2a-getting-the-google-app-approved-production--verification) below).
    - Fill in app name, support email, and developer contact. Add the `calendar.events` scope if prompted.
 4. **Create credentials:** APIs & Services → **Credentials → Create credentials → OAuth client ID**:
    - **Application type:** Web application
@@ -153,7 +161,7 @@ Scopes requested: `https://www.googleapis.com/auth/calendar.events`, `openid`, `
 > callback. (The current `api/.env` has exactly this missing-slash typo — fix it before
 > deploying Google.)
 
-### 3a. Getting the Google app approved (production + verification)
+### 2a. Getting the Google app approved (production + verification)
 
 **Our situation:** we're not on Google Workspace, so the OAuth app is **External**. We need it
 **Published** (to escape Testing mode's 7-day refresh-token revocation) **and verified** (to
@@ -222,17 +230,19 @@ Google won't verify an app that doesn't have these, all on **a domain you own an
 
 ---
 
-## 4. Wiring it up (local vs. deployed)
+## 3. Wiring it up (local vs. deployed)
 
 `.env` keys recap:
 
 ```env
-# GitHub per-user OAuth
+# GitHub App
+GITHUB_APP_ID=
+GITHUB_APP_PRIVATE_KEY=
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 GITHUB_OAUTH_REDIRECT_URI=http://localhost:4000/api/v1/github/callback
 GITHUB_ORG=mybizpush
-GITHUB_OAUTH_BASE_URL=https://github.com/login/oauth
+GITHUB_WEBHOOK_SECRET=
 
 # Google Calendar + Meet
 GOOGLE_CLIENT_ID=
@@ -251,7 +261,7 @@ the server's environment. The callback host is the **API's** public origin; `APP
 
 ---
 
-## 5. Verify it works
+## 4. Verify it works
 
 1. Start the API and UI, sign in, and open **Profile** (or run through onboarding).
 2. **GitHub:** click **Connect** on the GitHub card → authorize on github.com → you're sent
@@ -273,17 +283,19 @@ curl -H "Authorization: Bearer <accessToken>" http://localhost:4000/api/v1/googl
 
 ---
 
-## 6. Troubleshooting
+## 5. Troubleshooting
 
 | Symptom | Likely cause / fix |
 | --- | --- |
 | `"GitHub integration is not configured"` (503) | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` missing or API not restarted after editing `.env`. |
 | `"Google integration is not configured"` (503) | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` missing. |
-| GitHub returns `redirect_uri mismatch` | The OAuth App's **Authorization callback URL** doesn't byte-for-byte match `GITHUB_OAUTH_REDIRECT_URI`. |
+| GitHub returns `redirect_uri mismatch` | The GitHub App's **Callback URL** doesn't byte-for-byte match `GITHUB_OAUTH_REDIRECT_URI`. |
+| `"GitHub App is not installed on the org"` (502) | The App isn't installed on `GITHUB_ORG`, or `GITHUB_ORG` is misspelled. Install it under App settings → **Install App**. |
+| `"Failed to mint a GitHub App installation token"` (502) | `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` wrong, or the PEM lost its newlines — re-paste with literal `\n` or base64-encode it. |
 | Google returns `redirect_uri_mismatch` (Error 400) | The redirect URI isn't in the client's **Authorized redirect URIs**, or there's a typo / missing slash in `GOOGLE_REDIRECT_URI`. |
 | Connected, but no green "Verified member" badge | User isn't an active member of `GITHUB_ORG`, or `GITHUB_ORG` is empty/misspelled. |
-| Google: `access_blocked` / "app not verified" | App still in **Testing** and the user isn't a **Test user**. The fix is to **Publish** the app ([§3a](#3a-getting-the-google-app-approved-production--verification)); pre-verification, users click through *Advanced → Go to … (unsafe)*. |
-| Google users get logged out / "reconnect" weekly | App is in **Testing** (7-day refresh-token revocation). **Publish App** (Testing → In production) — this alone stops the 7-day clock, even before verification completes. See [§3a](#3a-getting-the-google-app-approved-production--verification). |
+| Google: `access_blocked` / "app not verified" | App still in **Testing** and the user isn't a **Test user**. The fix is to **Publish** the app ([§2a](#2a-getting-the-google-app-approved-production--verification)); pre-verification, users click through *Advanced → Go to … (unsafe)*. |
+| Google users get logged out / "reconnect" weekly | App is in **Testing** (7-day refresh-token revocation). **Publish App** (Testing → In production) — this alone stops the 7-day clock, even before verification completes. See [§2a](#2a-getting-the-google-app-approved-production--verification). |
 
 ---
 
