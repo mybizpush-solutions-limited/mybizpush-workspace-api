@@ -71,6 +71,7 @@ export class Department extends Model<InferAttributes<Department>, InferCreation
   declare name: string;
   declare description: CreationOptional<string>;
   declare headId: CreationOptional<string | null>;
+  declare avatarUrl: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -81,6 +82,7 @@ Department.init(
     name: { type: DataTypes.STRING, allowNull: false },
     description: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
     headId: { type: DataTypes.UUID, allowNull: true },
+    avatarUrl: { type: DataTypes.STRING, allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },
@@ -122,6 +124,7 @@ export class Project extends Model<InferAttributes<Project>, InferCreationAttrib
   declare description: CreationOptional<string>;
   declare managerId: CreationOptional<string | null>;
   declare progress: CreationOptional<number>;
+  declare avatarUrl: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -133,6 +136,7 @@ Project.init(
     description: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
     managerId: { type: DataTypes.UUID, allowNull: true },
     progress: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0, max: 100 } },
+    avatarUrl: { type: DataTypes.STRING, allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },

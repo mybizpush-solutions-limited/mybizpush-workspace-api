@@ -1,5 +1,7 @@
 import { Project, User } from "../../models";
 import { notFound } from "../../lib/errors";
+import { env } from "../../config/env";
+import { uploadAvatarImage, type UploadFile } from "../../lib/avatar";
 import { serializeProject } from "../shared/serializers";
 
 const withMembers = {
@@ -53,6 +55,18 @@ export const projectsService = {
       ...(patch.progress !== undefined ? { progress: patch.progress } : {}),
     });
     if (patch.memberIds) await (project as any).setMembers(patch.memberIds);
+    return reload(id);
+  },
+
+  async setAvatar(id: string, file: UploadFile) {
+    const project = await Project.findByPk(id);
+    if (!project) throw notFound("Project not found");
+    project.avatarUrl = await uploadAvatarImage(file, {
+      folder: `${env.CLOUDINARY_UPLOAD_FOLDER}/projects`,
+      publicId: id,
+      tags: ["project", id],
+    });
+    await project.save();
     return reload(id);
   },
 };

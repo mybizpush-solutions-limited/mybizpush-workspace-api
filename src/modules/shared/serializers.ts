@@ -28,6 +28,7 @@ export function serializeProject(p: Project) {
     managerId: p.managerId ?? null,
     memberIds: members.map((m) => m.id),
     progress: p.progress,
+    avatarUrl: p.avatarUrl ?? null,
     createdAt: p.createdAt.toISOString(),
   };
 }

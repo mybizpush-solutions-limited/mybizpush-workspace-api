@@ -1,5 +1,7 @@
 import { Department, DepartmentJoinRequest, User, type AccessLevel } from "../../models";
 import { badRequest, notFound, forbidden } from "../../lib/errors";
+import { env } from "../../config/env";
+import { uploadAvatarImage, type UploadFile } from "../../lib/avatar";
 
 // A user can manage a department if they're its head or an executive admin.
 function canManage(dept: Department, viewer: Viewer): boolean {
@@ -25,6 +27,7 @@ export interface PublicDepartment {
   name: string;
   description: string;
   headId: string | null;
+  avatarUrl: string | null;
   memberIds: string[];
 }
 
@@ -43,6 +46,7 @@ function serialize(dept: Department): PublicDepartment {
     name: dept.name,
     description: dept.description,
     headId: dept.headId ?? null,
+    avatarUrl: dept.avatarUrl ?? null,
     memberIds: members.map((m) => m.id),
   };
 }
@@ -171,6 +175,19 @@ export const departmentsService = {
       { status: "approved", decidedBy: viewer.id, decidedAt: new Date() },
       { where: { departmentId, userId, status: "pending" } },
     );
+    return this.bySlug(dept.slug);
+  },
+
+  async setAvatar(departmentId: string, file: UploadFile, viewer: Viewer) {
+    const dept = await Department.findByPk(departmentId);
+    if (!dept) throw notFound("Department not found");
+    if (!canManage(dept, viewer)) throw forbidden("Only the department head or an admin can do this");
+    dept.avatarUrl = await uploadAvatarImage(file, {
+      folder: `${env.CLOUDINARY_UPLOAD_FOLDER}/departments`,
+      publicId: departmentId,
+      tags: ["department", departmentId],
+    });
+    await dept.save();
     return this.bySlug(dept.slug);
   },
 };

@@ -1,9 +1,10 @@
 import { Router } from "express";
+import multer from "multer";
 import { z } from "zod";
-import { asyncHandler, forbidden } from "../../lib/errors";
+import { asyncHandler, badRequest, forbidden, notFound } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
-import { Department } from "../../models";
+import { Department, Project } from "../../models";
 import { projectsService } from "./projects.service";
 import { projectReposService } from "./repos.service";
 import { githubSyncService } from "../github/github.sync.service";
@@ -11,8 +12,9 @@ import { githubSyncService } from "../github/github.sync.service";
 export const projectsRouter = Router();
 projectsRouter.use(requireAuth);
 
-// Creating/structuring projects is limited to a department's head or an
-// executive admin.
+const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+
+// Creating a project under a department: the department's head or an exec admin.
 async function assertCanManageDept(
   departmentId: string,
   auth: { sub: string; accessLevel: string },
@@ -22,6 +24,20 @@ async function assertCanManageDept(
   if (!dept || dept.headId !== auth.sub) {
     throw forbidden("Only the department head or an executive admin can do this");
   }
+}
+
+// Editing an existing project: its manager, the department head, or an exec admin.
+async function assertCanManageProject(
+  projectId: string,
+  auth: { sub: string; accessLevel: string },
+): Promise<void> {
+  if (auth.accessLevel === "executive_admin") return;
+  const project = await Project.findByPk(projectId);
+  if (!project) throw notFound("Project not found");
+  if (project.managerId === auth.sub) return;
+  const dept = await Department.findByPk(project.departmentId);
+  if (dept?.headId === auth.sub) return;
+  throw forbidden("Only the project manager, department head, or an executive admin can do this");
 }
 
 const importIssueSchema = z.object({
@@ -73,7 +89,25 @@ projectsRouter.patch(
   "/:id",
   validateBody(updateSchema),
   asyncHandler(async (req, res) => {
+    await assertCanManageProject(req.params.id!, req.auth!);
     res.json({ project: await projectsService.update(req.params.id!, req.body) });
+  }),
+);
+
+projectsRouter.post(
+  "/:id/avatar",
+  avatarUpload.single("file"),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw badRequest("An image is required (multipart field 'file')");
+    await assertCanManageProject(req.params.id!, req.auth!);
+    res.json({
+      project: await projectsService.setAvatar(req.params.id!, {
+        buffer: req.file.buffer,
+        originalname: req.file.originalname,
+        size: req.file.size,
+        mimetype: req.file.mimetype,
+      }),
+    });
   }),
 );
 

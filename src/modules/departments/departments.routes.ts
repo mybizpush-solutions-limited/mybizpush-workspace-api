@@ -1,12 +1,15 @@
 import { Router } from "express";
+import multer from "multer";
 import { z } from "zod";
-import { asyncHandler } from "../../lib/errors";
+import { asyncHandler, badRequest } from "../../lib/errors";
 import { requireAuth, requireAccessLevel } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { departmentsService, type Viewer } from "./departments.service";
 import type { AccessLevel } from "../../models";
 
 export const departmentsRouter = Router();
+
+const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
 const viewerOf = (req: { auth?: { sub: string; accessLevel: string } }): Viewer => ({
   id: req.auth!.sub,
@@ -97,5 +100,26 @@ departmentsRouter.post(
   validateBody(z.object({ userId: z.string().uuid() })),
   asyncHandler(async (req, res) => {
     res.json({ department: await departmentsService.addMember(req.params.id!, req.body.userId, viewerOf(req)) });
+  }),
+);
+
+// Department profile image (head / exec admin — enforced in the service).
+departmentsRouter.post(
+  "/:id/avatar",
+  avatarUpload.single("file"),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw badRequest("An image is required (multipart field 'file')");
+    res.json({
+      department: await departmentsService.setAvatar(
+        req.params.id!,
+        {
+          buffer: req.file.buffer,
+          originalname: req.file.originalname,
+          size: req.file.size,
+          mimetype: req.file.mimetype,
+        },
+        viewerOf(req),
+      ),
+    });
   }),
 );
