@@ -69,9 +69,9 @@ export const profileService = {
     return publicUser(userId);
   },
 
-  // Onboarding is all-or-nothing: a profile picture, at least one department and
-  // project, and (when those integrations are configured) a connected GitHub
-  // account that's a verified org member, plus a connected Google account.
+  // Onboarding requires a profile picture, one department, at least one project,
+  // and at least one connected tool — GitHub OR Google (neither is compulsory on
+  // its own). If GitHub is the one they connect, it must be a verified org member.
   async completeOnboarding(userId: string): Promise<PublicUser> {
     const user = await User.findByPk(userId);
     if (!user) throw notFound("User not found");
@@ -79,22 +79,31 @@ export const profileService = {
     const me = await publicUser(userId);
     const missing: string[] = [];
     if (!me.avatarUrl) missing.push("a profile picture");
-    if (me.departmentIds.length === 0) missing.push("at least one department");
+    if (me.departmentIds.length === 0) missing.push("a department");
     if (me.projectIds.length === 0) missing.push("at least one project");
 
-    if (isOAuthConfigured()) {
+    const githubConfigured = isOAuthConfigured();
+    const googleConfigured = isGoogleConfigured();
+    let githubConnected = false;
+    let googleConnected = false;
+
+    if (githubConfigured) {
       const gh = await GithubAccount.findByPk(userId);
-      if (!gh?.accessToken) {
-        missing.push("your GitHub account");
-      } else if (env.GITHUB_ORG && !gh.orgMember) {
+      githubConnected = Boolean(gh?.accessToken);
+      // Org membership is only enforced for those who choose to connect GitHub.
+      if (githubConnected && env.GITHUB_ORG && !gh!.orgMember) {
         throw badRequest(
-          `Your connected GitHub account (@${gh.login ?? "unknown"}) isn't a member of the ${env.GITHUB_ORG} organization. Ask an admin for an invite, then reconnect.`,
+          `Your connected GitHub account (@${gh!.login ?? "unknown"}) isn't a member of the ${env.GITHUB_ORG} organization. Ask an admin for an invite, then reconnect.`,
         );
       }
     }
-    if (isGoogleConfigured()) {
-      const g = await GoogleAccount.findByPk(userId);
-      if (!g) missing.push("your Google account");
+    if (googleConfigured) {
+      googleConnected = Boolean(await GoogleAccount.findByPk(userId));
+    }
+
+    // Require at least one connected tool when any integration is configured.
+    if ((githubConfigured || googleConfigured) && !githubConnected && !googleConnected) {
+      missing.push("GitHub or Google");
     }
 
     if (missing.length) {
