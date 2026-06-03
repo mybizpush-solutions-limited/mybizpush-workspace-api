@@ -1,7 +1,7 @@
 import { ProjectRepo } from "../../models";
 import { badRequest, notFound } from "../../lib/errors";
 import { getRepo, listOpenPullRequests, parseRepoInput } from "../../lib/github";
-import { listDeployments, listIssues, listReleases } from "../../lib/github.features";
+import { listCommits, listDeployments, listIssues, listReleases } from "../../lib/github.features";
 
 function serialize(r: ProjectRepo) {
   return {
@@ -86,6 +86,20 @@ export const projectReposService = {
       ),
     );
     return lists.flat().sort((a, b) => (b.publishedAt ?? "").localeCompare(a.publishedAt ?? ""));
+  },
+
+  // Recent commits (push activity) across all linked repos' default branches.
+  async commits(projectId: string) {
+    const repos = await ProjectRepo.findAll({ where: { projectId } });
+    const lists = await Promise.all(
+      repos.map(async (r) =>
+        (await listCommits(r.owner, r.repo, { perPage: 10 })).map((c) => ({ ...c, repoFullName: r.fullName })),
+      ),
+    );
+    return lists
+      .flat()
+      .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""))
+      .slice(0, 30);
   },
 
   // Recent deployments across all linked repos (live).

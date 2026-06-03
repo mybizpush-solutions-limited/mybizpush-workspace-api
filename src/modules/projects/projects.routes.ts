@@ -116,6 +116,13 @@ projectsRouter.get(
   }),
 );
 
+projectsRouter.get(
+  "/:id/commits",
+  asyncHandler(async (req, res) => {
+    res.json({ commits: await projectReposService.commits(req.params.id!) });
+  }),
+);
+
 // Import a GitHub issue into this project as a synced app issue.
 projectsRouter.post(
   "/:id/github-issues/import",

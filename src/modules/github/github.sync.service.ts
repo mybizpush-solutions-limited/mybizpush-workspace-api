@@ -1,7 +1,7 @@
 import { Op } from "sequelize";
 import { Comment, Department, GithubAccount, GithubIssueLink, Issue, type WorkStatus } from "../../models";
 import { parseRepoInput } from "../../lib/github";
-import { getIssue, listTeams } from "../../lib/github.features";
+import { createIssueComment, getIssue, listTeams } from "../../lib/github.features";
 import { issuesService } from "../workitems/workitems.service";
 import { logActivity } from "../shared/events";
 
@@ -135,11 +135,20 @@ export const githubSyncService = {
     return 1;
   },
 
+  // app → GitHub: post an app comment to the linked GitHub issue, returning the
+  // new GitHub comment id (stored on our row so the echo webhook is ignored).
+  async pushAppComment(itemId: string, body: string, authorName: string | null): Promise<number | null> {
+    const link = await GithubIssueLink.findOne({ where: { itemId } });
+    if (!link) return null;
+    const text = authorName ? `**${authorName}** (via MyBizPush):\n\n${body}` : body;
+    return createIssueComment(link.owner, link.repo, link.number, text);
+  },
+
   // GitHub → app: a comment on a mirrored GitHub issue becomes an app comment.
   async handleIssueCommentWebhook(payload: {
     action?: string;
     issue?: { html_url?: string };
-    comment?: { body?: string; user?: { login?: string } };
+    comment?: { id?: number; body?: string; user?: { login?: string } };
   }): Promise<number> {
     if (payload.action !== "created") return 0;
     const url = payload.issue?.html_url;
@@ -148,15 +157,23 @@ export const githubSyncService = {
     const link = await GithubIssueLink.findOne({ where: { url } });
     if (!link) return 0;
 
+    // Loop guard: skip anything we already have by GitHub comment id (incl. our
+    // own pushed comments echoing back).
+    const ghId = payload.comment?.id;
+    if (ghId && (await Comment.findOne({ where: { githubCommentId: String(ghId) } }))) return 0;
+
     const login = payload.comment?.user?.login;
     const account = login ? await accountByLogin(login) : null;
     const authorId = account?.userId ?? null;
     const text = authorId ? body : `**@${login ?? "github"}** (via GitHub):\n\n${body}`;
 
-    // Dedupe redelivered webhooks by identical body on the same item.
-    const existing = await Comment.findOne({ where: { itemId: link.itemId, itemType: "issue", body: text } });
-    if (existing) return 0;
-    await Comment.create({ itemId: link.itemId, itemType: "issue", authorId, body: text });
+    await Comment.create({
+      itemId: link.itemId,
+      itemType: "issue",
+      authorId,
+      body: text,
+      githubCommentId: ghId ? String(ghId) : null,
+    });
     return 1;
   },
 

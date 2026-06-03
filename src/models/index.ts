@@ -206,6 +206,9 @@ export class Comment extends Model<InferAttributes<Comment>, InferCreationAttrib
   declare itemType: ItemType;
   declare authorId: CreationOptional<string | null>;
   declare body: string;
+  // Set when this comment is mirrored to/from a GitHub issue comment — used to
+  // dedupe the echo webhook and prevent app↔GitHub comment loops.
+  declare githubCommentId: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
 }
 Comment.init(
@@ -215,6 +218,7 @@ Comment.init(
     itemType: { type: DataTypes.ENUM(...ITEM_TYPES), allowNull: false },
     authorId: { type: DataTypes.UUID, allowNull: true },
     body: { type: DataTypes.TEXT, allowNull: false },
+    githubCommentId: { type: DataTypes.STRING, allowNull: true },
     createdAt: DataTypes.DATE,
   },
   { sequelize, tableName: "comments", updatedAt: false },

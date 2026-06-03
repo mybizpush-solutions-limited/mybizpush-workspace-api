@@ -1,6 +1,7 @@
 import { Comment, User, type ItemType } from "../../models";
 import { serializeComment } from "../shared/serializers";
 import { logActivity, notify } from "../shared/events";
+import { githubSyncService } from "../github/github.sync.service";
 
 const withMentions = {
   include: [{ model: User, as: "mentions", attributes: ["id"], through: { attributes: [] } }],
@@ -20,6 +21,19 @@ export const commentsService = {
       body: input.body,
     });
     if (input.mentions?.length) await (comment as any).setMentions(input.mentions);
+
+    // Mirror app → GitHub when this issue is linked to a GitHub issue. Storing
+    // the returned id makes the echo webhook a no-op (no comment loop).
+    if (input.itemType === "issue") {
+      const author = await User.findByPk(input.authorId);
+      const ghId = await githubSyncService
+        .pushAppComment(input.itemId, input.body, author?.name ?? null)
+        .catch(() => null);
+      if (ghId) {
+        comment.githubCommentId = String(ghId);
+        await comment.save();
+      }
+    }
 
     await logActivity({ itemId: input.itemId, itemType: input.itemType, actorId: input.authorId, kind: "commented" });
     for (const uid of input.mentions ?? []) {

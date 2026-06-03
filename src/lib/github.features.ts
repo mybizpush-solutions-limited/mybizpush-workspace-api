@@ -386,18 +386,21 @@ export async function listTeams(): Promise<Team[]> {
 }
 
 // ---- Bot write actions (need Pull requests / Issues: Read & write) ----------
+// Posts a comment; returns the new GitHub comment id (or null on failure).
 export async function createIssueComment(
   owner: string,
   repo: string,
   number: number,
   body: string,
-): Promise<boolean> {
+): Promise<number | null> {
   const res = await ghFetch(`/repos/${owner}/${repo}/issues/${number}/comments`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ body }),
   });
-  return res.ok;
+  if (!res.ok) return null;
+  const data = (await res.json()) as { id?: number };
+  return data.id ?? null;
 }
 
 export async function addLabels(
