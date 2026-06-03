@@ -2,6 +2,7 @@ import type { ModelStatic } from "sequelize";
 import { Comment, Issue, PullRequest, Task, type ItemType } from "../../models";
 import { notFound } from "../../lib/errors";
 import { fetchPullRequest } from "../../lib/github";
+import { githubService } from "../github/github.service";
 import { serializeWorkItem, workItemInclude } from "../shared/serializers";
 import { logActivity, notify } from "../shared/events";
 
@@ -142,6 +143,8 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
         status: gh?.status ?? pr.status ?? "open",
         authorId: actorId,
       });
+      // Best-effort CI + review enrichment (sets headSha so webhooks can match).
+      await githubService.enrich(created).catch(() => undefined);
       await logActivity({ itemId: id, itemType: type, actorId, kind: "pr_linked", data: { pr: created.id } });
       return reload(id);
     },

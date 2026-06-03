@@ -37,7 +37,16 @@ export function serializeAttachment(a: Attachment) {
 }
 
 export function serializePullRequest(pr: PullRequest) {
-  return { id: pr.id, number: pr.number, title: pr.title, url: pr.url, status: pr.status, authorId: pr.authorId ?? null };
+  return {
+    id: pr.id,
+    number: pr.number,
+    title: pr.title,
+    url: pr.url,
+    status: pr.status,
+    authorId: pr.authorId ?? null,
+    checkState: pr.checkState ?? null,
+    reviewDecision: pr.reviewDecision ?? null,
+  };
 }
 
 // ---- Work item (task | issue) --------------------------------------------

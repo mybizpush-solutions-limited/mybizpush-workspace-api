@@ -253,6 +253,10 @@ export class PullRequest extends Model<InferAttributes<PullRequest>, InferCreati
   declare url: string;
   declare status: CreationOptional<(typeof PR_STATUSES)[number]>;
   declare authorId: CreationOptional<string | null>;
+  // Enrichment refreshed on link + via webhooks (check_run / pull_request_review).
+  declare checkState: CreationOptional<string | null>;
+  declare reviewDecision: CreationOptional<string | null>;
+  declare headSha: CreationOptional<string | null>;
 }
 PullRequest.init(
   {
@@ -264,6 +268,9 @@ PullRequest.init(
     url: { type: DataTypes.STRING, allowNull: false },
     status: { type: DataTypes.ENUM(...PR_STATUSES), allowNull: false, defaultValue: "open" },
     authorId: { type: DataTypes.UUID, allowNull: true },
+    checkState: { type: DataTypes.STRING, allowNull: true },
+    reviewDecision: { type: DataTypes.STRING, allowNull: true },
+    headSha: { type: DataTypes.STRING, allowNull: true },
   },
   { sequelize, tableName: "pull_requests", timestamps: false },
 );

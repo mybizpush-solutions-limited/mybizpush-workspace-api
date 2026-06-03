@@ -1,6 +1,7 @@
 import { ProjectRepo } from "../../models";
 import { badRequest, notFound } from "../../lib/errors";
 import { getRepo, listOpenPullRequests, parseRepoInput } from "../../lib/github";
+import { listDeployments, listIssues, listReleases } from "../../lib/github.features";
 
 function serialize(r: ProjectRepo) {
   return {
@@ -63,5 +64,38 @@ export const projectReposService = {
       }),
     );
     return lists.flat().sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+  },
+
+  // Open GitHub issues across all linked repos (live).
+  async issues(projectId: string) {
+    const repos = await ProjectRepo.findAll({ where: { projectId } });
+    const lists = await Promise.all(
+      repos.map(async (r) =>
+        (await listIssues(r.owner, r.repo, { state: "open" })).map((i) => ({ ...i, repoFullName: r.fullName })),
+      ),
+    );
+    return lists.flat().sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+  },
+
+  // Recent releases across all linked repos (live).
+  async releases(projectId: string) {
+    const repos = await ProjectRepo.findAll({ where: { projectId } });
+    const lists = await Promise.all(
+      repos.map(async (r) =>
+        (await listReleases(r.owner, r.repo)).map((rel) => ({ ...rel, repoFullName: r.fullName })),
+      ),
+    );
+    return lists.flat().sort((a, b) => (b.publishedAt ?? "").localeCompare(a.publishedAt ?? ""));
+  },
+
+  // Recent deployments across all linked repos (live).
+  async deployments(projectId: string) {
+    const repos = await ProjectRepo.findAll({ where: { projectId } });
+    const lists = await Promise.all(
+      repos.map(async (r) =>
+        (await listDeployments(r.owner, r.repo)).map((d) => ({ ...d, repoFullName: r.fullName })),
+      ),
+    );
+    return lists.flat().sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
   },
 };

@@ -125,6 +125,23 @@ async function readHeaders(): Promise<Record<string, string>> {
   return h;
 }
 
+// Generic authed request against the GitHub REST API (installation token).
+export async function ghFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers = { ...(await readHeaders()), ...((init?.headers as Record<string, string>) ?? {}) };
+  return fetch(`${env.GITHUB_API_URL}${path}`, { ...init, headers });
+}
+
+// GET + parse JSON, or null on any non-2xx / error (callers degrade gracefully).
+export async function ghJson<T>(path: string, init?: RequestInit): Promise<T | null> {
+  try {
+    const res = await ghFetch(path, init);
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
 const PR_URL_RE = /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/i;
 const REPO_URL_RE = /github\.com\/([^/]+)\/([^/#?]+)/i;
 

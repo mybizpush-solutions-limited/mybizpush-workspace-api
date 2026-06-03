@@ -88,3 +88,24 @@ projectsRouter.get(
     res.json({ pullRequests: await projectReposService.pullRequests(req.params.id!) });
   }),
 );
+
+projectsRouter.get(
+  "/:id/issues-github",
+  asyncHandler(async (req, res) => {
+    res.json({ issues: await projectReposService.issues(req.params.id!) });
+  }),
+);
+
+projectsRouter.get(
+  "/:id/releases",
+  asyncHandler(async (req, res) => {
+    res.json({ releases: await projectReposService.releases(req.params.id!) });
+  }),
+);
+
+projectsRouter.get(
+  "/:id/deployments",
+  asyncHandler(async (req, res) => {
+    res.json({ deployments: await projectReposService.deployments(req.params.id!) });
+  }),
+);
