@@ -1,7 +1,7 @@
 import { Op } from "sequelize";
 import { Meeting, Notification, NotificationPreference, User } from "../../models";
 import { meService } from "../me/me.service";
-import { sendEmail } from "../../lib/email";
+import { sendEmail, renderEmail, BRAND } from "../../lib/email";
 import { env } from "../../config/env";
 
 type DigestFrequency = "off" | "daily" | "weekly";
@@ -31,8 +31,8 @@ async function prefsFor(userId: string): Promise<Prefs> {
 
 function section(title: string, lines: string[]): string {
   if (!lines.length) return "";
-  return `<h3 style="margin:16px 0 6px">${title}</h3><ul style="margin:0;padding-left:18px">${lines
-    .map((l) => `<li>${l}</li>`)
+  return `<h3 style="margin:20px 0 8px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:${BRAND.purple};">${title}</h3><ul style="margin:0;padding-left:18px;color:${BRAND.subtle};">${lines
+    .map((l) => `<li style="margin:0 0 6px;">${l}</li>`)
     .join("")}</ul>`;
 }
 
@@ -97,12 +97,16 @@ export async function buildDigest(userId: string, prefs: Prefs, windowDays: numb
 
   const body = blocks.filter(Boolean).join("");
   const hasContent = body.length > 0;
-  const html = `<div style="font-family:system-ui,sans-serif;max-width:560px">
-<h2 style="margin:0 0 4px">Your MyBizPush Dev Space digest</h2>
-<p style="color:#666;margin:0 0 8px">Here's what needs you.</p>
-${hasContent ? body : "<p>You're all clear — nothing needs you right now. 🎉</p>"}
-<p style="margin-top:20px;color:#999;font-size:12px"><a href="${env.APP_URL}/profile">Manage your email preferences</a></p>
-</div>`;
+  const html = renderEmail({
+    preheader: hasContent ? "Here's what needs you." : "You're all clear — nothing needs you right now.",
+    heading: "Your digest",
+    bodyHtml:
+      `<p style="margin:0 0 4px;">Here's what needs you.</p>` +
+      (hasContent
+        ? body
+        : `<p style="margin:12px 0 0;">You're all clear — nothing needs you right now. 🎉</p>`) +
+      `<p style="margin:24px 0 0;font-size:12px;color:${BRAND.muted};"><a href="${env.APP_URL}/profile" style="color:${BRAND.purple};text-decoration:none;">Manage your email preferences</a></p>`,
+  });
 
   return { subject: "Your MyBizPush Dev Space digest", html, hasContent };
 }

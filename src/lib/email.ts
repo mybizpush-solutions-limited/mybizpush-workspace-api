@@ -26,37 +26,144 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
   });
 }
 
-// Example templated sends — these map to the UI's digest preferences and will
-// be triggered by the relevant domain events / scheduled jobs.
+// ---- Branded layout --------------------------------------------------------
+const LOGO_URL =
+  "https://res.cloudinary.com/dkgbn7lfa/image/upload/q_auto/f_auto/v1780430173/mybizpush_logo_rszcoh.png";
+
+export const BRAND = {
+  purple: "#960095",
+  purpleDark: "#790278",
+  blue: "#3906FE",
+  text: "#1f2430",
+  subtle: "#5b6270",
+  muted: "#9aa0ad",
+  page: "#f3f3f7",
+  line: "#ececf1",
+};
+
+export interface EmailLayout {
+  preheader?: string; // hidden inbox-preview text
+  heading: string;
+  bodyHtml: string; // inner content (paragraphs etc.)
+  cta?: { label: string; url: string };
+}
+
+// Email-safe HTML (tables + inline styles): logo header, white card with a
+// brand-gradient top bar, optional bulletproof button, muted footer.
+export function renderEmail({ preheader, heading, bodyHtml, cta }: EmailLayout): string {
+  const gradient = `linear-gradient(90deg, ${BRAND.purple} 0%, ${BRAND.purpleDark} 100%)`;
+  const button = cta
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:26px auto 4px;">
+         <tr><td align="center" bgcolor="${BRAND.purple}" style="border-radius:10px;background:${gradient};">
+           <a href="${cta.url}" target="_blank"
+              style="display:inline-block;padding:13px 28px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:10px;">
+             ${cta.label}
+           </a>
+         </td></tr>
+       </table>`
+    : "";
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light only">
+  <meta name="supported-color-schemes" content="light only">
+</head>
+<body style="margin:0;padding:0;background:${BRAND.page};">
+  ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">${preheader}</div>` : ""}
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+         style="background:${BRAND.page};padding:28px 12px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;">
+        <tr><td align="center" style="padding:6px 0 22px;">
+          <img src="${LOGO_URL}" alt="MyBizPush" width="168"
+               style="display:block;border:0;outline:none;text-decoration:none;height:auto;max-width:168px;">
+        </td></tr>
+        <tr><td style="background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid ${BRAND.line};">
+          <div style="height:4px;background:${gradient};line-height:4px;font-size:0;">&nbsp;</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr><td style="padding:34px 34px 30px;">
+              <h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;font-weight:700;color:${BRAND.text};">${heading}</h1>
+              <div style="font-size:14px;line-height:1.65;color:${BRAND.subtle};">${bodyHtml}</div>
+              ${button}
+            </td></tr>
+          </table>
+        </td></tr>
+        <tr><td align="center" style="padding:22px 16px;font-size:11px;line-height:1.7;color:${BRAND.muted};">
+          MyBizPush Solutions Limited · internal work hub<br>
+          You're receiving this because you have a MyBizPush Dev Space account.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+const p = (html: string) => `<p style="margin:0 0 12px;">${html}</p>`;
+const APP = env.APP_URL;
+
+// ---- Templated sends -------------------------------------------------------
 export const emails = {
   welcome: (to: string, name: string) =>
     sendEmail({
       to,
       subject: "Welcome to MyBizPush Dev Space",
-      html: `<p>Hi ${name},</p><p>Your MyBizPush Dev Space account is ready.</p>`,
+      html: renderEmail({
+        preheader: "Your MyBizPush Dev Space account is ready.",
+        heading: `Welcome, ${name} 👋`,
+        bodyHtml:
+          p("Your <strong>MyBizPush Dev Space</strong> account is ready.") +
+          p("Jump in to see what's assigned to you, track issues, and collaborate with your team."),
+        cta: { label: "Open the Space", url: APP },
+      }),
+      text: `Welcome to MyBizPush Dev Space, ${name}. Your account is ready: ${APP}`,
     }),
-  feedbackRequested: (to: string, itemTitle: string, fromName: string) =>
-    sendEmail({
-      to,
-      subject: `${fromName} requested your feedback`,
-      html: `<p>${fromName} asked for your feedback on <strong>${itemTitle}</strong>.</p>`,
-    }),
-  passwordReset: (to: string, resetLink: string) =>
-    sendEmail({
-      to,
-      subject: "Reset your MyBizPush Dev Space password",
-      html: `<p>We received a request to reset your password.</p>
-<p><a href="${resetLink}">Click here to choose a new password</a>. This link expires in 30 minutes.</p>
-<p>If you didn't request this, you can safely ignore this email.</p>`,
-      text: `Reset your password: ${resetLink} (expires in 30 minutes)`,
-    }),
+
   verifyOtp: (to: string, code: string) =>
     sendEmail({
       to,
       subject: `${code} is your MyBizPush Dev Space verification code`,
-      html: `<p>Welcome to MyBizPush Dev Space! Use this code to finish creating your account:</p>
-<p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:12px 0">${code}</p>
-<p>This code expires in 10 minutes. If you didn't request it, you can ignore this email.</p>`,
+      html: renderEmail({
+        preheader: `Your verification code is ${code}`,
+        heading: "Verify your email",
+        bodyHtml:
+          p("Welcome to MyBizPush Dev Space! Use this code to finish creating your account:") +
+          `<div style="text-align:center;margin:20px 0;">
+             <span style="display:inline-block;font-size:30px;font-weight:700;letter-spacing:9px;color:${BRAND.purple};background:#f7eef7;border:1px solid #efddef;border-radius:12px;padding:14px 22px;">${code}</span>
+           </div>` +
+          p(`<span style="color:${BRAND.muted};">This code expires in 10 minutes. If you didn't request it, you can ignore this email.</span>`),
+      }),
       text: `Your MyBizPush Dev Space verification code is ${code} (expires in 10 minutes).`,
+    }),
+
+  passwordReset: (to: string, resetLink: string) =>
+    sendEmail({
+      to,
+      subject: "Reset your MyBizPush Dev Space password",
+      html: renderEmail({
+        preheader: "Reset your password (link expires in 30 minutes).",
+        heading: "Reset your password",
+        bodyHtml:
+          p("We received a request to reset your password. Click the button below to choose a new one.") +
+          p(`<span style="color:${BRAND.muted};">This link expires in 30 minutes. If you didn't request it, you can safely ignore this email.</span>`),
+        cta: { label: "Choose a new password", url: resetLink },
+      }),
+      text: `Reset your MyBizPush Dev Space password: ${resetLink} (expires in 30 minutes)`,
+    }),
+
+  feedbackRequested: (to: string, itemTitle: string, fromName: string) =>
+    sendEmail({
+      to,
+      subject: `${fromName} requested your feedback`,
+      html: renderEmail({
+        preheader: `${fromName} asked for your feedback on "${itemTitle}".`,
+        heading: `${fromName} requested your feedback`,
+        bodyHtml: p(`${fromName} asked for your feedback on <strong>${itemTitle}</strong>.`),
+        cta: { label: "Open the Space", url: APP },
+      }),
+      text: `${fromName} requested your feedback on "${itemTitle}". ${APP}`,
     }),
 };
