@@ -195,9 +195,17 @@ githubRouter.post(
         return res.json({ ok: true, updated: await githubService.handleCheckEvent(req.body) });
       case "issues":
         return res.json({ ok: true, updated: await githubSyncService.handleIssueWebhook(req.body) });
+      case "issue_comment":
+        return res.json({ ok: true, updated: await githubSyncService.handleIssueCommentWebhook(req.body) });
+      case "membership":
+        return res.json({ ok: true, updated: await githubSyncService.handleMembershipWebhook(req.body) });
+      case "team":
+        return res.json({ ok: true, updated: await githubSyncService.handleTeamWebhook(req.body) });
+      case "organization":
+        return res.json({ ok: true, updated: await githubSyncService.handleOrgWebhook(req.body) });
       default:
-        // push / issue_comment / release / deployment / member / team
-        // are surfaced through live-read endpoints, so we just acknowledge them.
+        // push / release / deployment / member are surfaced via live-read
+        // endpoints, so we just acknowledge them.
         return res.json({ ok: true, ignored: event });
     }
   }),

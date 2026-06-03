@@ -1,8 +1,21 @@
-import { Department, GithubAccount, GithubIssueLink, Issue, type WorkStatus } from "../../models";
+import { Op } from "sequelize";
+import { Comment, Department, GithubAccount, GithubIssueLink, Issue, type WorkStatus } from "../../models";
 import { parseRepoInput } from "../../lib/github";
 import { getIssue, listTeams } from "../../lib/github.features";
 import { issuesService } from "../workitems/workitems.service";
 import { logActivity } from "../shared/events";
+
+// Match a connected account by GitHub login, case-insensitively.
+async function accountByLogin(login: string) {
+  return GithubAccount.findOne({ where: { login: { [Op.iLike]: login } } });
+}
+
+const deptMixins = (d: Department) =>
+  d as unknown as {
+    hasMember(id: string): Promise<boolean>;
+    addMember(id: string): Promise<void>;
+    removeMember(id: string): Promise<void>;
+  };
 
 function slugify(s: string): string {
   return s
@@ -54,9 +67,8 @@ export const githubSyncService = {
           unmatched.add(login);
           continue;
         }
-        const has = await (dept as unknown as { hasMember(id: string): Promise<boolean> }).hasMember(userId);
-        if (!has) {
-          await (dept as unknown as { addMember(id: string): Promise<void> }).addMember(userId);
+        if (!(await deptMixins(dept).hasMember(userId))) {
+          await deptMixins(dept).addMember(userId);
           added += 1;
           membersAdded += 1;
         }
@@ -120,6 +132,96 @@ export const githubSyncService = {
       await issue.update(patch);
       await logActivity({ itemId: issue.id, itemType: "issue", actorId: issue.reporterId ?? issue.id, kind: "status_changed", data: { source: "github" } });
     }
+    return 1;
+  },
+
+  // GitHub → app: a comment on a mirrored GitHub issue becomes an app comment.
+  async handleIssueCommentWebhook(payload: {
+    action?: string;
+    issue?: { html_url?: string };
+    comment?: { body?: string; user?: { login?: string } };
+  }): Promise<number> {
+    if (payload.action !== "created") return 0;
+    const url = payload.issue?.html_url;
+    const body = payload.comment?.body;
+    if (!url || !body) return 0;
+    const link = await GithubIssueLink.findOne({ where: { url } });
+    if (!link) return 0;
+
+    const login = payload.comment?.user?.login;
+    const account = login ? await accountByLogin(login) : null;
+    const authorId = account?.userId ?? null;
+    const text = authorId ? body : `**@${login ?? "github"}** (via GitHub):\n\n${body}`;
+
+    // Dedupe redelivered webhooks by identical body on the same item.
+    const existing = await Comment.findOne({ where: { itemId: link.itemId, itemType: "issue", body: text } });
+    if (existing) return 0;
+    await Comment.create({ itemId: link.itemId, itemType: "issue", authorId, body: text });
+    return 1;
+  },
+
+  // ---- Live team / membership sync (webhooks) ------------------------------
+  // `membership` (scope=team): add/remove a member to/from the mapped department.
+  async handleMembershipWebhook(payload: {
+    action?: string;
+    scope?: string;
+    member?: { login?: string };
+    team?: { slug?: string; name?: string; description?: string | null };
+  }): Promise<number> {
+    if (payload.scope !== "team" || !payload.team || !payload.member?.login) return 0;
+    const slug = slugify(payload.team.slug || payload.team.name || "");
+    if (!slug) return 0;
+
+    let dept = await Department.findOne({ where: { slug } });
+    if (payload.action === "added" && !dept) {
+      dept = await Department.create({
+        slug,
+        name: payload.team.name ?? slug,
+        description: payload.team.description ?? "",
+      });
+    }
+    if (!dept) return 0;
+
+    const account = await accountByLogin(payload.member.login);
+    if (!account) return 0; // member hasn't connected their GitHub account yet
+
+    if (payload.action === "added") {
+      if (!(await deptMixins(dept).hasMember(account.userId))) await deptMixins(dept).addMember(account.userId);
+    } else if (payload.action === "removed") {
+      await deptMixins(dept).removeMember(account.userId);
+    }
+    return 1;
+  },
+
+  // `team`: created/edited → upsert the matching department (deleted is a no-op).
+  async handleTeamWebhook(payload: {
+    action?: string;
+    team?: { slug?: string; name?: string; description?: string | null };
+  }): Promise<number> {
+    const team = payload.team;
+    if (!team) return 0;
+    const slug = slugify(team.slug || team.name || "");
+    if (!slug) return 0;
+    const dept = await Department.findOne({ where: { slug } });
+    if (payload.action === "created" || payload.action === "edited") {
+      if (dept) await dept.update({ name: team.name ?? dept.name, description: team.description ?? dept.description });
+      else await Department.create({ slug, name: team.name ?? slug, description: team.description ?? "" });
+      return 1;
+    }
+    return 0; // deleted — keep the department and its data
+  },
+
+  // `organization`: member_added/removed → keep each account's org-member flag fresh.
+  async handleOrgWebhook(payload: {
+    action?: string;
+    membership?: { user?: { login?: string } };
+  }): Promise<number> {
+    const login = payload.membership?.user?.login;
+    if (!login) return 0;
+    const account = await accountByLogin(login);
+    if (!account) return 0;
+    account.orgMember = payload.action === "member_added";
+    await account.save();
     return 1;
   },
 };
