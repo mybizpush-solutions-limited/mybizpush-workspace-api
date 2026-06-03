@@ -156,6 +156,23 @@ export const emails = {
       text: `Your MyBizPush password-change code is ${code} (expires in 10 minutes).`,
     }),
 
+  secondaryEmailOtp: (to: string, code: string) =>
+    sendEmail({
+      to,
+      subject: `${code} is your MyBizPush email-verification code`,
+      html: renderEmail({
+        preheader: `Your email-verification code is ${code}`,
+        heading: "Confirm your secondary email",
+        bodyHtml:
+          p("Use this code to link this address to your MyBizPush Dev Space account:") +
+          `<div style="text-align:center;margin:20px 0;">
+             <span style="display:inline-block;font-size:30px;font-weight:700;letter-spacing:9px;color:${BRAND.purple};background:#f7eef7;border:1px solid #efddef;border-radius:12px;padding:14px 22px;">${code}</span>
+           </div>` +
+          p(`<span style="color:${BRAND.muted};">This code expires in 10 minutes. If you didn't request it, you can safely ignore this email.</span>`),
+      }),
+      text: `Your MyBizPush email-verification code is ${code} (expires in 10 minutes).`,
+    }),
+
   passwordReset: (to: string, resetLink: string) =>
     sendEmail({
       to,

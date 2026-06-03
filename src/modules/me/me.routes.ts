@@ -8,6 +8,7 @@ import { ROLES } from "../../models";
 import { meService } from "./me.service";
 import { profileService } from "./profile.service";
 import { departmentsService } from "../departments/departments.service";
+import { authService } from "../auth/auth.service";
 
 // "My work" aggregations backing the dashboard and the My Queue view, plus the
 // caller's own self-service profile / membership / onboarding actions.
@@ -63,6 +64,36 @@ meRouter.post(
         mimetype: req.file.mimetype,
       }),
     });
+  }),
+);
+
+// ---- Secondary (second @domain) email linking -----------------------------
+const secondaryEmailSchema = z.object({ email: z.string().trim().email() });
+const secondaryVerifySchema = z.object({ otp: z.string().trim().length(6) });
+
+// Step 1: email a verification code to the address being linked.
+meRouter.post(
+  "/secondary-email/request",
+  validateBody(secondaryEmailSchema),
+  asyncHandler(async (req, res) => {
+    await authService.requestSecondaryEmailOtp(req.auth!.sub, req.body.email);
+    res.json({ ok: true });
+  }),
+);
+
+// Step 2: verify the code and attach the address.
+meRouter.post(
+  "/secondary-email/verify",
+  validateBody(secondaryVerifySchema),
+  asyncHandler(async (req, res) => {
+    res.json({ user: await authService.verifySecondaryEmail(req.auth!.sub, req.body.otp) });
+  }),
+);
+
+meRouter.delete(
+  "/secondary-email",
+  asyncHandler(async (req, res) => {
+    res.json({ user: await authService.removeSecondaryEmail(req.auth!.sub) });
   }),
 );
 

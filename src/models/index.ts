@@ -38,6 +38,9 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   declare id: CreationOptional<string>;
   declare name: string;
   declare email: string;
+  // Optional second @domain address (e.g. an executive's role email). Either
+  // email can be used to sign in; both are shown on the profile.
+  declare secondaryEmail: CreationOptional<string | null>;
   declare passwordHash: string;
   declare avatarColor: CreationOptional<string>;
   declare avatarUrl: CreationOptional<string | null>;
@@ -52,6 +55,7 @@ User.init(
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     name: { type: DataTypes.STRING, allowNull: false },
     email: { type: DataTypes.STRING, allowNull: false, unique: true },
+    secondaryEmail: { type: DataTypes.STRING, allowNull: true, unique: true },
     passwordHash: { type: DataTypes.STRING, allowNull: false },
     avatarColor: { type: DataTypes.STRING, allowNull: false, defaultValue: "#960095" },
     avatarUrl: { type: DataTypes.STRING, allowNull: true },

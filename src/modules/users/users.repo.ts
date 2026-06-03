@@ -1,3 +1,4 @@
+import { Op } from "sequelize";
 import { Department, NotificationPreference, Project, User } from "../../models";
 
 // Public shape returned to clients — mirrors ui/src/types/index.ts `User`.
@@ -5,6 +6,7 @@ export interface PublicUser {
   id: string;
   name: string;
   email: string;
+  secondaryEmail: string | null;
   avatarColor: string;
   avatarUrl: string | null;
   roles: string[];
@@ -23,6 +25,7 @@ export function toPublicUser(user: User): PublicUser {
     id: user.id,
     name: user.name,
     email: user.email,
+    secondaryEmail: user.secondaryEmail ?? null,
     avatarColor: user.avatarColor,
     avatarUrl: user.avatarUrl ?? null,
     roles: user.roles,
@@ -43,6 +46,19 @@ const withMemberships = {
 export const usersRepo = {
   rawByEmail: (email: string) =>
     User.findOne({ where: { email: email.toLowerCase() } }),
+
+  // Sign-in / reset lookups match either the primary or the secondary email.
+  rawByEmailOrSecondary: (email: string) => {
+    const e = email.toLowerCase();
+    return User.findOne({ where: { [Op.or]: [{ email: e }, { secondaryEmail: e }] } });
+  },
+
+  // Is this email already taken (as a primary or secondary) by anyone?
+  emailTaken: async (email: string, exceptUserId?: string): Promise<boolean> => {
+    const e = email.toLowerCase();
+    const row = await User.findOne({ where: { [Op.or]: [{ email: e }, { secondaryEmail: e }] } });
+    return Boolean(row && row.id !== exceptUserId);
+  },
 
   publicById: async (id: string): Promise<PublicUser | undefined> => {
     const user = await User.findByPk(id, withMemberships);

@@ -26,6 +26,9 @@ const REG_PREFIX = "reg:";
 const REG_TTL_SECONDS = 10 * 60;
 const OTP_MAX_ATTEMPTS = 5;
 
+const SECEMAIL_PREFIX = "secemail:";
+const SECEMAIL_TTL_SECONDS = 10 * 60;
+
 interface PendingRegistration {
   name: string;
   passwordHash: string;
@@ -55,8 +58,9 @@ export const authService = {
   // Step 1: validate, stash a pending registration in Redis, and email a 6-digit OTP.
   async startRegistration(input: RegisterInput): Promise<void> {
     assertAllowedDomain(input.email);
-    const existing = await usersRepo.rawByEmail(input.email);
-    if (existing) throw conflict("An account with this email already exists");
+    // Reject if this email is already in use as anyone's primary OR secondary.
+    if (await usersRepo.emailTaken(input.email))
+      throw conflict("An account with this email already exists");
 
     const passwordHash = await hashPassword(input.password);
     const pending: PendingRegistration = { name: input.name, passwordHash, otp: generateOtp(), attempts: 0 };
@@ -96,7 +100,7 @@ export const authService = {
     }
 
     // Guard against a race where the account was created in the meantime.
-    const existing = await usersRepo.rawByEmail(email);
+    const existing = await usersRepo.emailTaken(email);
     if (existing) {
       await redis.del(key);
       throw conflict("An account with this email already exists");
@@ -113,7 +117,8 @@ export const authService = {
 
   async login(input: LoginInput): Promise<{ user: PublicUser; accessToken: string; refreshToken: string }> {
     assertAllowedDomain(input.email);
-    const user = await usersRepo.rawByEmail(input.email);
+    // Either the primary or the secondary email may be used to sign in.
+    const user = await usersRepo.rawByEmailOrSecondary(input.email);
     if (!user) throw unauthorized("Invalid email or password");
 
     const ok = await verifyPassword(input.password, user.passwordHash);
@@ -154,12 +159,13 @@ export const authService = {
   // Issue a reset token + email. Always resolves (never reveals whether the
   // email exists) to avoid account enumeration.
   async requestPasswordReset(email: string): Promise<void> {
-    const user = await usersRepo.rawByEmail(email);
+    const user = await usersRepo.rawByEmailOrSecondary(email);
     if (!user) return;
     const token = randomUUID();
     await redis.set(`${RESET_PREFIX}${token}`, user.id, "EX", RESET_TTL_SECONDS);
     const link = `${env.APP_URL}/reset-password?token=${token}`;
-    await emails.passwordReset(user.email, link).catch(() => undefined);
+    // Send to whichever address they entered, falling back to the primary.
+    await emails.passwordReset(email.toLowerCase(), link).catch(() => undefined);
   },
 
   // Logged-in user changes their own password: email a 6-digit code, then verify
@@ -180,6 +186,51 @@ export const authService = {
     user.passwordHash = await hashPassword(password);
     await user.save();
     await redis.del(`${PWCHANGE_PREFIX}${userId}`);
+  },
+
+  // --- Secondary email linking (optional second @domain address) ---------
+  // Email a 6-digit code to the NEW address to prove the user controls it.
+  async requestSecondaryEmailOtp(userId: string, newEmail: string): Promise<void> {
+    assertAllowedDomain(newEmail);
+    const email = newEmail.toLowerCase();
+    const user = await User.findByPk(userId);
+    if (!user) throw badRequest("User not found");
+    if (user.email.toLowerCase() === email)
+      throw badRequest("That's already your primary email");
+    if (await usersRepo.emailTaken(email, userId))
+      throw conflict("That email is already in use by another account");
+
+    const otp = generateOtp();
+    await redis.set(`${SECEMAIL_PREFIX}${userId}`, JSON.stringify({ email, otp }), "EX", SECEMAIL_TTL_SECONDS);
+    await emails.secondaryEmailOtp(email, otp).catch(() => undefined);
+  },
+
+  // Verify the code and attach the address as the user's secondary email.
+  async verifySecondaryEmail(userId: string, otp: string): Promise<PublicUser> {
+    const key = `${SECEMAIL_PREFIX}${userId}`;
+    const raw = await redis.get(key);
+    if (!raw) throw badRequest("Your code has expired — please try again");
+    const pending = JSON.parse(raw) as { email: string; otp: string };
+    if (pending.otp !== otp.trim()) throw badRequest("That code isn't right");
+
+    // Re-check uniqueness in case it was claimed since the code was issued.
+    if (await usersRepo.emailTaken(pending.email, userId))
+      throw conflict("That email is already in use by another account");
+
+    const user = await User.findByPk(userId);
+    if (!user) throw badRequest("User not found");
+    user.secondaryEmail = pending.email;
+    await user.save();
+    await redis.del(key);
+    return (await usersRepo.publicById(userId))!;
+  },
+
+  async removeSecondaryEmail(userId: string): Promise<PublicUser> {
+    const user = await User.findByPk(userId);
+    if (!user) throw badRequest("User not found");
+    user.secondaryEmail = null;
+    await user.save();
+    return (await usersRepo.publicById(userId))!;
   },
 
   async resetPassword(token: string, password: string): Promise<void> {
