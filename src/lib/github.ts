@@ -1,4 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
 import { AppError } from "./errors";
@@ -40,15 +42,57 @@ export function isAppConfigured(): boolean {
   return Boolean(env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY);
 }
 
-// Accept a PEM with literal "\n" escapes (single-line .env) or a base64 blob.
+// Resolve the App private key from GITHUB_APP_PRIVATE_KEY, tolerating every way
+// it tends to get pasted into a .env: a path to the .pem file, a proper PEM,
+// literal "\n" escapes, a base64-encoded PEM, a PEM whose newlines/armor were
+// stripped, or just the bare base64 key body.
 function appPrivateKey(): string {
-  const raw = env.GITHUB_APP_PRIVATE_KEY;
-  if (raw.includes("BEGIN")) return raw.replace(/\\n/g, "\n");
-  try {
-    return Buffer.from(raw, "base64").toString("utf8");
-  } catch {
-    return raw;
+  let raw = env.GITHUB_APP_PRIVATE_KEY.trim();
+
+  // Surrounding quotes (some shells/editors add them).
+  if (raw.length > 1 && /^(["']).*\1$/s.test(raw)) raw = raw.slice(1, -1);
+
+  // 1) A filesystem path to the .pem (most reliable for local dev).
+  if (/^(~|\.{0,2}\/)/.test(raw) || raw.toLowerCase().endsWith(".pem")) {
+    try {
+      const file = readFileSync(raw.startsWith("~") ? raw.replace(/^~/, homedir()) : raw, "utf8");
+      if (file.includes("BEGIN")) return file;
+    } catch {
+      /* not a readable path — fall through to the string forms */
+    }
   }
+
+  // 2) Literal "\n" escapes → real newlines.
+  if (raw.includes("\\n")) raw = raw.replace(/\\n/g, "\n");
+
+  // 3) Already a well-formed PEM.
+  if (raw.includes("BEGIN") && raw.includes("\n")) return raw;
+
+  // 4) base64 of an entire PEM file.
+  if (!raw.includes("BEGIN")) {
+    try {
+      const decoded = Buffer.from(raw, "base64").toString("utf8");
+      if (decoded.includes("BEGIN")) return decoded;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // 5) PEM armor present but newlines stripped → re-wrap the body at 64 cols.
+  const marked = raw.match(/-----BEGIN ([A-Z0-9 ]+?)-----([\s\S]*?)-----END \1-----/);
+  if (marked) {
+    const label = (marked[1] ?? "").trim();
+    const body = (marked[2] ?? "").replace(/\s+/g, "").match(/.{1,64}/g)?.join("\n") ?? "";
+    return `-----BEGIN ${label}-----\n${body}\n-----END ${label}-----\n`;
+  }
+
+  // 6) Bare base64 key body with no armor (PKCS#1 RSA) → add the armor.
+  if (/^[A-Za-z0-9+/=\s]+$/.test(raw)) {
+    const body = raw.replace(/\s+/g, "").match(/.{1,64}/g)?.join("\n") ?? "";
+    return `-----BEGIN RSA PRIVATE KEY-----\n${body}\n-----END RSA PRIVATE KEY-----\n`;
+  }
+
+  return raw;
 }
 
 // Sign the App JWT (max 10 min; we use ~9 with a 60s backdated iat for clock skew).
