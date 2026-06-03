@@ -31,7 +31,7 @@ departmentsRouter.use(requireAuth);
 departmentsRouter.get(
   "/",
   asyncHandler(async (req, res) => {
-    res.json({ departments: await departmentsService.list(viewerOf(req)) });
+    res.json({ departments: await departmentsService.list() });
   }),
 );
 
@@ -47,7 +47,7 @@ departmentsRouter.get(
 departmentsRouter.get(
   "/:slug",
   asyncHandler(async (req, res) => {
-    res.json({ department: await departmentsService.bySlug(req.params.slug!, viewerOf(req)) });
+    res.json({ department: await departmentsService.bySlug(req.params.slug!) });
   }),
 );
 

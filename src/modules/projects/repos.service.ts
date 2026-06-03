@@ -96,10 +96,14 @@ export const projectReposService = {
         (await listCommits(r.owner, r.repo, { perPage: 10 })).map((c) => ({ ...c, repoFullName: r.fullName })),
       ),
     );
+    // Group by repo (alphabetical), newest commit first within each repo.
     return lists
       .flat()
-      .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""))
-      .slice(0, 30);
+      .sort(
+        (a, b) =>
+          a.repoFullName.localeCompare(b.repoFullName) || (b.date ?? "").localeCompare(a.date ?? ""),
+      )
+      .slice(0, 50);
   },
 
   // Recent deployments across all linked repos (live).

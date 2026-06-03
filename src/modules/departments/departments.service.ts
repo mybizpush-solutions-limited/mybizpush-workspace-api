@@ -35,10 +35,6 @@ export interface Viewer {
   accessLevel: AccessLevel;
 }
 
-function canSee(dept: PublicDepartment, viewer: Viewer): boolean {
-  return viewer.accessLevel === "executive_admin" || dept.memberIds.includes(viewer.id);
-}
-
 function serialize(dept: Department): PublicDepartment {
   const members = (dept.get("members") as User[] | undefined) ?? [];
   return {
@@ -56,10 +52,12 @@ const withMembers = {
 };
 
 export const departmentsService = {
-  // Executive admins see every department; everyone else only their own.
-  async list(viewer: Viewer): Promise<PublicDepartment[]> {
+  // Every department is visible to everyone (the directory). Access to a
+  // department's *contents* is enforced per-page in the UI; non-members get a
+  // limited view with a "request to join" action.
+  async list(): Promise<PublicDepartment[]> {
     const rows = await Department.findAll({ ...withMembers, order: [["name", "ASC"]] });
-    return rows.map(serialize).filter((d) => canSee(d, viewer));
+    return rows.map(serialize);
   },
 
   // A name-only directory of every department — used so anyone can pick a
@@ -70,14 +68,10 @@ export const departmentsService = {
     return rows.map((d) => ({ id: d.id, slug: d.slug, name: d.name, description: d.description, headId: d.headId ?? null }));
   },
 
-  async bySlug(slug: string, viewer?: Viewer): Promise<PublicDepartment> {
+  async bySlug(slug: string): Promise<PublicDepartment> {
     const dept = await Department.findOne({ where: { slug }, ...withMembers });
     if (!dept) throw notFound("Department not found");
-    const pub = serialize(dept);
-    if (viewer && !canSee(pub, viewer)) {
-      throw forbidden("You don't have access to this department");
-    }
-    return pub;
+    return serialize(dept);
   },
 
   async create(input: { name: string; description?: string; headId?: string | null }): Promise<PublicDepartment> {
@@ -177,6 +171,6 @@ export const departmentsService = {
       { status: "approved", decidedBy: viewer.id, decidedAt: new Date() },
       { where: { departmentId, userId, status: "pending" } },
     );
-    return this.bySlug(dept.slug, viewer);
+    return this.bySlug(dept.slug);
   },
 };
