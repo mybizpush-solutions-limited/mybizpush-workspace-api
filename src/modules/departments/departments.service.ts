@@ -1,5 +1,5 @@
-import { Department, User } from "../../models";
-import { notFound } from "../../lib/errors";
+import { Department, User, type AccessLevel } from "../../models";
+import { notFound, forbidden } from "../../lib/errors";
 
 export interface PublicDepartment {
   id: string;
@@ -8,6 +8,17 @@ export interface PublicDepartment {
   description: string;
   headId: string | null;
   memberIds: string[];
+}
+
+// Who's asking — drives department visibility. Only executive admins may see
+// departments they don't belong to; everyone else is scoped to their own.
+export interface Viewer {
+  id: string;
+  accessLevel: AccessLevel;
+}
+
+function canSee(dept: PublicDepartment, viewer: Viewer): boolean {
+  return viewer.accessLevel === "executive_admin" || dept.memberIds.includes(viewer.id);
 }
 
 function serialize(dept: Department): PublicDepartment {
@@ -27,15 +38,20 @@ const withMembers = {
 };
 
 export const departmentsService = {
-  async list(): Promise<PublicDepartment[]> {
+  // Executive admins see every department; everyone else only their own.
+  async list(viewer: Viewer): Promise<PublicDepartment[]> {
     const rows = await Department.findAll({ ...withMembers, order: [["name", "ASC"]] });
-    return rows.map(serialize);
+    return rows.map(serialize).filter((d) => canSee(d, viewer));
   },
 
-  async bySlug(slug: string): Promise<PublicDepartment> {
+  async bySlug(slug: string, viewer?: Viewer): Promise<PublicDepartment> {
     const dept = await Department.findOne({ where: { slug }, ...withMembers });
     if (!dept) throw notFound("Department not found");
-    return serialize(dept);
+    const pub = serialize(dept);
+    if (viewer && !canSee(pub, viewer)) {
+      throw forbidden("You don't have access to this department");
+    }
+    return pub;
   },
 
   async create(input: { name: string; description?: string; headId?: string | null }): Promise<PublicDepartment> {
