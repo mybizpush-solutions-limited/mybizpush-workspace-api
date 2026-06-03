@@ -5,6 +5,7 @@ import { requireAuth } from "../../middleware/auth";
 import { rateLimit } from "../../middleware/rateLimit";
 import { authController } from "./auth.controller";
 import {
+  changePasswordSchema,
   forgotPasswordSchema,
   loginSchema,
   registerSchema,
@@ -41,4 +42,18 @@ authRouter.post(
   resetLimiter,
   validateBody(resetPasswordSchema),
   asyncHandler(authController.resetPassword),
+);
+
+// Logged-in password change via emailed OTP.
+authRouter.post(
+  "/change-password/request",
+  requireAuth,
+  resetLimiter,
+  asyncHandler(authController.requestPasswordChange),
+);
+authRouter.post(
+  "/change-password",
+  requireAuth,
+  validateBody(changePasswordSchema),
+  asyncHandler(authController.changePassword),
 );

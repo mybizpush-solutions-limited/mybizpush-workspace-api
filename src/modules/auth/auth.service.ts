@@ -19,6 +19,9 @@ import type { LoginInput, RegisterInput } from "./auth.schemas";
 const RESET_PREFIX = "pwreset:";
 const RESET_TTL_SECONDS = 30 * 60;
 
+const PWCHANGE_PREFIX = "pwchange:";
+const PWCHANGE_TTL_SECONDS = 10 * 60;
+
 const REG_PREFIX = "reg:";
 const REG_TTL_SECONDS = 10 * 60;
 const OTP_MAX_ATTEMPTS = 5;
@@ -157,6 +160,26 @@ export const authService = {
     await redis.set(`${RESET_PREFIX}${token}`, user.id, "EX", RESET_TTL_SECONDS);
     const link = `${env.APP_URL}/reset-password?token=${token}`;
     await emails.passwordReset(user.email, link).catch(() => undefined);
+  },
+
+  // Logged-in user changes their own password: email a 6-digit code, then verify
+  // it + set the new password.
+  async requestPasswordChangeOtp(userId: string): Promise<void> {
+    const user = await User.findByPk(userId);
+    if (!user) return;
+    const otp = generateOtp();
+    await redis.set(`${PWCHANGE_PREFIX}${userId}`, otp, "EX", PWCHANGE_TTL_SECONDS);
+    await emails.passwordChangeOtp(user.email, otp).catch(() => undefined);
+  },
+
+  async changePasswordWithOtp(userId: string, otp: string, password: string): Promise<void> {
+    const stored = await redis.get(`${PWCHANGE_PREFIX}${userId}`);
+    if (!stored || stored !== otp.trim()) throw badRequest("That code is invalid or has expired");
+    const user = await User.findByPk(userId);
+    if (!user) throw badRequest("User not found");
+    user.passwordHash = await hashPassword(password);
+    await user.save();
+    await redis.del(`${PWCHANGE_PREFIX}${userId}`);
   },
 
   async resetPassword(token: string, password: string): Promise<void> {

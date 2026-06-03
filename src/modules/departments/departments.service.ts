@@ -11,6 +11,7 @@ import {
 import { badRequest, notFound, forbidden } from "../../lib/errors";
 import { env } from "../../config/env";
 import { uploadAvatarImage, type UploadFile } from "../../lib/avatar";
+import { notifyRoleAssigned } from "../shared/events";
 
 // A user can manage a department if they're its head or an executive admin.
 function canManage(dept: Department, viewer: Viewer): boolean {
@@ -106,13 +107,17 @@ export const departmentsService = {
   ): Promise<PublicDepartment> {
     const dept = await Department.findByPk(id);
     if (!dept) throw notFound("Department not found");
+    const prevHead = dept.headId;
     await dept.update({
       ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
       ...(patch.description !== undefined ? { description: patch.description.trim() } : {}),
       ...(patch.headId !== undefined ? { headId: patch.headId } : {}),
     });
-    // Keep a newly-assigned head in the member list.
+    // Keep a newly-assigned head in the member list + email them.
     if (patch.headId) await (dept as any).addMember(patch.headId);
+    if (patch.headId && patch.headId !== prevHead) {
+      void notifyRoleAssigned(patch.headId, "Department Head", dept.name);
+    }
     return this.bySlug(dept.slug);
   },
 

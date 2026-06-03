@@ -73,4 +73,15 @@ export const authController = {
     await authService.resetPassword(req.body.token, req.body.password);
     res.json({ ok: true });
   },
+
+  // Logged-in self-service password change via an emailed OTP.
+  async requestPasswordChange(req: Request, res: Response) {
+    await authService.requestPasswordChangeOtp(req.auth!.sub);
+    res.json({ ok: true });
+  },
+
+  async changePassword(req: Request, res: Response) {
+    await authService.changePasswordWithOtp(req.auth!.sub, req.body.otp, req.body.password);
+    res.json({ ok: true });
+  },
 };

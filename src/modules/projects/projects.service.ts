@@ -16,6 +16,7 @@ import { notFound } from "../../lib/errors";
 import { env } from "../../config/env";
 import { uploadAvatarImage, type UploadFile } from "../../lib/avatar";
 import { serializeProject } from "../shared/serializers";
+import { notifyRoleAssigned } from "../shared/events";
 
 // People on a project are derived from its involved departments' members, so we
 // load departments → their members.
@@ -75,12 +76,17 @@ export const projectsService = {
   async update(id: string, patch: { name?: string; description?: string; managerId?: string; progress?: number }) {
     const project = await Project.findByPk(id);
     if (!project) throw notFound("Project not found");
+    const prevManager = project.managerId;
     await project.update({
       ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
       ...(patch.description !== undefined ? { description: patch.description.trim() } : {}),
       ...(patch.managerId !== undefined ? { managerId: patch.managerId } : {}),
       ...(patch.progress !== undefined ? { progress: patch.progress } : {}),
     });
+    // Email the new project manager when promoted.
+    if (patch.managerId && patch.managerId !== prevManager) {
+      void notifyRoleAssigned(patch.managerId, "Project Manager", project.name);
+    }
     return reload(id);
   },
 

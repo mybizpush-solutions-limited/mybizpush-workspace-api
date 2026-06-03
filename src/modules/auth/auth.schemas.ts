@@ -29,5 +29,10 @@ export const resetPasswordSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters").max(200),
 });
 
+export const changePasswordSchema = z.object({
+  otp: z.string().trim().length(6, "Enter the 6-digit code"),
+  password: z.string().min(8, "Password must be at least 8 characters").max(200),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;

@@ -139,6 +139,23 @@ export const emails = {
       text: `Your MyBizPush Dev Space verification code is ${code} (expires in 10 minutes).`,
     }),
 
+  passwordChangeOtp: (to: string, code: string) =>
+    sendEmail({
+      to,
+      subject: `${code} is your MyBizPush password-change code`,
+      html: renderEmail({
+        preheader: `Your password-change code is ${code}`,
+        heading: "Confirm your password change",
+        bodyHtml:
+          p("Use this code to set a new password on your account:") +
+          `<div style="text-align:center;margin:20px 0;">
+             <span style="display:inline-block;font-size:30px;font-weight:700;letter-spacing:9px;color:${BRAND.purple};background:#f7eef7;border:1px solid #efddef;border-radius:12px;padding:14px 22px;">${code}</span>
+           </div>` +
+          p(`<span style="color:${BRAND.muted};">This code expires in 10 minutes. If you didn't request it, ignore this email and consider changing your password.</span>`),
+      }),
+      text: `Your MyBizPush password-change code is ${code} (expires in 10 minutes).`,
+    }),
+
   passwordReset: (to: string, resetLink: string) =>
     sendEmail({
       to,
@@ -152,6 +169,36 @@ export const emails = {
         cta: { label: "Choose a new password", url: resetLink },
       }),
       text: `Reset your MyBizPush Dev Space password: ${resetLink} (expires in 30 minutes)`,
+    }),
+
+  // Generic real-time activity alert (assigned, status change, mention, comment…).
+  activityAlert: (to: string, name: string, opts: { message: string; url: string }) =>
+    sendEmail({
+      to,
+      subject: opts.message.length > 70 ? `${opts.message.slice(0, 67)}…` : opts.message,
+      html: renderEmail({
+        preheader: opts.message,
+        heading: "You have an update",
+        bodyHtml: p(`Hi ${name},`) + p(opts.message),
+        cta: { label: "Open MyBizPush", url: opts.url },
+      }),
+      text: `${opts.message}\n\n${opts.url}`,
+    }),
+
+  // Sent when someone is made a project manager / department head, etc.
+  roleAssigned: (to: string, name: string, opts: { role: string; contextName: string; url: string }) =>
+    sendEmail({
+      to,
+      subject: `You're now ${opts.role} of ${opts.contextName}`,
+      html: renderEmail({
+        preheader: `You're now ${opts.role} of ${opts.contextName}.`,
+        heading: `You're now ${opts.role}`,
+        bodyHtml:
+          p(`Hi ${name},`) +
+          p(`You've been assigned as <strong>${opts.role}</strong> of <strong>${opts.contextName}</strong>.`),
+        cta: { label: "Open MyBizPush", url: APP },
+      }),
+      text: `You're now ${opts.role} of ${opts.contextName}. ${APP}`,
     }),
 
   feedbackRequested: (to: string, itemTitle: string, fromName: string) =>
