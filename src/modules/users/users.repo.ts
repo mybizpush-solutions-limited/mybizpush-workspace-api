@@ -1,5 +1,12 @@
 import { Op } from "sequelize";
-import { Department, NotificationPreference, Project, User } from "../../models";
+import {
+  Department,
+  GithubAccount,
+  GoogleAccount,
+  NotificationPreference,
+  Project,
+  User,
+} from "../../models";
 
 // Public shape returned to clients — mirrors ui/src/types/index.ts `User`.
 export interface PublicUser {
@@ -14,6 +21,8 @@ export interface PublicUser {
   onboarded: boolean;
   departmentIds: string[];
   projectIds: string[];
+  googleConnected: boolean;
+  githubConnected: boolean;
 }
 
 // Serialize a User model (optionally with its `departments`/`projects`
@@ -33,6 +42,8 @@ export function toPublicUser(user: User): PublicUser {
     onboarded: user.onboarded,
     departmentIds: departments.map((d) => d.id),
     projectIds: projects.map((p) => p.id),
+    googleConnected: Boolean(user.get("googleAccount")),
+    githubConnected: Boolean(user.get("githubAccount")),
   };
 }
 
@@ -40,6 +51,8 @@ const withMemberships = {
   include: [
     { model: Department, as: "departments", attributes: ["id"], through: { attributes: [] } },
     { model: Project, as: "projects", attributes: ["id"], through: { attributes: [] } },
+    { model: GoogleAccount, as: "googleAccount", attributes: ["userId"] },
+    { model: GithubAccount, as: "githubAccount", attributes: ["userId"] },
   ],
 };
 

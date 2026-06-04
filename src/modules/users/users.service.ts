@@ -18,6 +18,9 @@ import {
 } from "../../models";
 import { badRequest, forbidden, notFound } from "../../lib/errors";
 import { revokeAllRefreshTokens } from "../../lib/jwt";
+import { usersRepo, type PublicUser } from "./users.repo";
+
+type AccessLevel = "member" | "admin" | "executive_admin";
 
 // Join tables that carry a user_id — cleared with raw deletes (the through
 // models aren't exported as named classes).
@@ -90,6 +93,22 @@ export const usersService = {
     });
 
     await revokeAllRefreshTokens(targetId);
+  },
+
+  // Exec-only: promote/demote a member's access level (member ↔ admin ↔
+  // executive_admin). This is what actually makes someone an executive — it's
+  // separate from which department they belong to.
+  async setAccessLevel(
+    actingUserId: string,
+    targetId: string,
+    level: AccessLevel,
+  ): Promise<PublicUser> {
+    if (actingUserId === targetId) throw badRequest("You can't change your own access level");
+    const user = await User.findByPk(targetId);
+    if (!user) throw notFound("User not found");
+    user.accessLevel = level;
+    await user.save();
+    return (await usersRepo.publicById(targetId))!;
   },
 
   // Is this email banned from signing up?
