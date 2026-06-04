@@ -95,6 +95,51 @@ async function getAuthorizedClient(userId: string): Promise<OAuth2Client | null>
   return client;
 }
 
+// Whether a central organizer account is configured for meetings.
+export function isMeetOrganizerConfigured(): boolean {
+  return isGoogleConfigured() && Boolean(env.GOOGLE_MEET_ORGANIZER_REFRESH_TOKEN);
+}
+
+// Create the Meet event on the CENTRAL organizer account (e.g. mybizpush@gmail.com)
+// using its configured refresh token, inviting every attendee by email. Returns
+// null if no organizer account is configured.
+export async function createMeetEventAsOrganizer(input: {
+  summary: string;
+  description?: string;
+  attendees: string[];
+  startIso: string;
+  endIso: string;
+}): Promise<{ meetUrl: string; eventId: string } | null> {
+  if (!isMeetOrganizerConfigured()) return null;
+
+  const client = oauthClient();
+  client.setCredentials({ refresh_token: env.GOOGLE_MEET_ORGANIZER_REFRESH_TOKEN });
+
+  const calendar = google.calendar({ version: "v3", auth: client });
+  const res = await calendar.events.insert({
+    calendarId: "primary",
+    conferenceDataVersion: 1,
+    sendUpdates: "all",
+    requestBody: {
+      summary: input.summary,
+      description: input.description,
+      start: { dateTime: input.startIso },
+      end: { dateTime: input.endIso },
+      attendees: input.attendees.map((email) => ({ email })),
+      conferenceData: {
+        createRequest: { requestId: randomUUID(), conferenceSolutionKey: { type: "hangoutsMeet" } },
+      },
+    },
+  });
+
+  const meetUrl =
+    res.data.hangoutLink ??
+    res.data.conferenceData?.entryPoints?.find((e) => e.entryPointType === "video")?.uri ??
+    null;
+  if (!meetUrl || !res.data.id) return null;
+  return { meetUrl, eventId: res.data.id };
+}
+
 // Create a Google Calendar event with a Meet link. Returns null if the user
 // hasn't connected Google (so callers can fall back to a placeholder URL).
 export async function createMeetEvent(

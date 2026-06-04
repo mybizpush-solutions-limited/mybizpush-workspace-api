@@ -20,6 +20,11 @@ meetingsRouter.get("/", asyncHandler(async (_req, res) => {
   res.json({ meetings: await meetingsService.list() });
 }));
 
+// Whether the caller is allowed to schedule (exec, project manager, or HR).
+meetingsRouter.get("/can-schedule", asyncHandler(async (req, res) => {
+  res.json({ canSchedule: await meetingsService.canSchedule(req.auth!.sub) });
+}));
+
 meetingsRouter.post("/", validateBody(createSchema), asyncHandler(async (req, res) => {
   res.status(201).json({ meeting: await meetingsService.create({ ...req.body, organizerId: req.auth!.sub }) });
 }));

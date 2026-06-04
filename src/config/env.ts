@@ -73,6 +73,18 @@ const schema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional().default(""),
   GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
   GOOGLE_REDIRECT_URI: z.string().url().default("http://localhost:4000/api/v1/google/callback"),
+
+  // Central account that OWNS every scheduled meeting (e.g. mybizpush@gmail.com).
+  // A long-lived refresh token for that account (obtained once via the OAuth
+  // consent flow / playground with the calendar.events scope). When set, all
+  // Meet events are created on this account's calendar and attendees are invited
+  // by email. Empty = fall back to a placeholder Meet link (dev only).
+  GOOGLE_MEET_ORGANIZER_REFRESH_TOKEN: z.string().optional().default(""),
+  GOOGLE_MEET_ORGANIZER_EMAIL: z.string().optional().default(""),
+
+  // Slug of the department whose members may schedule meetings (in addition to
+  // executives and project managers).
+  HR_DEPARTMENT_SLUG: z.string().default("hr"),
 });
 
 const parsed = schema.safeParse(process.env);
