@@ -14,6 +14,8 @@ const accessLevelSchema = z.object({
   accessLevel: z.enum(["member", "admin", "chief", "executive_admin"]),
 });
 
+const chiefBadgeSchema = z.object({ value: z.boolean() });
+
 usersRouter.get(
   "/",
   asyncHandler(async (_req, res) => {
@@ -39,6 +41,16 @@ usersRouter.patch(
   asyncHandler(async (req, res) => {
     const user = await usersService.setAccessLevel(req.auth!.sub, req.params.id!, req.body.accessLevel);
     res.json({ user });
+  }),
+);
+
+// Exec-only: grant/remove the golden Chief badge (independent of access level).
+usersRouter.patch(
+  "/:id/chief-badge",
+  requireAccessLevel("executive_admin"),
+  validateBody(chiefBadgeSchema),
+  asyncHandler(async (req, res) => {
+    res.json({ user: await usersService.setChiefBadge(req.params.id!, req.body.value) });
   }),
 );
 

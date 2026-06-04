@@ -52,6 +52,9 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   declare accessLevel: CreationOptional<AccessLevel>;
   declare roles: CreationOptional<string[]>;
   declare onboarded: CreationOptional<boolean>;
+  // Cosmetic golden "Chief" badge — auto for the chief access level, but can be
+  // granted independently to any user by an executive admin.
+  declare chiefBadge: CreationOptional<boolean>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -67,6 +70,7 @@ User.init(
     accessLevel: { type: DataTypes.ENUM(...ACCESS_LEVELS), allowNull: false, defaultValue: "member" },
     roles: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
     onboarded: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    chiefBadge: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },

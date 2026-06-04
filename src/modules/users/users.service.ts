@@ -111,6 +111,16 @@ export const usersService = {
     return (await usersRepo.publicById(targetId))!;
   },
 
+  // Exec-only: grant/remove the cosmetic golden "Chief" badge independently of
+  // access level.
+  async setChiefBadge(targetId: string, value: boolean): Promise<PublicUser> {
+    const user = await User.findByPk(targetId);
+    if (!user) throw notFound("User not found");
+    user.chiefBadge = value;
+    await user.save();
+    return (await usersRepo.publicById(targetId))!;
+  },
+
   // Is this email banned from signing up?
   async isBlacklisted(email: string): Promise<boolean> {
     const row = await BlacklistedEmail.findOne({ where: { email: email.toLowerCase() } });
