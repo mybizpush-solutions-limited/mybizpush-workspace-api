@@ -13,6 +13,7 @@ import {
   Notification,
   NotificationPreference,
   Project,
+  ROLES,
   Task,
   User,
 } from "../../models";
@@ -21,6 +22,8 @@ import { revokeAllRefreshTokens } from "../../lib/jwt";
 import { usersRepo, type PublicUser } from "./users.repo";
 
 type AccessLevel = "member" | "admin" | "chief" | "executive_admin";
+
+const ROLE_SET = new Set<string>(ROLES);
 
 // Join tables that carry a user_id — cleared with raw deletes (the through
 // models aren't exported as named classes).
@@ -107,6 +110,20 @@ export const usersService = {
     const user = await User.findByPk(targetId);
     if (!user) throw notFound("User not found");
     user.accessLevel = level;
+    await user.save();
+    return (await usersRepo.publicById(targetId))!;
+  },
+
+  // Exec-only: set the roles (Frontend, Backend, CEO, CTO, …) for any member.
+  // Mirrors self-service role editing in profile.service, but lets an executive
+  // admin manage someone else's roles. Roles are validated, deduplicated, and
+  // replace the member's existing set wholesale.
+  async setRoles(targetId: string, roles: string[]): Promise<PublicUser> {
+    const user = await User.findByPk(targetId);
+    if (!user) throw notFound("User not found");
+    const invalid = roles.filter((r) => !ROLE_SET.has(r));
+    if (invalid.length) throw badRequest(`Unknown role(s): ${invalid.join(", ")}`);
+    user.roles = [...new Set(roles)];
     await user.save();
     return (await usersRepo.publicById(targetId))!;
   },

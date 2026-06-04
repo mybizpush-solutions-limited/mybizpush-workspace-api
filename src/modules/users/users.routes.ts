@@ -3,6 +3,7 @@ import { z } from "zod";
 import { asyncHandler, notFound } from "../../lib/errors";
 import { requireAuth, requireAccessLevel } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
+import { ROLES } from "../../models";
 import { usersRepo } from "./users.repo";
 import { usersService } from "./users.service";
 
@@ -12,6 +13,10 @@ usersRouter.use(requireAuth);
 
 const accessLevelSchema = z.object({
   accessLevel: z.enum(["member", "admin", "chief", "executive_admin"]),
+});
+
+const rolesSchema = z.object({
+  roles: z.array(z.enum(ROLES)),
 });
 
 const chiefBadgeSchema = z.object({ value: z.boolean() });
@@ -41,6 +46,18 @@ usersRouter.patch(
   asyncHandler(async (req, res) => {
     const user = await usersService.setAccessLevel(req.auth!.sub, req.params.id!, req.body.accessLevel);
     res.json({ user });
+  }),
+);
+
+// Exec-only: set any member's roles (Frontend, Backend, CEO, CTO, …). Members
+// edit their own roles via PATCH /me; this lets an executive admin manage them
+// for anyone.
+usersRouter.patch(
+  "/:id/roles",
+  requireAccessLevel("executive_admin"),
+  validateBody(rolesSchema),
+  asyncHandler(async (req, res) => {
+    res.json({ user: await usersService.setRoles(req.params.id!, req.body.roles) });
   }),
 );
 
