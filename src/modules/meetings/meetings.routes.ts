@@ -16,6 +16,14 @@ const createSchema = z.object({
   endsAt: z.string().datetime(),
 });
 
+const updateSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  description: z.string().trim().max(4000).optional(),
+  attendeeIds: z.array(z.string().uuid()).optional(),
+  startsAt: z.string().datetime().optional(),
+  endsAt: z.string().datetime().optional(),
+});
+
 meetingsRouter.get("/", asyncHandler(async (_req, res) => {
   res.json({ meetings: await meetingsService.list() });
 }));
@@ -27,4 +35,13 @@ meetingsRouter.get("/can-schedule", asyncHandler(async (req, res) => {
 
 meetingsRouter.post("/", validateBody(createSchema), asyncHandler(async (req, res) => {
   res.status(201).json({ meeting: await meetingsService.create({ ...req.body, organizerId: req.auth!.sub }) });
+}));
+
+meetingsRouter.patch("/:id", validateBody(updateSchema), asyncHandler(async (req, res) => {
+  res.json({ meeting: await meetingsService.update(req.auth!.sub, req.params.id!, req.body) });
+}));
+
+meetingsRouter.delete("/:id", asyncHandler(async (req, res) => {
+  await meetingsService.cancel(req.auth!.sub, req.params.id!);
+  res.status(204).end();
 }));

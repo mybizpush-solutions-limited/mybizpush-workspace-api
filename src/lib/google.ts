@@ -110,3 +110,35 @@ export async function createMeetEventAsOrganizer(input: {
   if (!meetUrl || !res.data.id) return null;
   return { meetUrl, eventId: res.data.id };
 }
+
+// Update an existing organizer-owned event (title, time, attendee invites).
+export async function updateMeetEventAsOrganizer(
+  eventId: string,
+  input: { summary: string; description?: string; attendees: string[]; startIso: string; endIso: string },
+): Promise<void> {
+  if (!isMeetOrganizerConfigured()) return;
+  const client = oauthClient();
+  client.setCredentials({ refresh_token: env.GOOGLE_MEET_ORGANIZER_REFRESH_TOKEN });
+  const calendar = google.calendar({ version: "v3", auth: client });
+  await calendar.events.patch({
+    calendarId: "primary",
+    eventId,
+    sendUpdates: "all",
+    requestBody: {
+      summary: input.summary,
+      description: input.description,
+      start: { dateTime: input.startIso },
+      end: { dateTime: input.endIso },
+      attendees: input.attendees.map((email) => ({ email })),
+    },
+  });
+}
+
+// Cancel (delete) an organizer-owned event; attendees are notified.
+export async function deleteMeetEventAsOrganizer(eventId: string): Promise<void> {
+  if (!isMeetOrganizerConfigured()) return;
+  const client = oauthClient();
+  client.setCredentials({ refresh_token: env.GOOGLE_MEET_ORGANIZER_REFRESH_TOKEN });
+  const calendar = google.calendar({ version: "v3", auth: client });
+  await calendar.events.delete({ calendarId: "primary", eventId, sendUpdates: "all" });
+}

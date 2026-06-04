@@ -1,13 +1,37 @@
 import { Op } from "sequelize";
 import { Department, GoogleAccount, Meeting, Project, User } from "../../models";
 import { env } from "../../config/env";
-import { forbidden } from "../../lib/errors";
+import { forbidden, notFound } from "../../lib/errors";
 import { serializeMeeting } from "../shared/serializers";
-import { createMeetEventAsOrganizer } from "../../lib/google";
+import {
+  createMeetEventAsOrganizer,
+  updateMeetEventAsOrganizer,
+  deleteMeetEventAsOrganizer,
+} from "../../lib/google";
 
 const withAttendees = {
   include: [{ model: User, as: "attendees", attributes: ["id"], through: { attributes: [] } }],
 };
+
+// Resolve the invite addresses for a set of attendees — preferring the Gmail
+// they linked via "Connect Google" (the identity they join Meet with), falling
+// back to their company email.
+async function resolveAttendeeEmails(attendeeIds: string[]): Promise<string[]> {
+  const users = await User.findAll({
+    where: { id: { [Op.in]: attendeeIds } },
+    attributes: ["id", "email"],
+    include: [{ model: GoogleAccount, as: "googleAccount", attributes: ["email"] }],
+  });
+  return users.map((u) => (u.get("googleAccount") as GoogleAccount | undefined)?.email || u.email);
+}
+
+// The organizer (scheduler) or any executive may edit/cancel a meeting.
+async function assertCanManage(userId: string, meeting: Meeting): Promise<void> {
+  if (meeting.organizerId === userId) return;
+  const user = await User.findByPk(userId, { attributes: ["accessLevel"] });
+  if (user?.accessLevel === "executive_admin") return;
+  throw forbidden("Only the organizer or an executive can change this meeting");
+}
 
 // Fallback Meet URL when no central organizer account is configured (dev only).
 function mockMeetUrl(): string {
@@ -54,19 +78,7 @@ export const meetingsService = {
 
     const attendeeIds = new Set(input.attendeeIds ?? []);
     attendeeIds.add(input.organizerId);
-
-    // Resolve attendee invite addresses. Prefer the Gmail they linked via
-    // "Connect Google" (that's the identity they actually join Meet with);
-    // fall back to their company email if they haven't linked one.
-    const attendeeUsers = await User.findAll({
-      where: { id: { [Op.in]: [...attendeeIds] } },
-      attributes: ["id", "email"],
-      include: [{ model: GoogleAccount, as: "googleAccount", attributes: ["email"] }],
-    });
-    const emails = attendeeUsers.map((u) => {
-      const linked = (u.get("googleAccount") as GoogleAccount | undefined)?.email;
-      return linked || u.email;
-    });
+    const emails = await resolveAttendeeEmails([...attendeeIds]);
 
     // The event is owned by the central organizer account; everyone (including
     // the scheduler) is invited by email. Falls back to a placeholder Meet link
@@ -92,5 +104,61 @@ export const meetingsService = {
 
     const reloaded = await Meeting.findByPk(meeting.id, withAttendees);
     return serializeMeeting(reloaded!);
+  },
+
+  // Edit a meeting (title/description/time/attendees). Organizer or exec only.
+  // The organizer always stays an attendee. Updates the Google event too.
+  async update(
+    actingUserId: string,
+    meetingId: string,
+    patch: { title?: string; description?: string; attendeeIds?: string[]; startsAt?: string; endsAt?: string },
+  ) {
+    const meeting = await Meeting.findByPk(meetingId, withAttendees);
+    if (!meeting) throw notFound("Meeting not found");
+    await assertCanManage(actingUserId, meeting);
+
+    if (patch.title !== undefined) meeting.title = patch.title.trim();
+    if (patch.description !== undefined) meeting.description = patch.description.trim() || null;
+    if (patch.startsAt) meeting.startsAt = new Date(patch.startsAt);
+    if (patch.endsAt) meeting.endsAt = new Date(patch.endsAt);
+
+    let attendeeIds: string[] | undefined;
+    if (patch.attendeeIds) {
+      const set = new Set(patch.attendeeIds);
+      set.add(meeting.organizerId!); // organizer stays on the invite
+      attendeeIds = [...set];
+      await (meeting as any).setAttendees(attendeeIds);
+    } else {
+      attendeeIds = ((meeting.get("attendees") as User[] | undefined) ?? []).map((u) => u.id);
+    }
+
+    await meeting.save();
+
+    if (meeting.googleEventId) {
+      const emails = await resolveAttendeeEmails(attendeeIds);
+      await updateMeetEventAsOrganizer(meeting.googleEventId, {
+        summary: meeting.title,
+        description: meeting.description ?? undefined,
+        attendees: emails,
+        startIso: meeting.startsAt.toISOString(),
+        endIso: meeting.endsAt.toISOString(),
+      }).catch(() => undefined);
+    }
+
+    const reloaded = await Meeting.findByPk(meeting.id, withAttendees);
+    return serializeMeeting(reloaded!);
+  },
+
+  // Cancel a meeting: delete the Google event (notifying attendees) and the row.
+  async cancel(actingUserId: string, meetingId: string): Promise<void> {
+    const meeting = await Meeting.findByPk(meetingId);
+    if (!meeting) throw notFound("Meeting not found");
+    await assertCanManage(actingUserId, meeting);
+
+    if (meeting.googleEventId) {
+      await deleteMeetEventAsOrganizer(meeting.googleEventId).catch(() => undefined);
+    }
+    await (meeting as any).setAttendees([]);
+    await meeting.destroy();
   },
 };
