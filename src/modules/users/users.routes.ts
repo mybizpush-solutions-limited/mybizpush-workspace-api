@@ -3,7 +3,6 @@ import { z } from "zod";
 import { asyncHandler, notFound } from "../../lib/errors";
 import { requireAuth, requireAccessLevel } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
-import { ROLES } from "../../models";
 import { usersRepo } from "./users.repo";
 import { usersService } from "./users.service";
 
@@ -15,8 +14,10 @@ const accessLevelSchema = z.object({
   accessLevel: z.enum(["member", "admin", "chief", "executive_admin"]),
 });
 
+// Membership in the catalog (built-ins + custom roles) is enforced in the
+// service; here we just bound the shape.
 const rolesSchema = z.object({
-  roles: z.array(z.enum(ROLES)),
+  roles: z.array(z.string().trim().min(1).max(40)),
 });
 
 const chiefBadgeSchema = z.object({ value: z.boolean() });

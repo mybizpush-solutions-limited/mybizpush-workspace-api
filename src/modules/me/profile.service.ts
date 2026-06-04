@@ -1,14 +1,14 @@
-import { Department, GithubAccount, GoogleAccount, Project, ROLES, User } from "../../models";
+import { Department, GithubAccount, GoogleAccount, Project, User } from "../../models";
 import { badRequest, notFound } from "../../lib/errors";
 import { env } from "../../config/env";
 import { uploadBuffer } from "../../lib/cloudinary";
 import { isOAuthConfigured } from "../../lib/github";
 import { isGoogleConfigured } from "../../lib/google";
 import { usersRepo, type PublicUser } from "../users/users.repo";
+import { rolesService } from "../roles/roles.service";
 
 const ALLOWED_AVATAR_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
 const MAX_AVATAR_MB = 8;
-const ROLE_SET = new Set<string>(ROLES);
 
 interface AvatarFile {
   buffer: Buffer;
@@ -25,8 +25,9 @@ async function publicUser(userId: string): Promise<PublicUser> {
 }
 
 export const profileService = {
-  // Patch the caller's own name / roles. Roles are validated against the
-  // canonical list so the picker can't smuggle in arbitrary strings.
+  // Patch the caller's own name / roles. Roles are validated against the shared
+  // catalog (built-ins + exec-added roles) so the picker can't smuggle in
+  // arbitrary strings, and are stored in their canonical spelling.
   async updateProfile(
     userId: string,
     patch: { name?: string; roles?: string[] },
@@ -36,9 +37,7 @@ export const profileService = {
 
     if (patch.name !== undefined) user.name = patch.name;
     if (patch.roles !== undefined) {
-      const invalid = patch.roles.filter((r) => !ROLE_SET.has(r));
-      if (invalid.length) throw badRequest(`Unknown role(s): ${invalid.join(", ")}`);
-      user.roles = [...new Set(patch.roles)];
+      user.roles = await rolesService.normalize(patch.roles);
     }
     await user.save();
     return publicUser(userId);

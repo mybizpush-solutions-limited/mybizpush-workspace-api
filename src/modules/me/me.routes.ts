@@ -4,7 +4,6 @@ import { z } from "zod";
 import { asyncHandler, badRequest } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
-import { ROLES } from "../../models";
 import { meService } from "./me.service";
 import { profileService } from "./profile.service";
 import { departmentsService } from "../departments/departments.service";
@@ -35,7 +34,8 @@ meRouter.get("/reported", asyncHandler(async (req, res) => {
 // ---- Self-service profile + onboarding ------------------------------------
 const profileSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
-  roles: z.array(z.enum(ROLES)).max(ROLES.length).optional(),
+  // Validated against the shared role catalog in profileService.updateProfile.
+  roles: z.array(z.string().trim().min(1).max(40)).max(50).optional(),
 });
 
 const avatarUpload = multer({

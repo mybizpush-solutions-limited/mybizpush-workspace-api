@@ -597,6 +597,30 @@ BlacklistedEmail.init(
   { sequelize, tableName: "blacklisted_emails" },
 );
 
+// ---- CustomRole ------------------------------------------------------------
+// Team roles an executive admin has added beyond the built-in ROLES list. The
+// effective role catalog is ROLES + these, and everyone picks from it.
+export class CustomRole extends Model<
+  InferAttributes<CustomRole>,
+  InferCreationAttributes<CustomRole>
+> {
+  declare id: CreationOptional<string>;
+  declare name: string;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+CustomRole.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    name: { type: DataTypes.STRING, allowNull: false, unique: true },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "custom_roles" },
+);
+
 // ---- Join (through) models -------------------------------------------------
 // Defined explicitly with timestamps:false so they match the migration's
 // timestamp-free join tables (the global define() default adds timestamps).
@@ -671,5 +695,5 @@ Notification.belongsTo(User, { as: "fromUser", foreignKey: "fromUserId" });
 export const models = {
   User, Department, Project, Label, Task, Issue, Comment, Activity,
   PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount, GithubAccount, ProjectRepo,
-  BlacklistedEmail,
+  BlacklistedEmail, CustomRole,
 };

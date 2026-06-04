@@ -16,6 +16,7 @@ import { notificationsRouter } from "./modules/notifications/notifications.route
 import { preferencesRouter } from "./modules/preferences/preferences.routes";
 import { meetingsRouter } from "./modules/meetings/meetings.routes";
 import { labelsRouter } from "./modules/labels/labels.routes";
+import { rolesRouter } from "./modules/roles/roles.routes";
 import { meRouter } from "./modules/me/me.routes";
 import { attachmentsRouter } from "./modules/attachments/attachments.routes";
 import { aiRouter } from "./modules/ai/ai.routes";
@@ -66,6 +67,7 @@ export function createApp() {
   v1.use("/preferences", preferencesRouter);
   v1.use("/meetings", meetingsRouter);
   v1.use("/labels", labelsRouter);
+  v1.use("/roles", rolesRouter);
   v1.use("/attachments", attachmentsRouter);
   v1.use("/ai", aiRouter);
   v1.use("/digests", digestsRouter);
