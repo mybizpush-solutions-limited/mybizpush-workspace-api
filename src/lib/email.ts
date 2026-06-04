@@ -27,12 +27,14 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
     html: input.html,
     text: input.text,
   });
+  const recipients = Array.isArray(input.to) ? input.to.join(", ") : input.to;
   if (error) {
-    const recipients = Array.isArray(input.to) ? input.to.join(", ") : input.to;
     console.error(`[email] Resend rejected → ${recipients} :: ${input.subject} ::`, error);
     throw new Error(`Email send failed: ${error.message ?? "unknown error"}`);
   }
-  return void data;
+  // Log every accepted send with Resend's message id so delivery can be traced
+  // in the Resend dashboard (Logs → search the id).
+  console.info(`[email] sent → ${recipients} :: ${input.subject} :: id=${data?.id ?? "?"}`);
 }
 
 // ---- Branded layout --------------------------------------------------------
