@@ -1,6 +1,6 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { env } from "../../config/env";
-import { badRequest, conflict, unauthorized } from "../../lib/errors";
+import { badRequest, conflict, forbidden, unauthorized } from "../../lib/errors";
 import { hashPassword, verifyPassword } from "../../lib/password";
 import {
   issueRefreshToken,
@@ -13,6 +13,7 @@ import {
 import { emails } from "../../lib/email";
 import { redis } from "../../redis/client";
 import { usersRepo, toPublicUser, type PublicUser } from "../users/users.repo";
+import { usersService } from "../users/users.service";
 import { User } from "../../models";
 import type { LoginInput, RegisterInput } from "./auth.schemas";
 
@@ -58,6 +59,9 @@ export const authService = {
   // Step 1: validate, stash a pending registration in Redis, and email a 6-digit OTP.
   async startRegistration(input: RegisterInput): Promise<void> {
     assertAllowedDomain(input.email);
+    // Reject blacklisted emails (banned by an executive).
+    if (await usersService.isBlacklisted(input.email))
+      throw forbidden("This email address is not permitted to sign up");
     // Reject if this email is already in use as anyone's primary OR secondary.
     if (await usersRepo.emailTaken(input.email))
       throw conflict("An account with this email already exists");

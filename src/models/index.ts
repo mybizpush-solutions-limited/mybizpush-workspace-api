@@ -554,6 +554,29 @@ NotificationPreference.init(
   { sequelize, tableName: "notification_preferences", timestamps: false },
 );
 
+// ---- BlacklistedEmail ------------------------------------------------------
+// Emails banned from ever signing up again (set when an exec blacklists a user).
+export class BlacklistedEmail extends Model<
+  InferAttributes<BlacklistedEmail>,
+  InferCreationAttributes<BlacklistedEmail>
+> {
+  declare id: CreationOptional<string>;
+  declare email: string;
+  declare reason: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+BlacklistedEmail.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    email: { type: DataTypes.STRING, allowNull: false, unique: true },
+    reason: { type: DataTypes.STRING, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "blacklisted_emails" },
+);
+
 // ---- Join (through) models -------------------------------------------------
 // Defined explicitly with timestamps:false so they match the migration's
 // timestamp-free join tables (the global define() default adds timestamps).
@@ -628,4 +651,5 @@ Notification.belongsTo(User, { as: "fromUser", foreignKey: "fromUserId" });
 export const models = {
   User, Department, Project, Label, Task, Issue, Comment, Activity,
   PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount, GithubAccount, ProjectRepo,
+  BlacklistedEmail,
 };
