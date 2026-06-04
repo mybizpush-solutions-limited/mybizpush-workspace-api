@@ -1,7 +1,10 @@
+import { QueryTypes } from "sequelize";
+import { sequelize } from "../../db/sequelize";
 import { CustomRole, ROLES } from "../../models";
 import { badRequest } from "../../lib/errors";
 
 const STANDARD: readonly string[] = ROLES;
+const STANDARD_LOWER = new Set(STANDARD.map((r) => r.toLowerCase()));
 const MAX_ROLE_LEN = 40;
 
 export const rolesService = {
@@ -58,6 +61,63 @@ export const rolesService = {
       throw badRequest(`A role called "${trimmed}" already exists`);
     }
     await CustomRole.create({ name: trimmed, createdBy });
+    return this.list();
+  },
+
+  // Find a custom role by name (case-insensitive). Returns null for built-in
+  // roles (which can't be renamed/removed) and unknown names.
+  async findCustom(name: string): Promise<CustomRole | null> {
+    const key = name.trim().toLowerCase();
+    if (!key || STANDARD_LOWER.has(key)) return null;
+    const all = await CustomRole.findAll();
+    return all.find((c) => c.name.toLowerCase() === key) ?? null;
+  },
+
+  // Exec-only: rename a custom role everywhere — the catalog entry and every
+  // member currently tagged with it — in one transaction. Built-in roles can't
+  // be renamed. Returns the updated catalog.
+  async rename(from: string, to: string): Promise<string[]> {
+    const role = await this.findCustom(from);
+    if (!role) throw badRequest("Only custom roles can be renamed");
+    const target = to.trim();
+    if (!target) throw badRequest("Role name is required");
+    if (target.length > MAX_ROLE_LEN) {
+      throw badRequest(`Role name must be ${MAX_ROLE_LEN} characters or fewer`);
+    }
+    const existing = await this.list();
+    const clashes = existing.some(
+      (r) => r.toLowerCase() === target.toLowerCase() && r.toLowerCase() !== role.name.toLowerCase(),
+    );
+    if (clashes) throw badRequest(`A role called "${target}" already exists`);
+
+    const old = role.name;
+    if (old !== target) {
+      await sequelize.transaction(async (tx) => {
+        role.name = target;
+        await role.save({ transaction: tx });
+        await sequelize.query(
+          `UPDATE users SET roles = array_replace(roles, :old, :new) WHERE :old = ANY(roles)`,
+          { replacements: { old, new: target }, type: QueryTypes.UPDATE, transaction: tx },
+        );
+      });
+    }
+    return this.list();
+  },
+
+  // Exec-only: remove a custom role from the catalog and strip it from every
+  // member who has it. Built-in roles can't be removed. Returns the updated
+  // catalog.
+  async remove(name: string): Promise<string[]> {
+    const role = await this.findCustom(name);
+    if (!role) throw badRequest("Only custom roles can be removed");
+    const old = role.name;
+    await sequelize.transaction(async (tx) => {
+      await role.destroy({ transaction: tx });
+      await sequelize.query(
+        `UPDATE users SET roles = array_remove(roles, :old) WHERE :old = ANY(roles)`,
+        { replacements: { old }, type: QueryTypes.UPDATE, transaction: tx },
+      );
+    });
     return this.list();
   },
 };
