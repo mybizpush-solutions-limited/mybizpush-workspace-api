@@ -407,6 +407,15 @@ Notification.init(
 );
 
 // ---- Meeting --------------------------------------------------------------
+// Structured recurrence for a meeting (translated to an iCalendar RRULE for
+// Google Calendar). `null` = one-off meeting.
+export interface RecurrenceRule {
+  freq: "daily" | "weekly" | "monthly";
+  interval: number; // every N days/weeks/months (1 = every, 2 = biweekly, …)
+  count?: number | null; // end after N occurrences
+  until?: string | null; // end on this date (YYYY-MM-DD), exclusive of count
+}
+
 export class Meeting extends Model<InferAttributes<Meeting>, InferCreationAttributes<Meeting>> {
   declare id: CreationOptional<string>;
   declare title: string;
@@ -416,6 +425,7 @@ export class Meeting extends Model<InferAttributes<Meeting>, InferCreationAttrib
   declare endsAt: Date;
   declare meetUrl: string;
   declare googleEventId: CreationOptional<string | null>;
+  declare recurrence: CreationOptional<RecurrenceRule | null>;
   declare createdAt: CreationOptional<Date>;
 }
 Meeting.init(
@@ -428,6 +438,7 @@ Meeting.init(
     endsAt: { type: DataTypes.DATE, allowNull: false },
     meetUrl: { type: DataTypes.STRING, allowNull: false },
     googleEventId: { type: DataTypes.STRING, allowNull: true },
+    recurrence: { type: DataTypes.JSONB, allowNull: true },
     createdAt: DataTypes.DATE,
   },
   { sequelize, tableName: "meetings", updatedAt: false },

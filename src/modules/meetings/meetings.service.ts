@@ -1,5 +1,5 @@
 import { Op } from "sequelize";
-import { Department, GoogleAccount, Meeting, Project, User } from "../../models";
+import { Department, GoogleAccount, Meeting, Project, User, type RecurrenceRule } from "../../models";
 import { env } from "../../config/env";
 import { forbidden, notFound } from "../../lib/errors";
 import { serializeMeeting } from "../shared/serializers";
@@ -23,6 +23,21 @@ async function resolveAttendeeEmails(attendeeIds: string[]): Promise<string[]> {
     include: [{ model: GoogleAccount, as: "googleAccount", attributes: ["email"] }],
   });
   return users.map((u) => (u.get("googleAccount") as GoogleAccount | undefined)?.email || u.email);
+}
+
+// Translate a structured recurrence into an iCalendar RRULE line for Google.
+function buildRRule(r: RecurrenceRule | null | undefined): string | null {
+  if (!r) return null;
+  const FREQ = { daily: "DAILY", weekly: "WEEKLY", monthly: "MONTHLY" } as const;
+  const parts = [`FREQ=${FREQ[r.freq]}`, `INTERVAL=${Math.max(1, r.interval || 1)}`];
+  if (r.count && r.count > 0) {
+    parts.push(`COUNT=${r.count}`);
+  } else if (r.until) {
+    // RRULE UNTIL must be a UTC timestamp; end of the chosen day.
+    const until = new Date(`${r.until}T23:59:59Z`);
+    parts.push(`UNTIL=${until.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")}`);
+  }
+  return `RRULE:${parts.join(";")}`;
 }
 
 // The organizer (scheduler) or any executive may edit/cancel a meeting.
@@ -71,6 +86,7 @@ export const meetingsService = {
     organizerId: string;
     startsAt: string;
     endsAt: string;
+    recurrence?: RecurrenceRule | null;
   }) {
     if (!(await canSchedule(input.organizerId))) {
       throw forbidden("Only executives, project managers, and HR can schedule meetings");
@@ -79,6 +95,7 @@ export const meetingsService = {
     const attendeeIds = new Set(input.attendeeIds ?? []);
     attendeeIds.add(input.organizerId);
     const emails = await resolveAttendeeEmails([...attendeeIds]);
+    const recurrence = input.recurrence ?? null;
 
     // The event is owned by the central organizer account; everyone (including
     // the scheduler) is invited by email. Falls back to a placeholder Meet link
@@ -89,6 +106,7 @@ export const meetingsService = {
       attendees: emails,
       startIso: new Date(input.startsAt).toISOString(),
       endIso: new Date(input.endsAt).toISOString(),
+      recurrence: buildRRule(recurrence),
     }).catch(() => null);
 
     const meeting = await Meeting.create({
@@ -99,6 +117,7 @@ export const meetingsService = {
       endsAt: new Date(input.endsAt),
       meetUrl: google?.meetUrl ?? mockMeetUrl(),
       googleEventId: google?.eventId ?? null,
+      recurrence,
     });
     await (meeting as any).setAttendees([...attendeeIds]);
 
@@ -111,7 +130,14 @@ export const meetingsService = {
   async update(
     actingUserId: string,
     meetingId: string,
-    patch: { title?: string; description?: string; attendeeIds?: string[]; startsAt?: string; endsAt?: string },
+    patch: {
+      title?: string;
+      description?: string;
+      attendeeIds?: string[];
+      startsAt?: string;
+      endsAt?: string;
+      recurrence?: RecurrenceRule | null;
+    },
   ) {
     const meeting = await Meeting.findByPk(meetingId, withAttendees);
     if (!meeting) throw notFound("Meeting not found");
@@ -121,6 +147,7 @@ export const meetingsService = {
     if (patch.description !== undefined) meeting.description = patch.description.trim() || null;
     if (patch.startsAt) meeting.startsAt = new Date(patch.startsAt);
     if (patch.endsAt) meeting.endsAt = new Date(patch.endsAt);
+    if (patch.recurrence !== undefined) meeting.recurrence = patch.recurrence;
 
     let attendeeIds: string[] | undefined;
     if (patch.attendeeIds) {
@@ -142,6 +169,7 @@ export const meetingsService = {
         attendees: emails,
         startIso: meeting.startsAt.toISOString(),
         endIso: meeting.endsAt.toISOString(),
+        recurrence: buildRRule(meeting.recurrence),
       }).catch(() => undefined);
     }
 

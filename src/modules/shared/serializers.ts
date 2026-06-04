@@ -167,6 +167,7 @@ export function serializeMeeting(m: Meeting) {
     startsAt: m.startsAt.toISOString(),
     endsAt: m.endsAt.toISOString(),
     meetUrl: m.meetUrl,
+    recurrence: m.recurrence ?? null,
   };
 }
 

@@ -8,12 +8,25 @@ import { meetingsService } from "./meetings.service";
 export const meetingsRouter = Router();
 meetingsRouter.use(requireAuth);
 
+const recurrenceSchema = z
+  .object({
+    freq: z.enum(["daily", "weekly", "monthly"]),
+    interval: z.number().int().min(1).max(99),
+    count: z.number().int().min(1).max(999).nullish(),
+    until: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .nullish(),
+  })
+  .nullable();
+
 const createSchema = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(4000).optional(),
   attendeeIds: z.array(z.string().uuid()).optional(),
   startsAt: z.string().datetime(),
   endsAt: z.string().datetime(),
+  recurrence: recurrenceSchema.optional(),
 });
 
 const updateSchema = z.object({
@@ -22,6 +35,7 @@ const updateSchema = z.object({
   attendeeIds: z.array(z.string().uuid()).optional(),
   startsAt: z.string().datetime().optional(),
   endsAt: z.string().datetime().optional(),
+  recurrence: recurrenceSchema.optional(),
 });
 
 meetingsRouter.get("/", asyncHandler(async (_req, res) => {

@@ -80,6 +80,7 @@ export async function createMeetEventAsOrganizer(input: {
   attendees: string[];
   startIso: string;
   endIso: string;
+  recurrence?: string | null; // an RRULE line, e.g. "RRULE:FREQ=WEEKLY;INTERVAL=2"
 }): Promise<{ meetUrl: string; eventId: string } | null> {
   if (!isMeetOrganizerConfigured()) return null;
 
@@ -97,6 +98,7 @@ export async function createMeetEventAsOrganizer(input: {
       start: { dateTime: input.startIso },
       end: { dateTime: input.endIso },
       attendees: input.attendees.map((email) => ({ email })),
+      ...(input.recurrence ? { recurrence: [input.recurrence] } : {}),
       conferenceData: {
         createRequest: { requestId: randomUUID(), conferenceSolutionKey: { type: "hangoutsMeet" } },
       },
@@ -114,7 +116,14 @@ export async function createMeetEventAsOrganizer(input: {
 // Update an existing organizer-owned event (title, time, attendee invites).
 export async function updateMeetEventAsOrganizer(
   eventId: string,
-  input: { summary: string; description?: string; attendees: string[]; startIso: string; endIso: string },
+  input: {
+    summary: string;
+    description?: string;
+    attendees: string[];
+    startIso: string;
+    endIso: string;
+    recurrence?: string | null;
+  },
 ): Promise<void> {
   if (!isMeetOrganizerConfigured()) return;
   const client = oauthClient();
@@ -130,6 +139,8 @@ export async function updateMeetEventAsOrganizer(
       start: { dateTime: input.startIso },
       end: { dateTime: input.endIso },
       attendees: input.attendees.map((email) => ({ email })),
+      // Pass [] to clear recurrence (make it one-off) when not provided.
+      recurrence: input.recurrence ? [input.recurrence] : [],
     },
   });
 }
