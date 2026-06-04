@@ -164,10 +164,16 @@ export const authService = {
   // email exists) to avoid account enumeration.
   async requestPasswordReset(email: string): Promise<void> {
     const user = await usersRepo.rawByEmailOrSecondary(email);
-    if (!user) return;
+    if (!user) {
+      // Anti-enumeration: the client still gets {ok:true}. Log server-side so we
+      // can tell "no account" apart from "send failed" when debugging delivery.
+      console.info(`[reset] no account matches ${email.toLowerCase()} — nothing sent`);
+      return;
+    }
     const token = randomUUID();
     await redis.set(`${RESET_PREFIX}${token}`, user.id, "EX", RESET_TTL_SECONDS);
     const link = `${env.APP_URL}/reset-password?token=${token}`;
+    console.info(`[reset] sending reset link to ${email.toLowerCase()}`);
     // Send to whichever address they entered, falling back to the primary.
     await emails.passwordReset(email.toLowerCase(), link).catch(() => undefined);
   },
