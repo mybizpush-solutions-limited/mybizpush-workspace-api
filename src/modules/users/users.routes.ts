@@ -11,7 +11,7 @@ export const usersRouter = Router();
 usersRouter.use(requireAuth);
 
 const accessLevelSchema = z.object({
-  accessLevel: z.enum(["member", "admin", "executive_admin"]),
+  accessLevel: z.enum(["member", "admin", "chief", "executive_admin"]),
 });
 
 usersRouter.get(

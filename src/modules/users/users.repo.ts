@@ -17,7 +17,7 @@ export interface PublicUser {
   avatarColor: string;
   avatarUrl: string | null;
   roles: string[];
-  accessLevel: "member" | "admin" | "executive_admin";
+  accessLevel: "member" | "admin" | "chief" | "executive_admin";
   onboarded: boolean;
   departmentIds: string[];
   projectIds: string[];

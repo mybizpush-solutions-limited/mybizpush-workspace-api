@@ -1,5 +1,13 @@
 import { Op } from "sequelize";
-import { Department, GoogleAccount, Meeting, Project, User, type RecurrenceRule } from "../../models";
+import {
+  Department,
+  GoogleAccount,
+  Meeting,
+  Project,
+  User,
+  isOrgManager,
+  type RecurrenceRule,
+} from "../../models";
 import { env } from "../../config/env";
 import { forbidden, notFound } from "../../lib/errors";
 import { serializeMeeting } from "../shared/serializers";
@@ -60,7 +68,7 @@ async function canSchedule(userId: string): Promise<boolean> {
     include: [{ model: Department, as: "departments", attributes: ["slug"], through: { attributes: [] } }],
   });
   if (!user) return false;
-  if (user.accessLevel === "executive_admin") return true;
+  if (isOrgManager(user.accessLevel)) return true;
 
   const hrSlug = env.HR_DEPARTMENT_SLUG.toLowerCase();
   const depts = (user.get("departments") as Department[] | undefined) ?? [];

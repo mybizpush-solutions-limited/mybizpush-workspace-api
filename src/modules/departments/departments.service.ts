@@ -6,6 +6,7 @@ import {
   ProjectRepo,
   Task,
   User,
+  isOrgManager,
   type AccessLevel,
 } from "../../models";
 import { badRequest, notFound, forbidden } from "../../lib/errors";
@@ -13,9 +14,9 @@ import { env } from "../../config/env";
 import { uploadAvatarImage, type UploadFile } from "../../lib/avatar";
 import { notifyRoleAssigned } from "../shared/events";
 
-// A user can manage a department if they're its head or an executive admin.
+// A user can manage a department if they're its head, a chief, or an exec admin.
 function canManage(dept: Department, viewer: Viewer): boolean {
-  return viewer.accessLevel === "executive_admin" || dept.headId === viewer.id;
+  return isOrgManager(viewer.accessLevel) || dept.headId === viewer.id;
 }
 
 function serializeRequest(r: DepartmentJoinRequest) {

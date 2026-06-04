@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { verifyAccessToken } from "../lib/jwt";
 import { forbidden, unauthorized } from "../lib/errors";
 
-type AccessLevel = "member" | "admin" | "executive_admin";
+type AccessLevel = "member" | "admin" | "chief" | "executive_admin";
 
 // Requires a valid Bearer access token; attaches req.auth.
 export function requireAuth(req: Request, _res: Response, next: NextFunction) {

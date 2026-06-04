@@ -8,7 +8,12 @@ import {
 import { sequelize } from "../db/sequelize";
 
 // Domain enums (kept in sync with ui/src/types/index.ts).
-export const ACCESS_LEVELS = ["member", "admin", "executive_admin"] as const;
+export const ACCESS_LEVELS = ["member", "admin", "chief", "executive_admin"] as const;
+// "Org managers" (chief or executive admin) may manage departments, projects and
+// schedule meetings. Promoting access levels and deleting members stay exec-only.
+export function isOrgManager(level: string): boolean {
+  return level === "chief" || level === "executive_admin";
+}
 export const WORK_STATUSES = ["todo", "in_progress", "in_review", "blocked", "done"] as const;
 export const PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_TYPES = ["task", "issue"] as const;

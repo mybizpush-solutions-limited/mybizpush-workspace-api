@@ -57,7 +57,7 @@ departmentsRouter.get(
 // Only executive admins may create or modify departments.
 departmentsRouter.post(
   "/",
-  requireAccessLevel("executive_admin"),
+  requireAccessLevel("chief", "executive_admin"),
   validateBody(createSchema),
   asyncHandler(async (req, res) => {
     res.status(201).json({ department: await departmentsService.create(req.body) });
@@ -66,7 +66,7 @@ departmentsRouter.post(
 
 departmentsRouter.patch(
   "/:id",
-  requireAccessLevel("executive_admin"),
+  requireAccessLevel("chief", "executive_admin"),
   validateBody(updateSchema),
   asyncHandler(async (req, res) => {
     res.json({ department: await departmentsService.update(req.params.id!, req.body) });
@@ -75,7 +75,7 @@ departmentsRouter.patch(
 
 departmentsRouter.delete(
   "/:id",
-  requireAccessLevel("executive_admin"),
+  requireAccessLevel("chief", "executive_admin"),
   asyncHandler(async (req, res) => {
     await departmentsService.delete(req.params.id!);
     res.status(204).end();

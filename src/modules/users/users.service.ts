@@ -20,7 +20,7 @@ import { badRequest, forbidden, notFound } from "../../lib/errors";
 import { revokeAllRefreshTokens } from "../../lib/jwt";
 import { usersRepo, type PublicUser } from "./users.repo";
 
-type AccessLevel = "member" | "admin" | "executive_admin";
+type AccessLevel = "member" | "admin" | "chief" | "executive_admin";
 
 // Join tables that carry a user_id — cleared with raw deletes (the through
 // models aren't exported as named classes).

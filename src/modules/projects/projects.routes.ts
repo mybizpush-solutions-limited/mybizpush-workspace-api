@@ -4,7 +4,7 @@ import { z } from "zod";
 import { asyncHandler, badRequest, forbidden, notFound } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
-import { Department, Project } from "../../models";
+import { Department, Project, isOrgManager } from "../../models";
 import { projectsService } from "./projects.service";
 import { projectReposService } from "./repos.service";
 import { githubSyncService } from "../github/github.sync.service";
@@ -19,7 +19,7 @@ async function assertCanManageProject(
   projectId: string,
   auth: { sub: string; accessLevel: string },
 ): Promise<void> {
-  if (auth.accessLevel === "executive_admin") return;
+  if (isOrgManager(auth.accessLevel)) return;
   const project = await Project.findByPk(projectId, {
     include: [{ model: Department, as: "departments", attributes: ["headId"], through: { attributes: [] } }],
   });
@@ -69,8 +69,8 @@ projectsRouter.post(
   "/",
   validateBody(createSchema),
   asyncHandler(async (req, res) => {
-    if (req.auth!.accessLevel !== "executive_admin") {
-      throw forbidden("Only an executive admin can create a project");
+    if (!isOrgManager(req.auth!.accessLevel)) {
+      throw forbidden("Only a chief or executive admin can create a project");
     }
     res.status(201).json({ project: await projectsService.create(req.body) });
   }),
@@ -85,12 +85,12 @@ projectsRouter.patch(
   }),
 );
 
-// Only executive admins can delete a project.
+// Chiefs and executive admins can delete a project.
 projectsRouter.delete(
   "/:id",
   asyncHandler(async (req, res) => {
-    if (req.auth!.accessLevel !== "executive_admin") {
-      throw forbidden("Only an executive admin can delete a project");
+    if (!isOrgManager(req.auth!.accessLevel)) {
+      throw forbidden("Only a chief or executive admin can delete a project");
     }
     await projectsService.delete(req.params.id!);
     res.status(204).end();
