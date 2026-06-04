@@ -1,5 +1,5 @@
 import { Op } from "sequelize";
-import { Department, Meeting, Project, User } from "../../models";
+import { Department, GoogleAccount, Meeting, Project, User } from "../../models";
 import { env } from "../../config/env";
 import { forbidden } from "../../lib/errors";
 import { serializeMeeting } from "../shared/serializers";
@@ -55,12 +55,18 @@ export const meetingsService = {
     const attendeeIds = new Set(input.attendeeIds ?? []);
     attendeeIds.add(input.organizerId);
 
-    // Resolve attendee emails for the calendar invite.
+    // Resolve attendee invite addresses. Prefer the Gmail they linked via
+    // "Connect Google" (that's the identity they actually join Meet with);
+    // fall back to their company email if they haven't linked one.
     const attendeeUsers = await User.findAll({
       where: { id: { [Op.in]: [...attendeeIds] } },
       attributes: ["id", "email"],
+      include: [{ model: GoogleAccount, as: "googleAccount", attributes: ["email"] }],
     });
-    const emails = attendeeUsers.map((u) => u.email);
+    const emails = attendeeUsers.map((u) => {
+      const linked = (u.get("googleAccount") as GoogleAccount | undefined)?.email;
+      return linked || u.email;
+    });
 
     // The event is owned by the central organizer account; everyone (including
     // the scheduler) is invited by email. Falls back to a placeholder Meet link

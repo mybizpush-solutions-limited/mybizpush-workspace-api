@@ -5,11 +5,11 @@ import { env } from "../config/env";
 import { AppError } from "./errors";
 import { GoogleAccount } from "../models";
 
-export const GOOGLE_SCOPES = [
-  "https://www.googleapis.com/auth/calendar.events",
-  "openid",
-  "email",
-];
+// Employees only connect Google so we can capture the Gmail they actually join
+// meetings with — identity scopes only, no sensitive Calendar access. The
+// calendar.events scope is held solely by the central organizer account (its
+// refresh token is configured via env, minted separately).
+export const GOOGLE_SCOPES = ["openid", "email"];
 
 export function isGoogleConfigured(): boolean {
   return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
@@ -66,35 +66,6 @@ export async function exchangeCodeAndStore(userId: string, code: string): Promis
   });
 }
 
-// Build an OAuth client for a connected user, auto-refreshing + persisting tokens.
-async function getAuthorizedClient(userId: string): Promise<OAuth2Client | null> {
-  assertConfigured();
-  const account = await GoogleAccount.findByPk(userId);
-  if (!account?.refreshToken) return null;
-
-  const client = oauthClient();
-  client.setCredentials({
-    access_token: account.accessToken ?? undefined,
-    refresh_token: account.refreshToken,
-    scope: account.scope ?? undefined,
-    token_type: account.tokenType ?? undefined,
-    expiry_date: account.expiryDate ? account.expiryDate.getTime() : undefined,
-  });
-
-  client.on("tokens", (tokens) => {
-    void GoogleAccount.update(
-      {
-        accessToken: tokens.access_token ?? account.accessToken,
-        refreshToken: tokens.refresh_token ?? account.refreshToken,
-        expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date) : account.expiryDate,
-      },
-      { where: { userId } },
-    ).catch(() => undefined);
-  });
-
-  return client;
-}
-
 // Whether a central organizer account is configured for meetings.
 export function isMeetOrganizerConfigured(): boolean {
   return isGoogleConfigured() && Boolean(env.GOOGLE_MEET_ORGANIZER_REFRESH_TOKEN);
@@ -114,40 +85,6 @@ export async function createMeetEventAsOrganizer(input: {
 
   const client = oauthClient();
   client.setCredentials({ refresh_token: env.GOOGLE_MEET_ORGANIZER_REFRESH_TOKEN });
-
-  const calendar = google.calendar({ version: "v3", auth: client });
-  const res = await calendar.events.insert({
-    calendarId: "primary",
-    conferenceDataVersion: 1,
-    sendUpdates: "all",
-    requestBody: {
-      summary: input.summary,
-      description: input.description,
-      start: { dateTime: input.startIso },
-      end: { dateTime: input.endIso },
-      attendees: input.attendees.map((email) => ({ email })),
-      conferenceData: {
-        createRequest: { requestId: randomUUID(), conferenceSolutionKey: { type: "hangoutsMeet" } },
-      },
-    },
-  });
-
-  const meetUrl =
-    res.data.hangoutLink ??
-    res.data.conferenceData?.entryPoints?.find((e) => e.entryPointType === "video")?.uri ??
-    null;
-  if (!meetUrl || !res.data.id) return null;
-  return { meetUrl, eventId: res.data.id };
-}
-
-// Create a Google Calendar event with a Meet link. Returns null if the user
-// hasn't connected Google (so callers can fall back to a placeholder URL).
-export async function createMeetEvent(
-  userId: string,
-  input: { summary: string; description?: string; attendees: string[]; startIso: string; endIso: string },
-): Promise<{ meetUrl: string; eventId: string } | null> {
-  const client = await getAuthorizedClient(userId);
-  if (!client) return null;
 
   const calendar = google.calendar({ version: "v3", auth: client });
   const res = await calendar.events.insert({
