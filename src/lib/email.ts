@@ -17,13 +17,22 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
     console.info(`[email:dev] → ${Array.isArray(input.to) ? input.to.join(", ") : input.to} :: ${input.subject}`);
     return;
   }
-  await resend.emails.send({
+  // Resend resolves with `{ data, error }` rather than throwing on API errors
+  // (unverified sending domain, bad key, etc.) — so we must inspect `error`
+  // explicitly, otherwise failed sends look successful.
+  const { data, error } = await resend.emails.send({
     from: env.EMAIL_FROM,
     to: input.to,
     subject: input.subject,
     html: input.html,
     text: input.text,
   });
+  if (error) {
+    const recipients = Array.isArray(input.to) ? input.to.join(", ") : input.to;
+    console.error(`[email] Resend rejected → ${recipients} :: ${input.subject} ::`, error);
+    throw new Error(`Email send failed: ${error.message ?? "unknown error"}`);
+  }
+  return void data;
 }
 
 // ---- Branded layout --------------------------------------------------------

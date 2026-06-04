@@ -175,7 +175,9 @@ export const authService = {
     if (!user) return;
     const otp = generateOtp();
     await redis.set(`${PWCHANGE_PREFIX}${userId}`, otp, "EX", PWCHANGE_TTL_SECONDS);
-    await emails.passwordChangeOtp(user.email, otp).catch(() => undefined);
+    // Authenticated user changing their own password — no account-enumeration
+    // concern, so let a delivery failure surface instead of faking success.
+    await emails.passwordChangeOtp(user.email, otp);
   },
 
   async changePasswordWithOtp(userId: string, otp: string, password: string): Promise<void> {

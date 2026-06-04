@@ -25,7 +25,7 @@ export const DIGEST_FREQUENCIES = ["off", "daily", "weekly"] as const;
 // Selectable team roles (kept in sync with ui/src/types/index.ts `Role`).
 export const ROLES = [
   "Frontend", "Backend", "DevOps", "SMM", "Graphics Designer", "UI/UX Designer",
-  "Video Editor", "CEO", "CTO", "CIO", "CSO", "CMO",
+  "Video Editor", "CEO", "CTO", "CIO", "CSO", "CMO", "COO",
 ] as const;
 
 export type AccessLevel = (typeof ACCESS_LEVELS)[number];
