@@ -14,7 +14,7 @@ import { emails } from "../../lib/email";
 import { redis } from "../../redis/client";
 import { usersRepo, toPublicUser, type PublicUser } from "../users/users.repo";
 import { usersService } from "../users/users.service";
-import { User } from "../../models";
+import { GoogleAccount, User } from "../../models";
 import type { LoginInput, RegisterInput } from "./auth.schemas";
 
 const RESET_PREFIX = "pwreset:";
@@ -162,7 +162,7 @@ export const authService = {
 
   // Issue a reset token + email. Always resolves (never reveals whether the
   // email exists) to avoid account enumeration.
-  async requestPasswordReset(email: string): Promise<void> {
+  async requestPasswordReset(email: string, useGoogle = false): Promise<void> {
     const user = await usersRepo.rawByEmailOrSecondary(email);
     if (!user) {
       // Anti-enumeration: the client still gets {ok:true}. Log server-side so we
@@ -170,24 +170,38 @@ export const authService = {
       console.info(`[reset] no account matches ${email.toLowerCase()} — nothing sent`);
       return;
     }
+    // Default to the entered address; the Google fallback sends to the linked
+    // Gmail (bypasses company-mail forwarding), silently no-op if unlinked.
+    let to = email.toLowerCase();
+    if (useGoogle) {
+      const g = await GoogleAccount.findByPk(user.id);
+      if (g?.email) to = g.email;
+    }
     const token = randomUUID();
     await redis.set(`${RESET_PREFIX}${token}`, user.id, "EX", RESET_TTL_SECONDS);
     const link = `${env.APP_URL}/reset-password?token=${token}`;
-    console.info(`[reset] sending reset link to ${email.toLowerCase()}`);
-    // Send to whichever address they entered, falling back to the primary.
-    await emails.passwordReset(email.toLowerCase(), link).catch(() => undefined);
+    console.info(`[reset] sending reset link to ${to}`);
+    await emails.passwordReset(to, link).catch(() => undefined);
   },
 
   // Logged-in user changes their own password: email a 6-digit code, then verify
   // it + set the new password.
-  async requestPasswordChangeOtp(userId: string): Promise<void> {
+  // `useGoogle` resends to the user's linked Gmail instead of their @domain
+  // address — a fallback for when company mail (e.g. Cloudflare routing) drops it.
+  async requestPasswordChangeOtp(userId: string, useGoogle = false): Promise<void> {
     const user = await User.findByPk(userId);
     if (!user) return;
+    let to = user.email;
+    if (useGoogle) {
+      const g = await GoogleAccount.findByPk(userId);
+      if (!g?.email) throw badRequest("Connect your Google account first to use this option");
+      to = g.email;
+    }
     const otp = generateOtp();
     await redis.set(`${PWCHANGE_PREFIX}${userId}`, otp, "EX", PWCHANGE_TTL_SECONDS);
     // Authenticated user changing their own password — no account-enumeration
     // concern, so let a delivery failure surface instead of faking success.
-    await emails.passwordChangeOtp(user.email, otp);
+    await emails.passwordChangeOtp(to, otp);
   },
 
   async changePasswordWithOtp(userId: string, otp: string, password: string): Promise<void> {

@@ -64,7 +64,7 @@ export const authController = {
   },
 
   async forgotPassword(req: Request, res: Response) {
-    await authService.requestPasswordReset(req.body.email);
+    await authService.requestPasswordReset(req.body.email, req.body.useGoogle === true);
     // Always 200 — don't reveal whether the account exists.
     res.json({ ok: true });
   },
@@ -76,7 +76,7 @@ export const authController = {
 
   // Logged-in self-service password change via an emailed OTP.
   async requestPasswordChange(req: Request, res: Response) {
-    await authService.requestPasswordChangeOtp(req.auth!.sub);
+    await authService.requestPasswordChangeOtp(req.auth!.sub, req.body?.useGoogle === true);
     res.json({ ok: true });
   },
 

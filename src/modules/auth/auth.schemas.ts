@@ -22,6 +22,7 @@ export const resendOtpSchema = z.object({
 
 export const forgotPasswordSchema = z.object({
   email: z.string().trim().toLowerCase().email("Enter a valid email"),
+  useGoogle: z.boolean().optional(),
 });
 
 export const resetPasswordSchema = z.object({
