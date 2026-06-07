@@ -127,7 +127,9 @@ export async function getPrChecks(owner: string, repo: string, number: number): 
     total_count: number;
     check_runs: Array<{ status: string; conclusion: string | null }>;
   }>(`/repos/${owner}/${repo}/commits/${sha}/check-runs?per_page=100`);
-  const combined = await ghJson<{ state: string }>(`/repos/${owner}/${repo}/commits/${sha}/status`);
+  const combined = await ghJson<{ state: string; total_count: number }>(
+    `/repos/${owner}/${repo}/commits/${sha}/status`,
+  );
 
   let passed = 0;
   let failed = 0;
@@ -137,10 +139,16 @@ export async function getPrChecks(owner: string, repo: string, number: number): 
     else if (r.conclusion && FAIL_CONCLUSIONS.has(r.conclusion)) failed += 1;
     else passed += 1;
   }
-  // Fold in the combined commit-status (CI that doesn't use the Checks API).
-  if (combined?.state === "failure" || combined?.state === "error") failed += 1;
-  else if (combined?.state === "pending") pending += 1;
-  else if (combined?.state === "success") passed += 1;
+  // Fold in the legacy combined commit-status — but ONLY when it actually has
+  // statuses. GitHub returns state:"pending" for a commit with zero statuses,
+  // which is the norm for repos that use the Checks API (GitHub Actions) and no
+  // legacy commit statuses. Counting that would pin every PR to "pending"
+  // forever even after all check-runs complete.
+  if ((combined?.total_count ?? 0) > 0) {
+    if (combined!.state === "failure" || combined!.state === "error") failed += 1;
+    else if (combined!.state === "pending") pending += 1;
+    else if (combined!.state === "success") passed += 1;
+  }
 
   const total = passed + failed + pending;
   const state: CheckState =

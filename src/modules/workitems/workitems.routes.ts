@@ -88,6 +88,11 @@ function makeWorkItemRouter(service: ReturnType<typeof makeWorkItemService>, wit
     res.json({ item: await service.linkPullRequest(req.params.id!, req.body, req.auth!.sub) });
   }));
 
+  // Re-fetch live CI/review state for the item's linked PRs (manual/auto refresh).
+  router.post("/:id/pull-requests/refresh", asyncHandler(async (req, res) => {
+    res.json({ item: await service.refreshPullRequests(req.params.id!) });
+  }));
+
   return router;
 }
 

@@ -166,6 +166,16 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
       await logActivity({ itemId: id, itemType: type, actorId, kind: "pr_linked", data: { pr: created.id } });
       return reload(id);
     },
+
+    // Re-fetch live CI/review state for every linked PR. Lets the UI self-heal
+    // when GitHub webhooks aren't delivered, so check state can't get stuck.
+    async refreshPullRequests(id: string) {
+      const item = await M.findByPk(id);
+      if (!item) throw notFound(`${type} not found`);
+      const prs = await PullRequest.findAll({ where: { itemId: id, itemType: type } });
+      await Promise.all(prs.map((pr) => githubService.enrich(pr).catch(() => undefined)));
+      return reload(id);
+    },
   };
 }
 
