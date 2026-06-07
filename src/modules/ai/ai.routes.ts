@@ -40,3 +40,13 @@ aiRouter.post(
     res.json({ summary: await aiService.summarizeItem(req.body.itemId, req.body.itemType) });
   }),
 );
+
+// Generate a brief for an external coding agent (Claude Code, etc.) with repo
+// context. Same input shape as summarize.
+aiRouter.post(
+  "/agent-brief",
+  validateBody(summarizeSchema),
+  asyncHandler(async (req, res) => {
+    res.json({ brief: await aiService.agentBrief(req.body.itemId, req.body.itemType) });
+  }),
+);
