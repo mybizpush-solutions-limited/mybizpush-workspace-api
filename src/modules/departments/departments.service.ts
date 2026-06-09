@@ -193,6 +193,19 @@ export const departmentsService = {
     return this.bySlug(dept.slug);
   },
 
+  // Remove a member from a department (head / exec admin). The head can't be
+  // removed while they still hold the role — reassign the head first.
+  async removeMember(departmentId: string, userId: string, viewer: Viewer) {
+    const dept = await Department.findByPk(departmentId);
+    if (!dept) throw notFound("Department not found");
+    if (!canManage(dept, viewer)) throw forbidden("Only the department head or an admin can do this");
+    if (dept.headId === userId) {
+      throw badRequest("Reassign the department head before removing them");
+    }
+    await (dept as any).removeMember(userId);
+    return this.bySlug(dept.slug);
+  },
+
   // Delete a department. Projects stay (they may have other departments); we
   // just detach this department's "lane" from any tasks/issues/repos/projects.
   async delete(id: string) {

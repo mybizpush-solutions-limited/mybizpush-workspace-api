@@ -329,6 +329,34 @@ PullRequest.init(
   { sequelize, tableName: "pull_requests", timestamps: false },
 );
 
+// ---- DocumentationLink ----------------------------------------------------
+// A documentation/reference URL linked to a task or issue (Google Doc, Notion,
+// spec, design, etc.) — analogous to a linked PR but just a titled link.
+export class DocumentationLink extends Model<
+  InferAttributes<DocumentationLink>,
+  InferCreationAttributes<DocumentationLink>
+> {
+  declare id: CreationOptional<string>;
+  declare itemId: string;
+  declare itemType: ItemType;
+  declare title: string;
+  declare url: string;
+  declare addedBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+}
+DocumentationLink.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    itemId: { type: DataTypes.UUID, allowNull: false },
+    itemType: { type: DataTypes.ENUM(...ITEM_TYPES), allowNull: false },
+    title: { type: DataTypes.STRING, allowNull: false },
+    url: { type: DataTypes.STRING, allowNull: false },
+    addedBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "documentation_links", updatedAt: false },
+);
+
 // ---- GithubIssueLink (mirror between an app issue and a GitHub issue) ------
 export class GithubIssueLink extends Model<
   InferAttributes<GithubIssueLink>,
@@ -670,6 +698,8 @@ Task.hasOne(GithubIssueLink, { as: "githubIssue", foreignKey: "itemId", constrai
 Issue.hasMany(Attachment, { as: "attachments", foreignKey: "itemId", constraints: false, scope: { itemType: "issue" } });
 Issue.hasMany(PullRequest, { as: "pullRequests", foreignKey: "itemId", constraints: false, scope: { itemType: "issue" } });
 Issue.hasOne(GithubIssueLink, { as: "githubIssue", foreignKey: "itemId", constraints: false, scope: { itemType: "issue" } });
+Task.hasMany(DocumentationLink, { as: "docs", foreignKey: "itemId", constraints: false, scope: { itemType: "task" } });
+Issue.hasMany(DocumentationLink, { as: "docs", foreignKey: "itemId", constraints: false, scope: { itemType: "issue" } });
 
 Comment.belongsTo(User, { as: "author", foreignKey: "authorId" });
 Comment.belongsToMany(User, { through: CommentMentions, as: "mentions", foreignKey: "commentId", otherKey: "userId" });
@@ -695,5 +725,5 @@ Notification.belongsTo(User, { as: "fromUser", foreignKey: "fromUserId" });
 export const models = {
   User, Department, Project, Label, Task, Issue, Comment, Activity,
   PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount, GithubAccount, ProjectRepo,
-  BlacklistedEmail, CustomRole,
+  BlacklistedEmail, CustomRole, DocumentationLink,
 };

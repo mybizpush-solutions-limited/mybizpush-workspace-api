@@ -1,5 +1,13 @@
 import type { ModelStatic } from "sequelize";
-import { Comment, GithubIssueLink, Issue, PullRequest, Task, type ItemType } from "../../models";
+import {
+  Comment,
+  DocumentationLink,
+  GithubIssueLink,
+  Issue,
+  PullRequest,
+  Task,
+  type ItemType,
+} from "../../models";
 import { notFound } from "../../lib/errors";
 import { fetchPullRequest } from "../../lib/github";
 import { setIssueState } from "../../lib/github.features";
@@ -164,6 +172,28 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
       // Best-effort CI + review enrichment (sets headSha so webhooks can match).
       await githubService.enrich(created).catch(() => undefined);
       await logActivity({ itemId: id, itemType: type, actorId, kind: "pr_linked", data: { pr: created.id } });
+      return reload(id);
+    },
+
+    // Link a documentation/reference URL to the item (Google Doc, Notion, spec…).
+    async linkDoc(id: string, doc: { title: string; url: string }, actorId: string) {
+      const item = await M.findByPk(id);
+      if (!item) throw notFound(`${type} not found`);
+      await DocumentationLink.create({
+        itemId: id,
+        itemType: type,
+        title: doc.title,
+        url: doc.url,
+        addedBy: actorId,
+      });
+      return reload(id);
+    },
+
+    // Remove a linked documentation URL.
+    async unlinkDoc(id: string, docId: string) {
+      const item = await M.findByPk(id);
+      if (!item) throw notFound(`${type} not found`);
+      await DocumentationLink.destroy({ where: { id: docId, itemId: id, itemType: type } });
       return reload(id);
     },
 

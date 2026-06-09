@@ -44,6 +44,10 @@ const prSchema = z.object({
   url: z.string().url(),
   status: z.enum(["open", "merged", "closed", "draft"]).optional(),
 });
+const docSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  url: z.string().url(),
+});
 
 // One router shape for both tasks and issues.
 function makeWorkItemRouter(service: ReturnType<typeof makeWorkItemService>, withSeverity: boolean) {
@@ -91,6 +95,14 @@ function makeWorkItemRouter(service: ReturnType<typeof makeWorkItemService>, wit
   // Re-fetch live CI/review state for the item's linked PRs (manual/auto refresh).
   router.post("/:id/pull-requests/refresh", asyncHandler(async (req, res) => {
     res.json({ item: await service.refreshPullRequests(req.params.id!) });
+  }));
+
+  router.post("/:id/docs", validateBody(docSchema), asyncHandler(async (req, res) => {
+    res.json({ item: await service.linkDoc(req.params.id!, req.body, req.auth!.sub) });
+  }));
+
+  router.delete("/:id/docs/:docId", asyncHandler(async (req, res) => {
+    res.json({ item: await service.unlinkDoc(req.params.id!, req.params.docId!) });
   }));
 
   return router;

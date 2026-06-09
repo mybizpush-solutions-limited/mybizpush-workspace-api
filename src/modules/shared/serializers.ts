@@ -2,6 +2,7 @@ import {
   Attachment,
   Comment,
   Department,
+  DocumentationLink,
   GithubIssueLink,
   Label,
   Project,
@@ -63,12 +64,17 @@ export function serializePullRequest(pr: PullRequest) {
   };
 }
 
+export function serializeDoc(doc: DocumentationLink) {
+  return { id: doc.id, title: doc.title, url: doc.url, addedBy: doc.addedBy ?? null };
+}
+
 // ---- Work item (task | issue) --------------------------------------------
 export function serializeWorkItem(item: Task | Issue, type: ItemType) {
   const assignees = (item.get("assignees") as User[] | undefined) ?? [];
   const labels = (item.get("labels") as Label[] | undefined) ?? [];
   const attachments = (item.get("attachments") as Attachment[] | undefined) ?? [];
   const pullRequests = (item.get("pullRequests") as PullRequest[] | undefined) ?? [];
+  const docs = (item.get("docs") as DocumentationLink[] | undefined) ?? [];
   const githubIssue = item.get("githubIssue") as GithubIssueLink | undefined;
 
   const base = {
@@ -85,6 +91,7 @@ export function serializeWorkItem(item: Task | Issue, type: ItemType) {
     labelIds: labels.map((l) => l.id),
     attachments: attachments.map(serializeAttachment),
     pullRequests: pullRequests.map(serializePullRequest),
+    docs: docs.map(serializeDoc),
     githubIssue: githubIssue
       ? {
           number: githubIssue.number,
@@ -192,5 +199,6 @@ export const workItemInclude = [
   { model: Label, as: "labels", attributes: ["id"], through: { attributes: [] } },
   { model: Attachment, as: "attachments" },
   { model: PullRequest, as: "pullRequests" },
+  { model: DocumentationLink, as: "docs" },
   { model: GithubIssueLink, as: "githubIssue", required: false },
 ];

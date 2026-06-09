@@ -112,6 +112,13 @@ departmentsRouter.post(
   }),
 );
 
+departmentsRouter.delete(
+  "/:id/members/:userId",
+  asyncHandler(async (req, res) => {
+    res.json({ department: await departmentsService.removeMember(req.params.id!, req.params.userId!, viewerOf(req)) });
+  }),
+);
+
 // Department profile image (head / exec admin — enforced in the service).
 departmentsRouter.post(
   "/:id/avatar",
