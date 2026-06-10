@@ -79,6 +79,14 @@ export const aiService = {
       `request. Structure it with: a one-line Goal; Context; concrete Acceptance criteria; a ` +
       `suggested step-by-step Plan; and any relevant links. Be specific and actionable; do not ` +
       `invent details that aren't provided. Use Markdown.\n\n` +
+      `Also instruct the agent that, once the work is done, it must produce TWO separate ` +
+      `reference documents (as separate Markdown files in the repo, e.g. docs/FRONTEND_REFERENCE.md ` +
+      `and docs/BACKEND_REFERENCE.md) documenting what was built for this ${itemType}: a FRONTEND ` +
+      `reference (components/routes/state/hooks touched, the API calls the UI makes, and how the ` +
+      `feature behaves) and a BACKEND reference (endpoints, models/migrations, services, ` +
+      `validation, and data flow). Each doc must stand alone so the frontend and backend teams ` +
+      `each have their own reference. If the change is purely one side, still produce both and note ` +
+      `the other as "No changes".\n\n` +
       `Project: ${project?.name ?? "(unknown)"}\n` +
       `Linked repositories:\n${repoList}\n\n` +
       `${itemType} title: ${item.title}\n` +

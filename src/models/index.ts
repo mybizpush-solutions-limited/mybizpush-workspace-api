@@ -463,6 +463,8 @@ export class Meeting extends Model<InferAttributes<Meeting>, InferCreationAttrib
   declare meetUrl: string;
   declare googleEventId: CreationOptional<string | null>;
   declare recurrence: CreationOptional<RecurrenceRule | null>;
+  // Third-party invitees by email (not app users) — added to the Google invite.
+  declare externalEmails: CreationOptional<string[]>;
   declare createdAt: CreationOptional<Date>;
 }
 Meeting.init(
@@ -476,6 +478,7 @@ Meeting.init(
     meetUrl: { type: DataTypes.STRING, allowNull: false },
     googleEventId: { type: DataTypes.STRING, allowNull: true },
     recurrence: { type: DataTypes.JSONB, allowNull: true },
+    externalEmails: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
     createdAt: DataTypes.DATE,
   },
   { sequelize, tableName: "meetings", updatedAt: false },

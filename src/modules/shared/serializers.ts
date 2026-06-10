@@ -170,6 +170,7 @@ export function serializeMeeting(m: Meeting) {
     title: m.title,
     description: m.description ?? undefined,
     attendeeIds: attendees.map((u) => u.id),
+    externalEmails: m.externalEmails ?? [],
     organizerId: m.organizerId ?? null,
     startsAt: m.startsAt.toISOString(),
     endsAt: m.endsAt.toISOString(),

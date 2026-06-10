@@ -33,6 +33,22 @@ async function resolveAttendeeEmails(attendeeIds: string[]): Promise<string[]> {
   return users.map((u) => (u.get("googleAccount") as GoogleAccount | undefined)?.email || u.email);
 }
 
+// Validate, trim and de-duplicate third-party invitee emails.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function cleanEmails(list: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of list) {
+    const email = raw.trim();
+    if (!email || !EMAIL_RE.test(email)) continue;
+    const key = email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(email);
+  }
+  return out;
+}
+
 // Translate a structured recurrence into an iCalendar RRULE line for Google.
 function buildRRule(r: RecurrenceRule | null | undefined): string | null {
   if (!r) return null;
@@ -91,6 +107,7 @@ export const meetingsService = {
     title: string;
     description?: string;
     attendeeIds?: string[];
+    externalEmails?: string[];
     organizerId: string;
     startsAt: string;
     endsAt: string;
@@ -102,7 +119,8 @@ export const meetingsService = {
 
     const attendeeIds = new Set(input.attendeeIds ?? []);
     attendeeIds.add(input.organizerId);
-    const emails = await resolveAttendeeEmails([...attendeeIds]);
+    const externalEmails = cleanEmails(input.externalEmails ?? []);
+    const emails = [...(await resolveAttendeeEmails([...attendeeIds])), ...externalEmails];
     const recurrence = input.recurrence ?? null;
 
     // The event is owned by the central organizer account; everyone (including
@@ -126,6 +144,7 @@ export const meetingsService = {
       meetUrl: google?.meetUrl ?? mockMeetUrl(),
       googleEventId: google?.eventId ?? null,
       recurrence,
+      externalEmails,
     });
     await (meeting as any).setAttendees([...attendeeIds]);
 
@@ -142,6 +161,7 @@ export const meetingsService = {
       title?: string;
       description?: string;
       attendeeIds?: string[];
+      externalEmails?: string[];
       startsAt?: string;
       endsAt?: string;
       recurrence?: RecurrenceRule | null;
@@ -156,6 +176,7 @@ export const meetingsService = {
     if (patch.startsAt) meeting.startsAt = new Date(patch.startsAt);
     if (patch.endsAt) meeting.endsAt = new Date(patch.endsAt);
     if (patch.recurrence !== undefined) meeting.recurrence = patch.recurrence;
+    if (patch.externalEmails !== undefined) meeting.externalEmails = cleanEmails(patch.externalEmails);
 
     let attendeeIds: string[] | undefined;
     if (patch.attendeeIds) {
@@ -170,7 +191,10 @@ export const meetingsService = {
     await meeting.save();
 
     if (meeting.googleEventId) {
-      const emails = await resolveAttendeeEmails(attendeeIds);
+      const emails = [
+        ...(await resolveAttendeeEmails(attendeeIds)),
+        ...(meeting.externalEmails ?? []),
+      ];
       await updateMeetEventAsOrganizer(meeting.googleEventId, {
         summary: meeting.title,
         description: meeting.description ?? undefined,
