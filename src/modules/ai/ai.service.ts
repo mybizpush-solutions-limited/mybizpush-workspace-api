@@ -75,18 +75,27 @@ export const aiService = {
     const prompt =
       `Write a clear, self-contained brief instructing an autonomous coding agent (such as ` +
       `Claude Code) to resolve the following ${itemType}. Assume the agent already has the ` +
-      `repository checked out locally and can read/edit files, run commands, and open a pull ` +
-      `request. Structure it with: a one-line Goal; Context; concrete Acceptance criteria; a ` +
-      `suggested step-by-step Plan; and any relevant links. Be specific and actionable; do not ` +
-      `invent details that aren't provided. Use Markdown.\n\n` +
-      `Also instruct the agent that, once the work is done, it must produce TWO separate ` +
-      `reference documents (as separate Markdown files in the repo, e.g. docs/FRONTEND_REFERENCE.md ` +
-      `and docs/BACKEND_REFERENCE.md) documenting what was built for this ${itemType}: a FRONTEND ` +
-      `reference (components/routes/state/hooks touched, the API calls the UI makes, and how the ` +
-      `feature behaves) and a BACKEND reference (endpoints, models/migrations, services, ` +
-      `validation, and data flow). Each doc must stand alone so the frontend and backend teams ` +
-      `each have their own reference. If the change is purely one side, still produce both and note ` +
-      `the other as "No changes".\n\n` +
+      `repository checked out locally and can read/edit files and run commands. Structure it ` +
+      `with: a one-line Goal; Context; concrete Acceptance criteria; a suggested step-by-step ` +
+      `Plan; and any relevant links. Be specific and actionable; do not invent details that ` +
+      `aren't provided. Use Markdown.\n\n` +
+      `Do NOT instruct the agent to perform any git actions — no creating branches, committing, ` +
+      `pushing, or opening/creating pull requests. All git operations are left for the user to ` +
+      `perform manually. The brief must stop at making the code changes and writing the ` +
+      `reference docs below.\n\n` +
+      `Also instruct the agent that, once the work is done, it must produce reference ` +
+      `documentation as Markdown files in the repo, named after this ${itemType}: ` +
+      `"[TASK/ISSUE_NAME]_Backend_Reference.md" and "[TASK/ISSUE_NAME]_Frontend_Reference.md", ` +
+      `where [TASK/ISSUE_NAME] is a slug of the ${itemType} title. ` +
+      `The Backend reference documents the details of the files that were actually changed for ` +
+      `this ${itemType}: each file touched and what changed in it, plus the relevant endpoints, ` +
+      `models/migrations, services, validation, and data flow. ` +
+      `The Frontend reference is the API reference the frontend needs to integrate this feature — ` +
+      `the endpoints the UI should call (HTTP method and path), request and response payload ` +
+      `shapes, auth requirements, and error responses. It documents the API contract consumable ` +
+      `by the frontend, NOT frontend code changes, so never leave it empty or write "No changes"; ` +
+      `if this ${itemType} exposes or affects no API, omit the Frontend reference file entirely ` +
+      `rather than emitting an empty one.\n\n` +
       `Project: ${project?.name ?? "(unknown)"}\n` +
       `Linked repositories:\n${repoList}\n\n` +
       `${itemType} title: ${item.title}\n` +
