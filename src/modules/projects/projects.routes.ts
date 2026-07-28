@@ -1,11 +1,11 @@
 import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
-import { asyncHandler, badRequest, forbidden, notFound } from "../../lib/errors";
+import { asyncHandler, badRequest, forbidden } from "../../lib/errors";
 import { assertCanManageProject } from "../../lib/permissions";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
-import { Project, isOrgManager } from "../../models";
+import { isOrgManager } from "../../models";
 import { projectsService } from "./projects.service";
 import { projectReposService } from "./repos.service";
 import { githubSyncService } from "../github/github.sync.service";
