@@ -37,6 +37,7 @@ export function serializeProject(p: Project) {
     departmentIds: departments.map((d) => d.id), // involved departments (lanes)
     name: p.name,
     description: p.description,
+    techStack: p.techStack ?? "",
     managerId: p.managerId ?? null,
     memberIds: [...memberSet], // everyone: PM + involved-dept members + guests
     guestIds: guests.map((g) => g.id), // individuals added on top of the departments

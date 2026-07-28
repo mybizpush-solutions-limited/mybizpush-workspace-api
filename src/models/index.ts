@@ -29,7 +29,7 @@ export const PR_STATUSES = ["open", "merged", "closed", "draft"] as const;
 export const DIGEST_FREQUENCIES = ["off", "daily", "weekly"] as const;
 // Selectable team roles (kept in sync with ui/src/types/index.ts `Role`).
 export const ROLES = [
-  "Frontend", "Backend", "DevOps", "SMM", "Graphics Designer", "UI/UX Designer",
+  "Frontend", "Backend", "DevOps", "SMM", "Marketer", "Graphics Designer", "UI/UX Designer",
   "Video Editor", "CEO", "CTO", "CIO", "CSO", "CMO", "COO",
 ] as const;
 
@@ -137,6 +137,9 @@ export class Project extends Model<InferAttributes<Project>, InferCreationAttrib
   declare departmentId: CreationOptional<string | null>;
   declare name: string;
   declare description: CreationOptional<string>;
+  // What the project is built with, e.g. "Node.js + TypeScript (Express,
+  // Sequelize, Postgres)". Surfaced to the AI so briefs target the real stack.
+  declare techStack: CreationOptional<string>;
   declare managerId: CreationOptional<string | null>;
   declare progress: CreationOptional<number>;
   declare avatarUrl: CreationOptional<string | null>;
@@ -149,6 +152,7 @@ Project.init(
     departmentId: { type: DataTypes.UUID, allowNull: true },
     name: { type: DataTypes.STRING, allowNull: false },
     description: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    techStack: { type: DataTypes.STRING(400), allowNull: false, defaultValue: "" },
     managerId: { type: DataTypes.UUID, allowNull: true },
     progress: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0, max: 100 } },
     avatarUrl: { type: DataTypes.STRING, allowNull: true },
@@ -652,6 +656,192 @@ CustomRole.init(
   { sequelize, tableName: "custom_roles" },
 );
 
+// ---- Analytics -------------------------------------------------------------
+// A tracked website. `publicKey` is the only identifier that leaves the server
+// (it lives in the snippet's data-site attribute), so it's non-guessable but
+// safe to expose.
+export class AnalyticsSite extends Model<
+  InferAttributes<AnalyticsSite>,
+  InferCreationAttributes<AnalyticsSite>
+> {
+  declare id: CreationOptional<string>;
+  declare projectId: CreationOptional<string | null>;
+  declare name: string;
+  declare domain: string;
+  declare publicKey: string;
+  declare allowedOrigins: CreationOptional<string[]>;
+  // Read-only key that lets another of our apps render this site's numbers
+  // without a Dev Space session. Null = sharing off.
+  declare shareKey: CreationOptional<string | null>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+AnalyticsSite.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    projectId: { type: DataTypes.UUID, allowNull: true },
+    name: { type: DataTypes.STRING, allowNull: false },
+    domain: { type: DataTypes.STRING, allowNull: false },
+    publicKey: { type: DataTypes.STRING(32), allowNull: false, unique: true },
+    allowedOrigins: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
+    shareKey: { type: DataTypes.STRING(32), allowNull: true, unique: true },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "analytics_sites" },
+);
+
+export const ANALYTICS_EVENT_KINDS = ["pageview", "event"] as const;
+export type AnalyticsEventKind = (typeof ANALYTICS_EVENT_KINDS)[number];
+
+// One raw hit. Deliberately denormalised (no joins on the read path) and free of
+// personal data — the visitor is a salted daily hash, never an IP or a cookie.
+export class AnalyticsEvent extends Model<
+  InferAttributes<AnalyticsEvent>,
+  InferCreationAttributes<AnalyticsEvent>
+> {
+  declare id: CreationOptional<string>;
+  declare siteId: string;
+  declare ts: Date;
+  declare kind: CreationOptional<AnalyticsEventKind>;
+  declare name: CreationOptional<string>;
+  declare path: CreationOptional<string>;
+  declare referrerHost: CreationOptional<string>;
+  declare referrerPath: CreationOptional<string>;
+  declare utmSource: CreationOptional<string>;
+  declare utmMedium: CreationOptional<string>;
+  declare utmCampaign: CreationOptional<string>;
+  declare country: CreationOptional<string>;
+  declare deviceType: CreationOptional<string>;
+  declare browser: CreationOptional<string>;
+  declare os: CreationOptional<string>;
+  declare visitorHash: string;
+  declare sessionId: CreationOptional<string>;
+  declare durationMs: CreationOptional<number>;
+  declare createdAt: CreationOptional<Date>;
+}
+AnalyticsEvent.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    siteId: { type: DataTypes.UUID, allowNull: false },
+    ts: { type: DataTypes.DATE, allowNull: false },
+    kind: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "pageview" },
+    name: { type: DataTypes.STRING(80), allowNull: false, defaultValue: "" },
+    path: { type: DataTypes.STRING(512), allowNull: false, defaultValue: "/" },
+    referrerHost: { type: DataTypes.STRING(255), allowNull: false, defaultValue: "" },
+    referrerPath: { type: DataTypes.STRING(512), allowNull: false, defaultValue: "" },
+    utmSource: { type: DataTypes.STRING(120), allowNull: false, defaultValue: "" },
+    utmMedium: { type: DataTypes.STRING(120), allowNull: false, defaultValue: "" },
+    utmCampaign: { type: DataTypes.STRING(120), allowNull: false, defaultValue: "" },
+    country: { type: DataTypes.STRING(2), allowNull: false, defaultValue: "" },
+    deviceType: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "" },
+    browser: { type: DataTypes.STRING(40), allowNull: false, defaultValue: "" },
+    os: { type: DataTypes.STRING(40), allowNull: false, defaultValue: "" },
+    visitorHash: { type: DataTypes.STRING(64), allowNull: false },
+    sessionId: { type: DataTypes.STRING(64), allowNull: false, defaultValue: "" },
+    durationMs: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "analytics_events", updatedAt: false },
+);
+
+// Per-day, per-path rollup rebuilt by the analytics cron so dashboards over long
+// ranges never scan the raw event log.
+export class AnalyticsDaily extends Model<
+  InferAttributes<AnalyticsDaily>,
+  InferCreationAttributes<AnalyticsDaily>
+> {
+  declare id: CreationOptional<string>;
+  declare siteId: string;
+  declare day: string;
+  declare path: CreationOptional<string>;
+  declare pageviews: CreationOptional<number>;
+  declare visitors: CreationOptional<number>;
+  declare sessions: CreationOptional<number>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+AnalyticsDaily.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    siteId: { type: DataTypes.UUID, allowNull: false },
+    day: { type: DataTypes.DATEONLY, allowNull: false },
+    path: { type: DataTypes.STRING(512), allowNull: false, defaultValue: "/" },
+    pageviews: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    visitors: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    sessions: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "analytics_daily" },
+);
+
+// ---- Blog console ----------------------------------------------------------
+// A project's connection to the blog API that powers its public website. Posts
+// themselves are never stored here — the site's own API stays authoritative.
+export class BlogChannel extends Model<
+  InferAttributes<BlogChannel>,
+  InferCreationAttributes<BlogChannel>
+> {
+  declare id: CreationOptional<string>;
+  declare projectId: string;
+  declare name: string;
+  declare kind: CreationOptional<string>;
+  declare apiBaseUrl: string;
+  declare serviceToken: string;
+  declare siteUrl: CreationOptional<string>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+BlogChannel.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    projectId: { type: DataTypes.UUID, allowNull: false },
+    name: { type: DataTypes.STRING, allowNull: false },
+    kind: { type: DataTypes.STRING(32), allowNull: false, defaultValue: "hyparrow" },
+    apiBaseUrl: { type: DataTypes.STRING(500), allowNull: false },
+    serviceToken: { type: DataTypes.TEXT, allowNull: false },
+    siteUrl: { type: DataTypes.STRING(500), allowNull: false, defaultValue: "" },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "blog_channels" },
+);
+
+// Who may work on a project's blog. Assignment is restricted to the project
+// manager, a head of an involved department, or an executive admin.
+export const BLOG_EDITOR_ROLES = ["editor", "publisher"] as const;
+export type BlogEditorRole = (typeof BLOG_EDITOR_ROLES)[number];
+
+export class BlogEditor extends Model<
+  InferAttributes<BlogEditor>,
+  InferCreationAttributes<BlogEditor>
+> {
+  declare id: CreationOptional<string>;
+  declare projectId: string;
+  declare userId: string;
+  declare role: CreationOptional<BlogEditorRole>;
+  declare assignedBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+BlogEditor.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    projectId: { type: DataTypes.UUID, allowNull: false },
+    userId: { type: DataTypes.UUID, allowNull: false },
+    role: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "editor" },
+    assignedBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "blog_editors" },
+);
+
 // ---- Join (through) models -------------------------------------------------
 // Defined explicitly with timestamps:false so they match the migration's
 // timestamp-free join tables (the global define() default adds timestamps).
@@ -722,6 +912,16 @@ GithubAccount.belongsTo(User, { foreignKey: "userId" });
 Project.hasMany(ProjectRepo, { as: "repos", foreignKey: "projectId" });
 ProjectRepo.belongsTo(Project, { foreignKey: "projectId" });
 
+BlogChannel.belongsTo(Project, { as: "project", foreignKey: "projectId" });
+Project.hasMany(BlogChannel, { as: "blogChannels", foreignKey: "projectId" });
+BlogEditor.belongsTo(User, { as: "user", foreignKey: "userId" });
+BlogEditor.belongsTo(Project, { as: "project", foreignKey: "projectId" });
+
+AnalyticsSite.belongsTo(Project, { as: "project", foreignKey: "projectId" });
+Project.hasMany(AnalyticsSite, { as: "analyticsSites", foreignKey: "projectId" });
+AnalyticsEvent.belongsTo(AnalyticsSite, { as: "site", foreignKey: "siteId" });
+AnalyticsDaily.belongsTo(AnalyticsSite, { as: "site", foreignKey: "siteId" });
+
 Notification.belongsTo(User, { as: "recipient", foreignKey: "userId" });
 Notification.belongsTo(User, { as: "fromUser", foreignKey: "fromUserId" });
 
@@ -729,4 +929,5 @@ export const models = {
   User, Department, Project, Label, Task, Issue, Comment, Activity,
   PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount, GithubAccount, ProjectRepo,
   BlacklistedEmail, CustomRole, DocumentationLink,
+  AnalyticsSite, AnalyticsEvent, AnalyticsDaily, BlogChannel, BlogEditor,
 };

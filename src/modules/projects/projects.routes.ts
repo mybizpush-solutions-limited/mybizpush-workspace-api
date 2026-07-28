@@ -2,9 +2,10 @@ import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
 import { asyncHandler, badRequest, forbidden, notFound } from "../../lib/errors";
+import { assertCanManageProject } from "../../lib/permissions";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
-import { Department, Project, isOrgManager } from "../../models";
+import { Project, isOrgManager } from "../../models";
 import { projectsService } from "./projects.service";
 import { projectReposService } from "./repos.service";
 import { githubSyncService } from "../github/github.sync.service";
@@ -14,22 +15,6 @@ projectsRouter.use(requireAuth);
 
 const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
-// Editing a project: its manager, the head of any involved department, or an exec.
-async function assertCanManageProject(
-  projectId: string,
-  auth: { sub: string; accessLevel: string },
-): Promise<void> {
-  if (isOrgManager(auth.accessLevel)) return;
-  const project = await Project.findByPk(projectId, {
-    include: [{ model: Department, as: "departments", attributes: ["headId"], through: { attributes: [] } }],
-  });
-  if (!project) throw notFound("Project not found");
-  if (project.managerId === auth.sub) return;
-  const depts = (project.get("departments") as Department[] | undefined) ?? [];
-  if (depts.some((d) => d.headId === auth.sub)) return;
-  throw forbidden("Only the project manager, a department head, or an executive admin can do this");
-}
-
 const importIssueSchema = z.object({
   repoFullName: z.string().trim().min(3),
   number: z.number().int().positive(),
@@ -38,6 +23,7 @@ const importIssueSchema = z.object({
 const createSchema = z.object({
   name: z.string().trim().min(1).max(160),
   description: z.string().trim().max(4000).optional(),
+  techStack: z.string().trim().max(400).optional(),
   managerId: z.string().uuid().optional(),
   departmentIds: z.array(z.string().uuid()).optional(),
 });
@@ -45,6 +31,7 @@ const createSchema = z.object({
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(160).optional(),
   description: z.string().trim().max(4000).optional(),
+  techStack: z.string().trim().max(400).optional(),
   managerId: z.string().uuid().optional(),
   progress: z.number().int().min(0).max(100).optional(),
 });

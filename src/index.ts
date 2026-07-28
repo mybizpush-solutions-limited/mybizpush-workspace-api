@@ -3,6 +3,7 @@ import { env } from "./config/env";
 import { assertDbConnection, sequelize } from "./db/sequelize";
 import { redis } from "./redis/client";
 import { startDigestScheduler } from "./modules/digests/digests.scheduler";
+import { startAnalyticsScheduler } from "./modules/analytics/analytics.scheduler";
 // Importing the models registers them with Sequelize and wires associations.
 import "./models";
 
@@ -16,6 +17,7 @@ async function start() {
   });
 
   startDigestScheduler();
+  startAnalyticsScheduler();
 
   const shutdown = async (signal: string) => {
     console.info(`\n${signal} received — shutting down…`);

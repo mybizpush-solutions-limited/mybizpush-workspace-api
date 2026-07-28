@@ -11,11 +11,24 @@ import {
 } from "../../models";
 import { notFound } from "../../lib/errors";
 
+// Without this the model fills the stack gap from the project name alone and
+// consistently guesses PHP/Laravel. Every prompt carries it; briefs additionally
+// carry the project's own declared stack, which always wins over this default.
+const STACK_GUARDRAIL =
+  "Tech stack rules — follow these exactly. Every MyBizPush project is Node.js with " +
+  "TypeScript (Express, Sequelize, Postgres on the API; React/Vite or Next.js on the " +
+  "frontend), with one exception: the Hyparrow API is written in Go (Gin + GORM). " +
+  "Never assume PHP/Laravel, Ruby on Rails, Django, or Spring, and never emit commands " +
+  "or file paths from those ecosystems (no `artisan`, `composer`, `rails`, `manage.py`, " +
+  "no `app/Http/Controllers`). If a project states its own stack, that statement wins. " +
+  "If you genuinely cannot tell which stack applies, say so instead of guessing.";
+
 const SYSTEM_PROMPT =
   "You are the MyBizPush Dev Space assistant — a concise, practical copilot inside an internal " +
   "work-management tool organized as Departments → Projects → Tasks & Issues. Help the team " +
   "summarize issues, draft replies, break work into steps, and surface blockers. Keep answers " +
-  "brief and actionable; use short bullet lists when helpful.";
+  "brief and actionable; use short bullet lists when helpful.\n\n" +
+  STACK_GUARDRAIL;
 
 export const aiService = {
   // Free-form chat. The system prompt is prepended server-side.
@@ -72,6 +85,13 @@ export const aiService = {
       ? `${ghLink.fullName} #${ghLink.number} (${ghLink.state}) — ${ghLink.url}`
       : "(not linked to a GitHub issue)";
 
+    // The project's declared stack, or the org default. Stated explicitly so the
+    // brief targets the real toolchain instead of one inferred from the name.
+    const techStack =
+      project?.techStack?.trim() ||
+      "Node.js + TypeScript (Express, Sequelize, Postgres) unless the repository " +
+        "clearly shows otherwise";
+
     const prompt =
       `Write a clear, self-contained brief instructing an autonomous coding agent (such as ` +
       `Claude Code) to resolve the following ${itemType}. Assume the agent already has the ` +
@@ -96,7 +116,9 @@ export const aiService = {
       `by the frontend, NOT frontend code changes, so never leave it empty or write "No changes"; ` +
       `if this ${itemType} exposes or affects no API, omit the Frontend reference file entirely ` +
       `rather than emitting an empty one.\n\n` +
+      `${STACK_GUARDRAIL}\n\n` +
       `Project: ${project?.name ?? "(unknown)"}\n` +
+      `Tech stack: ${techStack}\n` +
       `Linked repositories:\n${repoList}\n\n` +
       `${itemType} title: ${item.title}\n` +
       `Status: ${item.status}\nPriority: ${item.priority}\n` +

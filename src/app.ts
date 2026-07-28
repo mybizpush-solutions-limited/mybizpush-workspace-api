@@ -24,12 +24,21 @@ import { digestsRouter } from "./modules/digests/digests.routes";
 import { googleRouter } from "./modules/google/google.routes";
 import { githubRouter } from "./modules/github/github.routes";
 import { healthRouter } from "./modules/health/health.routes";
+import { analyticsRouter } from "./modules/analytics/analytics.routes";
+import { analyticsCollectRouter } from "./modules/analytics/analytics.collect.routes";
+import { blogsRouter } from "./modules/blogs/blogs.routes";
 
 // All versioned business endpoints live under this prefix.
 export const API_PREFIX = "/api/v1";
 
 export function createApp() {
   const app = express();
+
+  // The analytics tracker and beacon endpoint are mounted FIRST, ahead of helmet
+  // and the CORS allow-list. They're served to our public marketing sites from
+  // arbitrary origins, so they carry their own permissive CORS and body parser
+  // rather than being squeezed through the Dev Space's same-origin policy.
+  app.use(analyticsCollectRouter);
 
   app.use(helmet());
   app.use(
@@ -73,6 +82,8 @@ export function createApp() {
   v1.use("/digests", digestsRouter);
   v1.use("/google", googleRouter);
   v1.use("/github", githubRouter);
+  v1.use("/analytics", analyticsRouter);
+  v1.use("/blogs", blogsRouter);
   app.use(API_PREFIX, v1);
 
   // Fallbacks

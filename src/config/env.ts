@@ -85,6 +85,16 @@ const schema = z.object({
   // Slug of the department whose members may schedule meetings (in addition to
   // executives and project managers).
   HR_DEPARTMENT_SLUG: z.string().default("hr"),
+
+  // ---- Website analytics ----
+  // Rollup keeps the dashboards fast; prune keeps the raw event log bounded.
+  ENABLE_ANALYTICS_SCHEDULER: z
+    .string()
+    .default("true")
+    .transform((s) => s !== "false"),
+  ANALYTICS_ROLLUP_CRON: z.string().default("*/15 * * * *"), // every 15 minutes
+  ANALYTICS_PRUNE_CRON: z.string().default("30 3 * * *"), // 03:30 every day
+  ANALYTICS_RETENTION_DAYS: z.coerce.number().int().positive().default(400),
 });
 
 const parsed = schema.safeParse(process.env);

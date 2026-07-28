@@ -61,25 +61,37 @@ export const projectsService = {
   async create(input: {
     name: string;
     description?: string;
+    techStack?: string;
     managerId?: string;
     departmentIds?: string[];
   }) {
     const project = await Project.create({
       name: input.name.trim(),
       description: input.description?.trim() ?? "",
+      techStack: input.techStack?.trim() ?? "",
       managerId: input.managerId ?? null,
     });
     if (input.departmentIds?.length) await (project as any).setDepartments(input.departmentIds);
     return reload(project.id);
   },
 
-  async update(id: string, patch: { name?: string; description?: string; managerId?: string; progress?: number }) {
+  async update(
+    id: string,
+    patch: {
+      name?: string;
+      description?: string;
+      techStack?: string;
+      managerId?: string;
+      progress?: number;
+    },
+  ) {
     const project = await Project.findByPk(id);
     if (!project) throw notFound("Project not found");
     const prevManager = project.managerId;
     await project.update({
       ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
       ...(patch.description !== undefined ? { description: patch.description.trim() } : {}),
+      ...(patch.techStack !== undefined ? { techStack: patch.techStack.trim() } : {}),
       ...(patch.managerId !== undefined ? { managerId: patch.managerId } : {}),
       ...(patch.progress !== undefined ? { progress: patch.progress } : {}),
     });
