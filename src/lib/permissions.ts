@@ -23,3 +23,24 @@ export async function assertCanManageProject(projectId: string, auth: Auth): Pro
   if (await canManageProject(projectId, auth)) return;
   throw forbidden("Only the project manager, a department head, or an executive admin can do this");
 }
+
+// The same rule as canManageProject, answered for every project at once. Use
+// this instead of calling canManageProject in a loop — that costs one query per
+// project. Returns "all" for org managers, who can manage everything.
+export async function manageableProjectIds(auth: Auth): Promise<Set<string> | "all"> {
+  if (isOrgManager(auth.accessLevel)) return "all";
+  const projects = await Project.findAll({
+    attributes: ["id", "managerId"],
+    include: [
+      { model: Department, as: "departments", attributes: ["headId"], through: { attributes: [] } },
+    ],
+  });
+  const ids = new Set<string>();
+  for (const project of projects) {
+    const depts = (project.get("departments") as Department[] | undefined) ?? [];
+    if (project.managerId === auth.sub || depts.some((d) => d.headId === auth.sub)) {
+      ids.add(project.id);
+    }
+  }
+  return ids;
+}

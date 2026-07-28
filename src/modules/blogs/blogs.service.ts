@@ -1,6 +1,6 @@
 import { BlogChannel, BlogEditor, Project, User, type BlogEditorRole } from "../../models";
 import { badRequest, forbidden, notFound } from "../../lib/errors";
-import { canManageProject, type Auth } from "../../lib/permissions";
+import { canManageProject, manageableProjectIds, type Auth } from "../../lib/permissions";
 import { BlogChannelClient, type ChannelActor, type PostInput } from "./blogs.channel";
 
 function serializeChannel(c: BlogChannel) {
@@ -75,30 +75,44 @@ async function clientFor(projectId: string, auth: Auth) {
 export const blogsService = {
   // ---- Channels (one per project) -----------------------------------------
 
-  // Projects the caller can work on the blog for: those they're assigned to,
-  // plus any they can manage outright.
+  // Every project whose blog this person can touch. Two kinds show up:
+  //   - connected    — a channel exists; they're assigned to it or can manage it
+  //   - not yet set up — they can manage the project but no channel exists yet
+  // The second kind matters: without it a manager has nowhere to create their
+  // first channel, and the console looks permanently empty.
   async myProjects(auth: Auth) {
-    const channels = await BlogChannel.findAll({ order: [["createdAt", "ASC"]] });
-    const assignments = await BlogEditor.findAll({ where: { userId: auth.sub } });
+    const [channels, assignments, manageable, projects] = await Promise.all([
+      BlogChannel.findAll({ order: [["createdAt", "ASC"]] }),
+      BlogEditor.findAll({ where: { userId: auth.sub } }),
+      manageableProjectIds(auth),
+      Project.findAll({ attributes: ["id", "name"], order: [["name", "ASC"]] }),
+    ]);
+
+    const channelByProject = new Map(channels.map((c) => [c.projectId, c]));
     const assigned = new Map(assignments.map((a) => [a.projectId, a.role]));
+    const canManage = (id: string) => manageable === "all" || manageable.has(id);
 
     const out: {
       projectId: string;
       projectName: string;
-      channel: ReturnType<typeof serializeChannel>;
+      channel: ReturnType<typeof serializeChannel> | null;
       role: BlogEditorRole;
       canAssign: boolean;
     }[] = [];
 
-    for (const channel of channels) {
-      const canAssign = await canManageProject(channel.projectId, auth);
-      const role = canAssign ? "publisher" : assigned.get(channel.projectId);
-      if (!role) continue;
-      const project = await Project.findByPk(channel.projectId);
+    for (const project of projects) {
+      const channel = channelByProject.get(project.id) ?? null;
+      const canAssign = canManage(project.id);
+      // Managers are implicitly publishers on their own project's blog.
+      const role = canAssign ? "publisher" : assigned.get(project.id);
+      if (!role) continue; // no relationship to this project's blog at all
+      // Someone assigned as an editor before the channel exists has nothing to
+      // do yet — only managers see the not-yet-connected entry.
+      if (!channel && !canAssign) continue;
       out.push({
-        projectId: channel.projectId,
-        projectName: project?.name ?? "Unknown project",
-        channel: serializeChannel(channel),
+        projectId: project.id,
+        projectName: project.name,
+        channel: channel ? serializeChannel(channel) : null,
         role,
         canAssign,
       });

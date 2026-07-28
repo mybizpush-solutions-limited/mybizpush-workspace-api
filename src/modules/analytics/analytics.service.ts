@@ -4,6 +4,7 @@ import { sequelize } from "../../db/sequelize";
 import { AnalyticsSite, Project } from "../../models";
 import { badRequest, notFound } from "../../lib/errors";
 import { invalidateSiteCache } from "./analytics.ingest";
+import { fetchSiteBranding } from "./branding";
 
 export const RANGES = ["24h", "7d", "30d", "90d"] as const;
 export type Range = (typeof RANGES)[number];
@@ -50,8 +51,39 @@ function serializeSite(s: AnalyticsSite) {
     publicKey: s.publicKey,
     allowedOrigins: s.allowedOrigins,
     shareKey: s.shareKey ?? null,
+    faviconUrl: s.faviconUrl ?? "",
+    ogImageUrl: s.ogImageUrl ?? "",
+    siteTitle: s.siteTitle ?? "",
+    siteDescription: s.siteDescription ?? "",
+    brandingFetchedAt: s.brandingFetchedAt?.toISOString() ?? null,
     createdAt: s.createdAt.toISOString(),
   };
+}
+
+// Is the snippet actually installed and reporting?
+//   connected — something arrived in the last 48h
+//   quiet     — it reported before, but not recently (snippet removed? no traffic?)
+//   waiting   — nothing has ever arrived; the snippet isn't live yet
+export const CONNECTION_STATUSES = ["connected", "quiet", "waiting"] as const;
+export type ConnectionStatus = (typeof CONNECTION_STATUSES)[number];
+
+const CONNECTED_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+function connectionStatus(lastEventAt: Date | null): ConnectionStatus {
+  if (!lastEventAt) return "waiting";
+  return Date.now() - lastEventAt.getTime() <= CONNECTED_WINDOW_MS ? "connected" : "quiet";
+}
+
+// Scrape the site's homepage and store what we find. Best-effort: a failure
+// leaves the previous values alone and is never surfaced to the caller, since
+// branding is decoration, not data.
+async function refreshBranding(site: AnalyticsSite): Promise<void> {
+  try {
+    const branding = await fetchSiteBranding(site.domain);
+    await site.update({ ...branding, brandingFetchedAt: new Date() });
+  } catch (err) {
+    console.error(`[analytics] branding fetch failed for ${site.domain}`, err);
+  }
 }
 
 // Normalise whatever the user typed ("https://hyparrow.com/", "www.Hyparrow.com")
@@ -65,9 +97,36 @@ function normalizeDomain(raw: string): string {
 }
 
 export const analyticsService = {
+  // Sites plus their live connection state, so the list shows at a glance which
+  // snippets are actually reporting and which were never installed.
   async listSites() {
     const sites = await AnalyticsSite.findAll({ order: [["createdAt", "ASC"]] });
-    return sites.map(serializeSite);
+    if (!sites.length) return [];
+
+    // One grouped query for every site rather than one per site.
+    const stats = await sequelize.query<{
+      site_id: string;
+      last_event_at: Date | null;
+      total: string;
+    }>(
+      `SELECT site_id, MAX(ts) AS last_event_at, COUNT(*) AS total
+         FROM analytics_events
+        WHERE site_id IN (:ids)
+        GROUP BY site_id`,
+      { type: QueryTypes.SELECT, replacements: { ids: sites.map((s) => s.id) } },
+    );
+    const byId = new Map(stats.map((r) => [r.site_id, r]));
+
+    return sites.map((site) => {
+      const stat = byId.get(site.id);
+      const lastEventAt = stat?.last_event_at ? new Date(stat.last_event_at) : null;
+      return {
+        ...serializeSite(site),
+        lastEventAt: lastEventAt?.toISOString() ?? null,
+        totalEvents: Number(stat?.total ?? 0),
+        status: connectionStatus(lastEventAt),
+      };
+    });
   },
 
   async siteById(id: string) {
@@ -96,6 +155,9 @@ export const analyticsService = {
       publicKey: crypto.randomBytes(12).toString("base64url"),
       createdBy: input.createdBy,
     });
+    // Grab the favicon/OG image before answering, so the new card is never
+    // briefly blank — the scrape is a single short-timeout request.
+    await refreshBranding(site);
     return serializeSite(site);
   },
 
@@ -104,13 +166,24 @@ export const analyticsService = {
     patch: { name?: string; domain?: string; projectId?: string | null; allowedOrigins?: string[] },
   ) {
     const site = await this.siteById(id);
+    const previousDomain = site.domain;
     await site.update({
       ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
       ...(patch.domain !== undefined ? { domain: normalizeDomain(patch.domain) } : {}),
       ...(patch.projectId !== undefined ? { projectId: patch.projectId } : {}),
       ...(patch.allowedOrigins !== undefined ? { allowedOrigins: patch.allowedOrigins } : {}),
     });
+    // A new domain means the old favicon and preview image are stale.
+    if (site.domain !== previousDomain) await refreshBranding(site);
     invalidateSiteCache(site.publicKey);
+    return serializeSite(site);
+  },
+
+  // Re-scrape branding on demand — for when a site is redesigned, or the first
+  // attempt ran before the site was live.
+  async refreshBranding(id: string) {
+    const site = await this.siteById(id);
+    await refreshBranding(site);
     return serializeSite(site);
   },
 

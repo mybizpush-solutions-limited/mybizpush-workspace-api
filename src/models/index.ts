@@ -673,6 +673,13 @@ export class AnalyticsSite extends Model<
   // Read-only key that lets another of our apps render this site's numbers
   // without a Dev Space session. Null = sharing off.
   declare shareKey: CreationOptional<string | null>;
+  // Branding scraped from the site's homepage so the sites list is scannable.
+  // URLs only — the images are loaded straight from the site by the browser.
+  declare faviconUrl: CreationOptional<string>;
+  declare ogImageUrl: CreationOptional<string>;
+  declare siteTitle: CreationOptional<string>;
+  declare siteDescription: CreationOptional<string>;
+  declare brandingFetchedAt: CreationOptional<Date | null>;
   declare createdBy: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
@@ -686,6 +693,11 @@ AnalyticsSite.init(
     publicKey: { type: DataTypes.STRING(32), allowNull: false, unique: true },
     allowedOrigins: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
     shareKey: { type: DataTypes.STRING(32), allowNull: true, unique: true },
+    faviconUrl: { type: DataTypes.STRING(1000), allowNull: false, defaultValue: "" },
+    ogImageUrl: { type: DataTypes.STRING(1000), allowNull: false, defaultValue: "" },
+    siteTitle: { type: DataTypes.STRING(300), allowNull: false, defaultValue: "" },
+    siteDescription: { type: DataTypes.STRING(600), allowNull: false, defaultValue: "" },
+    brandingFetchedAt: { type: DataTypes.DATE, allowNull: true },
     createdBy: { type: DataTypes.UUID, allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,

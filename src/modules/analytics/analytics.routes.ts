@@ -3,18 +3,18 @@ import { z } from "zod";
 import { asyncHandler, forbidden } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
-import { isOrgManager } from "../../models";
 import { analyticsService, DIMENSIONS, RANGES, type Dimension, type Range } from "./analytics.service";
 
 // The authenticated half of analytics: everything the dashboard reads, plus
-// site management. Anyone signed in can view the numbers; only chiefs and
-// executive admins can add, edit or delete a tracked site.
+// site management. Anyone signed in can view the numbers; adding, editing and
+// deleting a tracked site is executive-admin only — a site's tracking key is
+// org-wide infrastructure, not per-department.
 export const analyticsRouter = Router();
 analyticsRouter.use(requireAuth);
 
 function assertCanManageSites(accessLevel: string): void {
-  if (!isOrgManager(accessLevel)) {
-    throw forbidden("Only a chief or executive admin can manage analytics sites");
+  if (accessLevel !== "executive_admin") {
+    throw forbidden("Only an executive admin can manage analytics sites");
   }
 }
 
@@ -79,6 +79,16 @@ analyticsRouter.post(
   asyncHandler(async (req, res) => {
     assertCanManageSites(req.auth!.accessLevel);
     res.json({ site: await analyticsService.rotateKey(req.params.id!) });
+  }),
+);
+
+// Re-scrape the site's favicon / preview image (after a redesign, or if the
+// first attempt ran before the site was live).
+analyticsRouter.post(
+  "/sites/:id/refresh-branding",
+  asyncHandler(async (req, res) => {
+    assertCanManageSites(req.auth!.accessLevel);
+    res.json({ site: await analyticsService.refreshBranding(req.params.id!) });
   }),
 );
 
