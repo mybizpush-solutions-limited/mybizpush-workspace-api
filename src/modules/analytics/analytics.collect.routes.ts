@@ -6,25 +6,27 @@ import { analyticsService, DIMENSIONS, RANGES, type Dimension, type Range } from
 import { trackerScript } from "./tracker";
 import { env } from "../../config/env";
 
-// The public half of analytics: the tracker script and the beacon endpoint.
-// Both are unauthenticated and must be reachable from ANY origin (that's the
-// whole point — they run on our marketing sites, not on the Dev Space), so this
-// router carries its own permissive CORS instead of the app-wide allow-list.
+// The public half of analytics: the tracker script, the beacon endpoint, and
+// read-only shared dashboards. These are unauthenticated and must be reachable
+// from ANY origin (that's the point — they run on our marketing sites, not on
+// the Dev Space), so they carry their own permissive CORS.
 export const analyticsCollectRouter = Router();
 
+// Attached PER ROUTE, never with router.use(). This router is mounted at "/",
+// so router-level middleware would run for every request in the app and reflect
+// any origin back at the whole authenticated API — exactly what the app-wide
+// allow-list exists to prevent.
 const anyOrigin = cors({
   origin: true,
-  credentials: false,
+  credentials: false, // never combine a reflected origin with credentials
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type"],
   maxAge: 86_400,
 });
-analyticsCollectRouter.use(anyOrigin);
-analyticsCollectRouter.options("*", anyOrigin);
-// Its own body parser: this router is mounted ahead of the app-wide one so the
-// global CORS allow-list never gets a chance to reject a beacon's preflight.
-// sendBeacon posts a Blob typed application/json; fetch fallbacks post plain text.
-analyticsCollectRouter.use(express.json({ limit: "8kb", type: ["application/json", "text/plain"] }));
+
+// sendBeacon posts a Blob typed application/json; the fetch fallback may post
+// plain text. Scoped to the beacon route for the same reason as the CORS above.
+const beaconBody = express.json({ limit: "8kb", type: ["application/json", "text/plain"] });
 
 // Absolute URL the snippet posts back to. Derived from the request so the same
 // build works on localhost, staging and production without configuration.
@@ -33,7 +35,7 @@ function collectUrl(protocol: string, host: string): string {
 }
 
 // GET /px.js — the tracking snippet.
-analyticsCollectRouter.get("/px.js", (req, res) => {
+analyticsCollectRouter.get("/px.js", anyOrigin, (req, res) => {
   const proto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0] ?? req.protocol;
   const host = req.headers["x-forwarded-host"] ?? req.headers.host ?? `localhost:${env.PORT}`;
   res
@@ -54,6 +56,7 @@ const parseRange = (raw: unknown): Range => (RANGES.includes(raw as Range) ? (ra
 
 analyticsCollectRouter.get(
   "/api/analytics/share/:shareKey/summary",
+  anyOrigin,
   asyncHandler(async (req, res) => {
     const site = await analyticsService.siteByShareKey(req.params.shareKey!);
     if (!site) return void res.status(404).json({ error: "Unknown share key" });
@@ -66,6 +69,7 @@ analyticsCollectRouter.get(
 
 analyticsCollectRouter.get(
   "/api/analytics/share/:shareKey/breakdown",
+  anyOrigin,
   asyncHandler(async (req, res) => {
     const site = await analyticsService.siteByShareKey(req.params.shareKey!);
     if (!site) return void res.status(404).json({ error: "Unknown share key" });
@@ -87,6 +91,7 @@ analyticsCollectRouter.get(
 
 analyticsCollectRouter.get(
   "/api/analytics/share/:shareKey/realtime",
+  anyOrigin,
   asyncHandler(async (req, res) => {
     const site = await analyticsService.siteByShareKey(req.params.shareKey!);
     if (!site) return void res.status(404).json({ error: "Unknown share key" });
@@ -96,8 +101,11 @@ analyticsCollectRouter.get(
 
 // POST /api/collect — one beacon. Always answers 204, even for unknown site
 // keys, so the endpoint can't be used to probe which keys exist.
+analyticsCollectRouter.options("/api/collect", anyOrigin);
 analyticsCollectRouter.post(
   "/api/collect",
+  anyOrigin,
+  beaconBody,
   asyncHandler(async (req, res) => {
     try {
       await ingestService.record(req, (req.body ?? {}) as Beacon);
