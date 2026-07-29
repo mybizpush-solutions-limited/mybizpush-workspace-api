@@ -52,6 +52,14 @@ blogsRouter.get(
   }),
 );
 
+// Everything awaiting review, across every blog this person publishes for.
+blogsRouter.get(
+  "/review-queue",
+  asyncHandler(async (req, res) => {
+    res.json({ items: await blogsService.reviewQueue(req.auth!) });
+  }),
+);
+
 blogsRouter.get(
   "/projects/:projectId/channel",
   asyncHandler(async (req, res) => {

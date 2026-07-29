@@ -53,10 +53,11 @@ async function actorFor(auth: Auth, role: BlogEditorRole): Promise<ChannelActor>
   return { email: user.email, name: user.name, role };
 }
 
-// Editors can't publish. Anything they mark "approved"/"rejected" is downgraded
-// to "pending" so a publisher still has to sign it off.
-function guardStatus(role: BlogEditorRole, status?: PostInput["status"]): PostInput["status"] {
-  if (!status || role === "publisher") return status;
+// Writing a post never publishes it, whoever you are. Saving sends it to
+// "pending" and a publisher signs it off through the explicit approve action —
+// so every post gets a second look, and there's a review queue to work from.
+function guardStatus(_role: BlogEditorRole, status?: PostInput["status"]): PostInput["status"] {
+  if (!status) return status;
   return status === "approved" || status === "rejected" ? "pending" : status;
 }
 
@@ -279,6 +280,36 @@ export const blogsService = {
     return client.list({ status });
   },
 
+  // Everything awaiting sign-off, across every blog this person publishes for.
+  // Once anyone approves or rejects a post it leaves this list, so two
+  // publishers can work the queue without stepping on each other.
+  async reviewQueue(auth: Auth) {
+    const workspaces = await this.myProjects(auth);
+    const publishable = workspaces.filter((w) => w.channel && w.role === "publisher");
+
+    const perProject = await Promise.all(
+      publishable.map(async (w) => {
+        try {
+          const { posts } = await this.listPosts(w.projectId, auth, "pending");
+          return posts.map((post) => ({
+            projectId: w.projectId,
+            projectName: w.projectName,
+            channelName: w.channel!.name,
+            post,
+          }));
+        } catch (err) {
+          // One unreachable site API must not blank the whole queue.
+          console.error(`[blogs] review queue: ${w.projectName} unreachable`, err);
+          return [];
+        }
+      }),
+    );
+
+    return perProject
+      .flat()
+      .sort((a, b) => (a.post.updatedAt < b.post.updatedAt ? 1 : -1));
+  },
+
   async getPost(projectId: string, postId: string, auth: Auth) {
     const { client } = await clientFor(projectId, auth);
     return client.get(postId);
@@ -288,9 +319,7 @@ export const blogsService = {
     const { client, access, channel } = await clientFor(projectId, auth);
     const status = guardStatus(access.role, input.status);
     assertPublishable({ ...input, status });
-    const post = await client.create({ ...input, status });
-    if (post.status === "approved") await onPublished(post, channel, auth);
-    return post;
+    return client.create({ ...input, status });
   },
 
   async updatePost(projectId: string, postId: string, input: PostInput, auth: Auth) {
@@ -302,10 +331,7 @@ export const blogsService = {
       const current = await client.get(postId);
       assertPublishable({ ...current, ...input, status });
     }
-    const wasPublished = status === "approved";
-    const post = await client.update(postId, { ...input, status });
-    if (wasPublished && post.status === "approved") await onPublished(post, channel, auth);
-    return post;
+    return client.update(postId, { ...input, status });
   },
 
   async deletePost(projectId: string, postId: string, auth: Auth) {
