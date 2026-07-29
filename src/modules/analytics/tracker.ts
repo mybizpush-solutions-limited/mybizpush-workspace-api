@@ -14,16 +14,24 @@ export function trackerScript(collectUrl: string): string {
   if(!key)return;
   var endpoint=${JSON.stringify(collectUrl)};
   var sid=Math.random().toString(36).slice(2)+Date.now().toString(36);
+  // Feature-detect once: Request honours "keepalive" in every current browser.
+  var supportsKeepalive=(function(){try{return "keepalive" in new Request("");}catch(e){return false;}})();
   var lastPath=null,enteredAt=Date.now();
 
   function send(body,beacon){
     body.k=key;body.s=sid;
     try{
       var json=JSON.stringify(body);
-      if(beacon&&navigator.sendBeacon){
-        navigator.sendBeacon(endpoint,new Blob([json],{type:"application/json"}));
-      }else{
-        fetch(endpoint,{method:"POST",body:json,headers:{"Content-Type":"application/json"},keepalive:true,mode:"cors",credentials:"omit"}).catch(function(){});
+      // fetch+keepalive survives page unload exactly like sendBeacon, but lets
+      // us send credentials:"omit". That matters: sendBeacon is ALWAYS
+      // credentials:"include", and the collector reflects arbitrary origins, so
+      // it can't legally answer with allow-credentials. An uncredentialed
+      // request sidesteps the whole problem. text/plain keeps it a "simple"
+      // request, so there's no preflight either.
+      if(supportsKeepalive){
+        fetch(endpoint,{method:"POST",body:json,headers:{"Content-Type":"text/plain;charset=UTF-8"},keepalive:true,mode:"cors",credentials:"omit"}).catch(function(){});
+      }else if(navigator.sendBeacon){
+        navigator.sendBeacon(endpoint,new Blob([json],{type:"text/plain;charset=UTF-8"}));
       }
     }catch(e){}
   }
