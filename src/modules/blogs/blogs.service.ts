@@ -2,7 +2,13 @@ import { BlogChannel, BlogEditor, Project, User, type BlogEditorRole } from "../
 import { badRequest, forbidden, notFound } from "../../lib/errors";
 import { tasksService } from "../workitems/workitems.service";
 import { canManageProject, manageableProjectIds, type Auth } from "../../lib/permissions";
-import { BlogChannelClient, type ChannelActor, type PostInput } from "./blogs.channel";
+import {
+  BlogChannelClient,
+  type ChannelActor,
+  type PostInput,
+  type ReviewCommentInput,
+  type ReviewCommentPatch,
+} from "./blogs.channel";
 
 function serializeChannel(c: BlogChannel) {
   return {
@@ -343,20 +349,71 @@ export const blogsService = {
     await client.remove(postId);
   },
 
-  async approvePost(projectId: string, postId: string, auth: Auth) {
+  async approvePost(projectId: string, postId: string, auth: Auth, feedback = "") {
     const { client, access, channel } = await clientFor(projectId, auth);
     if (access.role !== "publisher") throw forbidden("Only a blog publisher can approve posts");
     // Same rule as publishing from the editor: no cover image, no link preview.
     assertPublishable({ ...(await client.get(postId)), status: "approved" });
-    const post = await client.approve(postId);
+    const post = await client.approve(postId, feedback);
     await onPublished(post, channel, auth);
     return post;
   },
 
-  async rejectPost(projectId: string, postId: string, auth: Auth) {
+  async rejectPost(projectId: string, postId: string, auth: Auth, feedback: string) {
     const { client, access } = await clientFor(projectId, auth);
     if (access.role !== "publisher") throw forbidden("Only a blog publisher can reject posts");
-    return client.reject(postId);
+    // The remote enforces this too, but catching it here means the console can
+    // say so without a round trip through a 400.
+    if (!feedback.trim()) {
+      throw badRequest("Tell the author what needs to change before sending the post back");
+    }
+    return client.reject(postId, feedback);
+  },
+
+  // ---- Review --------------------------------------------------------------
+
+  // The automated check, the inline notes, and the decision history. Anyone who
+  // can open the post can read these: an author needs to see the feedback on
+  // their own draft as much as a publisher needs to write it.
+  async getReview(projectId: string, postId: string, auth: Auth) {
+    const { client } = await clientFor(projectId, auth);
+    return client.review(postId);
+  },
+
+  // Running the check costs a model call on the remote, so it's the reviewer's
+  // tool rather than something an author can spam before submitting.
+  async runAIReview(projectId: string, postId: string, auth: Auth) {
+    const { client, access } = await clientFor(projectId, auth);
+    if (access.role !== "publisher") {
+      throw forbidden("Only a blog publisher can run the automated review");
+    }
+    return client.runAIReview(postId);
+  },
+
+  async addReviewComment(
+    projectId: string,
+    postId: string,
+    input: ReviewCommentInput,
+    auth: Auth,
+  ) {
+    const { client } = await clientFor(projectId, auth);
+    return client.addComment(postId, input);
+  },
+
+  async updateReviewComment(
+    projectId: string,
+    postId: string,
+    commentId: string,
+    patch: ReviewCommentPatch,
+    auth: Auth,
+  ) {
+    const { client } = await clientFor(projectId, auth);
+    return client.updateComment(postId, commentId, patch);
+  },
+
+  async deleteReviewComment(projectId: string, postId: string, commentId: string, auth: Auth) {
+    const { client } = await clientFor(projectId, auth);
+    await client.deleteComment(postId, commentId);
   },
 
   async uploadImage(

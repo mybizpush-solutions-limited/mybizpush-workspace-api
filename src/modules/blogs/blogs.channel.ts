@@ -38,6 +38,65 @@ export type ChannelActor = {
   role: "editor" | "publisher";
 };
 
+// ---- Review ----------------------------------------------------------------
+
+/** One thing the automated pre-publication check flagged. */
+export type ReviewFinding = {
+  category: string;
+  severity: "critical" | "high" | "medium" | "low" | string;
+  title: string;
+  detail: string;
+  quote: string;
+  /** The section the quote came from, when the reviewer could place it. */
+  anchorId: string;
+  suggestion: string;
+};
+
+export type AIReview = {
+  id: string;
+  verdict: "pass" | "warn" | "fail";
+  seoScore: number;
+  safetyScore: number;
+  summary: string;
+  findings: ReviewFinding[];
+  model: string;
+  requestedByName: string;
+  createdAt: string;
+};
+
+/** A reviewer's note against one section of the post. */
+export type ReviewComment = {
+  id: string;
+  anchorId: string;
+  quote: string;
+  body: string;
+  resolved: boolean;
+  authorId: string;
+  authorName: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** An approve or reject, with the feedback that went with it. */
+export type ReviewDecision = {
+  id: string;
+  decision: "approved" | "rejected";
+  feedback: string;
+  reviewerName: string;
+  createdAt: string;
+};
+
+export type ReviewBundle = {
+  aiReview: AIReview | null;
+  /** True when the post has been edited since that review ran. */
+  aiReviewStale: boolean;
+  comments: ReviewComment[];
+  decisions: ReviewDecision[];
+};
+
+export type ReviewCommentInput = { anchorId?: string; quote?: string; body: string };
+export type ReviewCommentPatch = { body?: string; resolved?: boolean };
+
 type HyparrowBlog = {
   id: string;
   title?: string;
@@ -56,12 +115,115 @@ type HyparrowBlog = {
   author?: { firstName?: string; lastName?: string; email?: string; name?: string } | null;
 };
 
+type HyparrowUser = {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  name?: string;
+} | null;
+
+type HyparrowFinding = {
+  category?: string;
+  severity?: string;
+  title?: string;
+  detail?: string;
+  quote?: string;
+  anchor_id?: string;
+  suggestion?: string;
+};
+
+type HyparrowAIReview = {
+  id: string;
+  verdict?: string;
+  seo_score?: number;
+  safety_score?: number;
+  summary?: string;
+  findings?: HyparrowFinding[] | null;
+  model?: string;
+  created_at?: string;
+  requester?: HyparrowUser;
+};
+
+type HyparrowReviewComment = {
+  id: string;
+  anchor_id?: string;
+  quote?: string;
+  body?: string;
+  resolved?: boolean;
+  author_id?: string;
+  created_at?: string;
+  updated_at?: string;
+  author?: HyparrowUser;
+};
+
+type HyparrowReviewDecision = {
+  id: string;
+  decision?: string;
+  feedback?: string;
+  created_at?: string;
+  reviewer?: HyparrowUser;
+};
+
 const STATUSES = new Set(["draft", "pending", "approved", "rejected"]);
 
 function authorName(author: HyparrowBlog["author"]): string {
   if (!author) return "";
   if (author.name) return author.name;
   return [author.firstName, author.lastName].filter(Boolean).join(" ").trim();
+}
+
+function personName(user: HyparrowUser): string {
+  if (!user) return "";
+  if (user.name) return user.name;
+  const full = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
+  return full || user.email || "";
+}
+
+function reviewFromHyparrow(r: HyparrowAIReview): AIReview {
+  const verdict = r.verdict === "pass" || r.verdict === "fail" ? r.verdict : "warn";
+  return {
+    id: r.id,
+    verdict,
+    seoScore: r.seo_score ?? 0,
+    safetyScore: r.safety_score ?? 0,
+    summary: r.summary ?? "",
+    findings: (r.findings ?? []).map((f) => ({
+      category: f.category ?? "other",
+      severity: f.severity ?? "medium",
+      title: f.title ?? "",
+      detail: f.detail ?? "",
+      quote: f.quote ?? "",
+      anchorId: f.anchor_id ?? "",
+      suggestion: f.suggestion ?? "",
+    })),
+    model: r.model ?? "",
+    requestedByName: personName(r.requester ?? null),
+    createdAt: r.created_at ?? "",
+  };
+}
+
+function commentFromHyparrow(c: HyparrowReviewComment): ReviewComment {
+  return {
+    id: c.id,
+    anchorId: c.anchor_id ?? "",
+    quote: c.quote ?? "",
+    body: c.body ?? "",
+    resolved: c.resolved ?? false,
+    authorId: c.author_id ?? "",
+    authorName: personName(c.author ?? null),
+    createdAt: c.created_at ?? "",
+    updatedAt: c.updated_at ?? "",
+  };
+}
+
+function decisionFromHyparrow(d: HyparrowReviewDecision): ReviewDecision {
+  return {
+    id: d.id,
+    decision: d.decision === "approved" ? "approved" : "rejected",
+    feedback: d.feedback ?? "",
+    reviewerName: personName(d.reviewer ?? null),
+    createdAt: d.created_at ?? "",
+  };
 }
 
 function fromHyparrow(b: HyparrowBlog): RemotePost {
@@ -130,7 +292,9 @@ export class BlogChannelClient {
       res = await fetch(this.url(path), {
         ...init,
         headers: { ...this.headers(), ...(init.headers as Record<string, string> | undefined) },
-        signal: AbortSignal.timeout(20_000),
+        // Twenty seconds suits every ordinary call; a caller that knows it is
+        // waiting on something slower (the AI review) passes its own signal.
+        signal: init.signal ?? AbortSignal.timeout(20_000),
       });
     } catch (err) {
       // A dead or misconfigured site API is a gateway problem, not the user's.
@@ -211,14 +375,74 @@ export class BlogChannelClient {
 
   // Hyparrow's approve/reject answer with a message rather than the post, so
   // re-read it to hand the console back a current record either way.
-  async approve(id: string): Promise<RemotePost> {
-    await this.request(`/${id}/approve`, { method: "PATCH" });
+  async approve(id: string, feedback = ""): Promise<RemotePost> {
+    await this.request(`/${id}/approve`, this.json({ method: "PATCH" }, { feedback }));
     return this.get(id);
   }
 
-  async reject(id: string): Promise<RemotePost> {
-    await this.request(`/${id}/reject`, { method: "PATCH" });
+  async reject(id: string, feedback: string): Promise<RemotePost> {
+    await this.request(`/${id}/reject`, this.json({ method: "PATCH" }, { feedback }));
     return this.get(id);
+  }
+
+  // ---- Review -------------------------------------------------------------
+
+  // Everything the review panel shows, in one round trip.
+  async review(id: string): Promise<ReviewBundle> {
+    const body = await this.request<{
+      data: {
+        ai_review?: HyparrowAIReview | null;
+        ai_review_stale?: boolean;
+        comments?: HyparrowReviewComment[] | null;
+        decisions?: HyparrowReviewDecision[] | null;
+      };
+    }>(`/${id}/review`);
+
+    const data = body.data ?? {};
+    return {
+      aiReview: data.ai_review ? reviewFromHyparrow(data.ai_review) : null,
+      aiReviewStale: data.ai_review_stale ?? false,
+      comments: (data.comments ?? []).map(commentFromHyparrow),
+      decisions: (data.decisions ?? []).map(decisionFromHyparrow),
+    };
+  }
+
+  // The automated safety/SEO pass. Slower than everything else here — the
+  // remote hands the post to a language model — so it gets its own timeout.
+  async runAIReview(id: string): Promise<AIReview> {
+    const body = await this.request<{ data: HyparrowAIReview }>(`/${id}/ai-review`, {
+      method: "POST",
+      signal: AbortSignal.timeout(120_000),
+    });
+    return reviewFromHyparrow(body.data);
+  }
+
+  async addComment(id: string, input: ReviewCommentInput): Promise<ReviewComment> {
+    const body = await this.request<{ data: HyparrowReviewComment }>(
+      `/${id}/review-comments`,
+      this.json({ method: "POST" }, {
+        anchor_id: input.anchorId ?? "",
+        quote: input.quote ?? "",
+        body: input.body,
+      }),
+    );
+    return commentFromHyparrow(body.data);
+  }
+
+  async updateComment(
+    id: string,
+    commentId: string,
+    patch: ReviewCommentPatch,
+  ): Promise<ReviewComment> {
+    const body = await this.request<{ data: HyparrowReviewComment }>(
+      `/${id}/review-comments/${commentId}`,
+      this.json({ method: "PATCH" }, patch),
+    );
+    return commentFromHyparrow(body.data);
+  }
+
+  async deleteComment(id: string, commentId: string): Promise<void> {
+    await this.request(`/${id}/review-comments/${commentId}`, { method: "DELETE" });
   }
 
   // Cover images are uploaded straight through to the site's own media store

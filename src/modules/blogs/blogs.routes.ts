@@ -42,6 +42,25 @@ const postSchema = z.object({
   seoDescription: z.string().trim().max(500).optional(),
 });
 
+// Feedback the reviewer leaves with a decision. Optional on approve ("nice
+// work"), required on reject — enforced in the service so the rule lives with
+// the behaviour rather than with the parsing.
+const decisionSchema = z.object({
+  feedback: z.string().trim().max(5000).optional(),
+});
+
+const reviewCommentSchema = z.object({
+  // The id of the block the note is pinned to, stamped by the editor.
+  anchorId: z.string().trim().max(64).optional(),
+  quote: z.string().trim().max(400).optional(),
+  body: z.string().trim().min(1).max(5000),
+});
+
+const reviewCommentPatchSchema = z.object({
+  body: z.string().trim().min(1).max(5000).optional(),
+  resolved: z.boolean().optional(),
+});
+
 // ---- Channels ---------------------------------------------------------------
 
 // Every project whose blog this user may work on, with their role on each.
@@ -169,17 +188,95 @@ blogsRouter.delete(
 
 blogsRouter.post(
   "/projects/:projectId/posts/:postId/approve",
+  validateBody(decisionSchema),
   asyncHandler(async (req, res) => {
-    const post = await blogsService.approvePost(req.params.projectId!, req.params.postId!, req.auth!);
+    const post = await blogsService.approvePost(
+      req.params.projectId!,
+      req.params.postId!,
+      req.auth!,
+      req.body.feedback ?? "",
+    );
     res.json({ post });
   }),
 );
 
 blogsRouter.post(
   "/projects/:projectId/posts/:postId/reject",
+  validateBody(decisionSchema),
   asyncHandler(async (req, res) => {
-    const post = await blogsService.rejectPost(req.params.projectId!, req.params.postId!, req.auth!);
+    const post = await blogsService.rejectPost(
+      req.params.projectId!,
+      req.params.postId!,
+      req.auth!,
+      req.body.feedback ?? "",
+    );
     res.json({ post });
+  }),
+);
+
+// ---- Review -----------------------------------------------------------------
+
+// The automated check, the inline notes, and the decision history in one call.
+blogsRouter.get(
+  "/projects/:projectId/posts/:postId/review",
+  asyncHandler(async (req, res) => {
+    res.json(await blogsService.getReview(req.params.projectId!, req.params.postId!, req.auth!));
+  }),
+);
+
+// Runs the post through the site API's AI reviewer. Can take a while — it's a
+// model call on the far side.
+blogsRouter.post(
+  "/projects/:projectId/posts/:postId/ai-review",
+  asyncHandler(async (req, res) => {
+    const review = await blogsService.runAIReview(
+      req.params.projectId!,
+      req.params.postId!,
+      req.auth!,
+    );
+    res.json({ review });
+  }),
+);
+
+blogsRouter.post(
+  "/projects/:projectId/posts/:postId/comments",
+  validateBody(reviewCommentSchema),
+  asyncHandler(async (req, res) => {
+    const comment = await blogsService.addReviewComment(
+      req.params.projectId!,
+      req.params.postId!,
+      req.body,
+      req.auth!,
+    );
+    res.status(201).json({ comment });
+  }),
+);
+
+blogsRouter.patch(
+  "/projects/:projectId/posts/:postId/comments/:commentId",
+  validateBody(reviewCommentPatchSchema),
+  asyncHandler(async (req, res) => {
+    const comment = await blogsService.updateReviewComment(
+      req.params.projectId!,
+      req.params.postId!,
+      req.params.commentId!,
+      req.body,
+      req.auth!,
+    );
+    res.json({ comment });
+  }),
+);
+
+blogsRouter.delete(
+  "/projects/:projectId/posts/:postId/comments/:commentId",
+  asyncHandler(async (req, res) => {
+    await blogsService.deleteReviewComment(
+      req.params.projectId!,
+      req.params.postId!,
+      req.params.commentId!,
+      req.auth!,
+    );
+    res.status(204).end();
   }),
 );
 
