@@ -316,14 +316,14 @@ export const blogsService = {
   },
 
   async createPost(projectId: string, input: PostInput, auth: Auth) {
-    const { client, access, channel } = await clientFor(projectId, auth);
+    const { client, access } = await clientFor(projectId, auth);
     const status = guardStatus(access.role, input.status);
     assertPublishable({ ...input, status });
     return client.create({ ...input, status });
   },
 
   async updatePost(projectId: string, postId: string, input: PostInput, auth: Auth) {
-    const { client, access, channel } = await clientFor(projectId, auth);
+    const { client, access } = await clientFor(projectId, auth);
     const status = guardStatus(access.role, input.status);
     if (status) {
       // Validate against the merged post, not just the patch — the image may
