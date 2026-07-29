@@ -291,7 +291,11 @@ export const blogsService = {
       publishable.map(async (w) => {
         try {
           const { posts } = await this.listPosts(w.projectId, auth, "pending");
-          return posts.map((post) => ({
+          // Don't trust the remote to have honoured ?status=pending — a channel
+          // that ignores it would leave published posts sitting in the queue.
+          return posts
+            .filter((post) => post.status === "pending")
+            .map((post) => ({
             projectId: w.projectId,
             projectName: w.projectName,
             channelName: w.channel!.name,
