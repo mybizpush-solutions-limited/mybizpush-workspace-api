@@ -141,14 +141,27 @@ export class BlogChannelClient {
       );
     }
 
-    const body = (await res.json().catch(() => null)) as
-      | { success?: boolean; data?: unknown; error?: string; total?: number }
-      | null;
+    // Read as text first: a crashed upstream (or a proxy in front of it) answers
+    // with an empty or HTML body, and swallowing that leaves nothing to debug.
+    type Envelope = { success?: boolean; data?: unknown; error?: string; total?: number };
+    const raw = await res.text().catch(() => "");
+    let body: Envelope | null = null;
+    try {
+      body = raw ? (JSON.parse(raw) as Envelope) : null;
+    } catch {
+      body = null;
+    }
 
     if (!res.ok || body?.success === false) {
+      const detail =
+        body?.error ??
+        // Not JSON — surface a trimmed snippet of whatever did come back.
+        (raw.trim() ? `${res.status}: ${raw.replace(/<[^>]*>/g, " ").trim().slice(0, 200)}` : "");
       throw new AppError(
         res.status === 401 || res.status === 403 ? 403 : res.status,
-        body?.error ?? `The ${this.channel.name} blog API returned ${res.status}`,
+        detail
+          ? `${this.channel.name} blog API: ${detail}`
+          : `The ${this.channel.name} blog API returned ${res.status} with an empty body — it likely crashed. Check its logs.`,
         "channel_error",
       );
     }

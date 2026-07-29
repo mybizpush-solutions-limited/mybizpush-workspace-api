@@ -86,6 +86,22 @@ async function refreshBranding(site: AnalyticsSite): Promise<void> {
   }
 }
 
+// Sites currently being backfilled, so overlapping list calls don't each start
+// their own scrape of the same domain.
+const backfilling = new Set<string>();
+
+// Fetch branding for any site that has never had it, in the background. Runs at
+// most a few at a time and retries on the next list call if a site was down.
+function backfillBranding(sites: AnalyticsSite[]): void {
+  const pending = sites
+    .filter((s) => !s.brandingFetchedAt && !backfilling.has(s.id))
+    .slice(0, 5);
+  for (const site of pending) {
+    backfilling.add(site.id);
+    void refreshBranding(site).finally(() => backfilling.delete(site.id));
+  }
+}
+
 // Normalise whatever the user typed ("https://hyparrow.com/", "www.Hyparrow.com")
 // down to a bare lowercase hostname.
 function normalizeDomain(raw: string): string {
@@ -102,6 +118,11 @@ export const analyticsService = {
   async listSites() {
     const sites = await AnalyticsSite.findAll({ order: [["createdAt", "ASC"]] });
     if (!sites.length) return [];
+
+    // Self-heal: sites added before branding existed (or whose first scrape
+    // failed) have never been fetched. Kick those off in the background so the
+    // list fills in on its own rather than needing a manual refresh each time.
+    void backfillBranding(sites);
 
     // One grouped query for every site rather than one per site.
     const stats = await sequelize.query<{

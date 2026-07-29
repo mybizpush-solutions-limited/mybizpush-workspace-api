@@ -1,5 +1,6 @@
 import { BlogChannel, BlogEditor, Project, User, type BlogEditorRole } from "../../models";
 import { badRequest, forbidden, notFound } from "../../lib/errors";
+import { tasksService } from "../workitems/workitems.service";
 import { canManageProject, manageableProjectIds, type Auth } from "../../lib/permissions";
 import { BlogChannelClient, type ChannelActor, type PostInput } from "./blogs.channel";
 
@@ -57,6 +58,60 @@ async function actorFor(auth: Auth, role: BlogEditorRole): Promise<ChannelActor>
 function guardStatus(role: BlogEditorRole, status?: PostInput["status"]): PostInput["status"] {
   if (!status || role === "publisher") return status;
   return status === "approved" || status === "rejected" ? "pending" : status;
+}
+
+// A cover image is mandatory for anything leaving draft: it becomes the og:image
+// on the public page, so a post without one shares as a blank card on every
+// social platform and in every link preview.
+function assertPublishable(post: { imageUrl?: string; status?: PostInput["status"] }): void {
+  if (!post.status || post.status === "draft") return;
+  if (!post.imageUrl?.trim()) {
+    throw badRequest(
+      "A cover image is required before a post can be submitted or published — it's used as the link preview image.",
+    );
+  }
+}
+
+// After a post goes live, open a task for its author to submit the URL for
+// indexing. Search engines find new pages on their own eventually; asking
+// explicitly is what makes a post discoverable the same week it ships.
+async function onPublished(
+  post: { title: string; slug: string },
+  channel: BlogChannel,
+  auth: Auth,
+): Promise<void> {
+  try {
+    // Only build a link when we have both halves. A site URL with no slug
+    // produces ".../blogs/", which sends whoever picks the task to the index
+    // page and looks like a bug.
+    const url =
+      channel.siteUrl && post.slug
+        ? `${channel.siteUrl.replace(/\/+$/, "")}/blogs/${post.slug}`
+        : "";
+
+    await tasksService.create(
+      {
+        projectId: channel.projectId,
+        title: `Submit "${post.title}" for search indexing`,
+        description:
+          (url
+            ? `The post is live at ${url}\n\n`
+            : `The post is live — open it from the blog console to copy its URL.\n\n`) +
+          `Get it indexed so it can be found in search:\n\n` +
+          `1. **Google** — open Search Console for this site, paste the URL into the "Inspect any URL" bar at the top, then click **Request indexing**.\n` +
+          `2. **Bing / DuckDuckGo / Yahoo** — open Bing Webmaster Tools → **URL Submission** and submit the same URL. This covers Bing-powered engines.\n` +
+          `3. Confirm the post appears in the site's sitemap (\`/sitemap.xml\`) so it gets recrawled automatically from now on.\n` +
+          `4. Share the link once somewhere public — an external link is the strongest crawl signal.\n\n` +
+          `Close this task once the URL shows as submitted.`,
+        priority: "medium",
+        assigneeIds: [auth.sub],
+      },
+      auth.sub,
+    );
+  } catch (err) {
+    // Publishing succeeded; a failed follow-up task must not undo that.
+    console.error("[blogs] couldn't create the search-indexing task", err);
+  }
 }
 
 async function clientFor(projectId: string, auth: Auth) {
@@ -230,13 +285,27 @@ export const blogsService = {
   },
 
   async createPost(projectId: string, input: PostInput, auth: Auth) {
-    const { client, access } = await clientFor(projectId, auth);
-    return client.create({ ...input, status: guardStatus(access.role, input.status) });
+    const { client, access, channel } = await clientFor(projectId, auth);
+    const status = guardStatus(access.role, input.status);
+    assertPublishable({ ...input, status });
+    const post = await client.create({ ...input, status });
+    if (post.status === "approved") await onPublished(post, channel, auth);
+    return post;
   },
 
   async updatePost(projectId: string, postId: string, input: PostInput, auth: Auth) {
-    const { client, access } = await clientFor(projectId, auth);
-    return client.update(postId, { ...input, status: guardStatus(access.role, input.status) });
+    const { client, access, channel } = await clientFor(projectId, auth);
+    const status = guardStatus(access.role, input.status);
+    if (status) {
+      // Validate against the merged post, not just the patch — the image may
+      // already be set from an earlier save.
+      const current = await client.get(postId);
+      assertPublishable({ ...current, ...input, status });
+    }
+    const wasPublished = status === "approved";
+    const post = await client.update(postId, { ...input, status });
+    if (wasPublished && post.status === "approved") await onPublished(post, channel, auth);
+    return post;
   },
 
   async deletePost(projectId: string, postId: string, auth: Auth) {
@@ -245,9 +314,13 @@ export const blogsService = {
   },
 
   async approvePost(projectId: string, postId: string, auth: Auth) {
-    const { client, access } = await clientFor(projectId, auth);
+    const { client, access, channel } = await clientFor(projectId, auth);
     if (access.role !== "publisher") throw forbidden("Only a blog publisher can approve posts");
-    return client.approve(postId);
+    // Same rule as publishing from the editor: no cover image, no link preview.
+    assertPublishable({ ...(await client.get(postId)), status: "approved" });
+    const post = await client.approve(postId);
+    await onPublished(post, channel, auth);
+    return post;
   },
 
   async rejectPost(projectId: string, postId: string, auth: Auth) {
