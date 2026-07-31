@@ -30,6 +30,11 @@ const schema = z.object({
 
   OPENROUTER_API_KEY: z.string().optional().default(""),
   OPENROUTER_MODEL: z.string().default("openai/gpt-oss-20b"),
+  // The assistant runs a tool-calling loop, which the small default model above
+  // handles poorly (it tends to describe a tool call in prose instead of
+  // emitting one). Kept separate so summaries/briefs can stay on the cheap model
+  // while the agent uses one that reliably supports function calling.
+  OPENROUTER_AGENT_MODEL: z.string().default("anthropic/claude-sonnet-5"),
   OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
 
   // Public URL of the UI (used in emails, e.g. the password-reset link).
