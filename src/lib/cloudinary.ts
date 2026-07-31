@@ -91,9 +91,77 @@ export function uploadBuffer(buffer: Buffer, options: UploadOptions = {}): Promi
 }
 
 // Best-effort delete from Cloudinary (used on attachment removal + save-failure cleanup).
-export async function destroyAsset(publicId: string, resourceType: ResourceType = "image"): Promise<void> {
+// `type` matters for assets we stored as "authenticated" (database backups) —
+// destroy scopes by delivery type and silently no-ops on a mismatch.
+export async function destroyAsset(
+  publicId: string,
+  resourceType: ResourceType = "image",
+  type: "upload" | "authenticated" | "private" = "upload",
+): Promise<void> {
   ensureConfigured();
-  await cloudinary.uploader.destroy(publicId, { resource_type: resourceType === "auto" ? "image" : resourceType });
+  await cloudinary.uploader.destroy(publicId, {
+    resource_type: resourceType === "auto" ? "image" : resourceType,
+    type,
+  });
+}
+
+// Is Cloudinary usable at all? Lets the UI explain *why* a backup went to local
+// disk instead of failing mysteriously.
+export function isCloudinaryConfigured(): boolean {
+  return Boolean(env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET);
+}
+
+export interface UploadFileOptions {
+  folder: string;
+  publicId: string;
+  tags?: string[];
+  /** "authenticated" keeps the asset off the public CDN — required for dumps. */
+  type?: "upload" | "authenticated";
+}
+
+// Upload a file *from disk* in chunks. Database dumps are far too large to read
+// into a Buffer the way uploadBuffer does, and upload_large resumes per chunk
+// rather than restarting a multi-hundred-megabyte POST.
+export function uploadFile(filePath: string, options: UploadFileOptions): Promise<UploadApiResponse> {
+  ensureConfigured();
+  return new Promise((resolve, reject) => {
+    cloudinary.uploader.upload_large(
+      filePath,
+      {
+        folder: options.folder,
+        public_id: options.publicId,
+        resource_type: "raw",
+        type: options.type ?? "authenticated",
+        tags: options.tags,
+        overwrite: true,
+        unique_filename: false,
+        use_filename: false,
+        chunk_size: 20 * 1024 * 1024,
+      },
+      (error, result) => {
+        if (error || !result) return reject(error ?? new Error("Upload failed"));
+        resolve(result as UploadApiResponse);
+      },
+    );
+  });
+}
+
+// Short-lived signed link to an "authenticated" raw asset. The browser can
+// follow it directly (no bearer token), and it expires, so a leaked link
+// doesn't hand someone a permanent copy of a production database.
+export function signedDownloadUrl(
+  publicId: string,
+  format: string,
+  ttlSeconds: number,
+  attachmentFilename?: string,
+): string {
+  ensureConfigured();
+  return cloudinary.utils.private_download_url(publicId, format, {
+    resource_type: "raw",
+    type: "authenticated",
+    expires_at: Math.floor(Date.now() / 1000) + ttlSeconds,
+    attachment: attachmentFilename ?? true,
+  } as Parameters<typeof cloudinary.utils.private_download_url>[2]);
 }
 
 export { cloudinary };

@@ -127,6 +127,47 @@ The whole integration is **one GitHub App** installed on the org — no personal
 - **User connect + org check:** the same App's **Client ID/secret** drive the per-user "Connect GitHub" flow. Set the App's **Callback URL** to `GITHUB_OAUTH_REDIRECT_URI` (default `http://localhost:4000/api/v1/github/callback`) and put `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` in `.env`. Membership in `GITHUB_ORG` is verified server-side via the installation token (leave `GITHUB_ORG` empty to skip). Users connect from the onboarding wizard's **Connect your tools** step or later from **Profile → GitHub**.
 - **Webhook (auto-update PR status):** configured once on the App → **Webhook**. URL `https://<api-host>/api/v1/github/webhook`, content type `application/json`, secret = `GITHUB_WEBHOOK_SECRET`, events: **Pull request**. When a PR is merged/closed/reopened, any linked PR (on a task/issue) updates automatically.
 
+### Database backups
+
+| Method | Path                                          | Auth   | Purpose                                    |
+| ------ | --------------------------------------------- | ------ | ------------------------------------------ |
+| GET    | `/api/v1/databases/capabilities`              | Bearer | pg_dump / Cloudinary availability          |
+| GET    | `/api/v1/databases?projectId=`                | Bearer | list managed databases                     |
+| POST   | `/api/v1/databases`                           | Bearer | register a database (connection string)    |
+| GET    | `/api/v1/databases/:id`                       | Bearer | one database + last backup + schedule      |
+| PATCH  | `/api/v1/databases/:id`                       | Bearer | rename / re-point / change retention       |
+| DELETE | `/api/v1/databases/:id`                       | Bearer | remove it **and its backup artifacts**     |
+| POST   | `/api/v1/databases/:id/test`                  | Bearer | re-probe the connection, refresh size      |
+| GET    | `/api/v1/databases/:id/backups`               | Bearer | backup history (newest first)              |
+| POST   | `/api/v1/databases/:id/backups`               | Bearer | trigger a backup → **202** with a running row |
+| GET    | `/api/v1/databases/:id/schedule`              | Bearer | the schedule, if any                       |
+| PUT    | `/api/v1/databases/:id/schedule`              | Bearer | upsert the schedule                        |
+| DELETE | `/api/v1/databases/:id/schedule`              | Bearer | remove the schedule                        |
+| POST   | `/api/v1/databases/backups/:backupId/download-url` | Bearer | short-lived download link             |
+| DELETE | `/api/v1/databases/backups/:backupId`         | Bearer | delete one backup + its artifact           |
+| GET    | `/api/v1/databases/backups/file?token=`       | token  | streams a locally-stored artifact (single-use token) |
+
+**Access is by access level, not by project**: `admin`, `chief` and `executive_admin` only. A project manager or department head who is an ordinary `member` is refused — running a project shouldn't hand over the keys to its production data.
+
+How it works:
+
+- **Credentials.** All we store is the connection string, encrypted with AES-256-GCM under `SECRET_ENCRYPTION_KEY` (`lib/crypto.ts`). Host / port / database / user are also stored *unencrypted* as a non-secret projection, so the console renders without ever decrypting. The plaintext never appears in an API response — the UI only ever sees `postgres://user:••••••@host:5432/db`.
+- **Dumps.** Real `pg_dump`, spawned with discrete flags and the password passed via `PGPASSWORD` in the environment — never on the command line, where `ps` would expose it. Two formats: `custom` (pg_dump's compressed archive, restore with `pg_restore`) and `plain` (gzipped `.sql`, restore by piping into `psql`). A sha256 of the artifact is recorded so a download can be verified with `shasum -a 256`.
+- **Storage.** Cloudinary by default, as a `raw` asset with delivery type `authenticated` so it is never reachable from a public CDN URL — downloads go through a signed link that expires (`BACKUP_DOWNLOAD_TTL_SECONDS`). Cloudinary caps raw uploads at 10MB on free plans and ~100MB on paid ones, so anything over `BACKUP_CLOUDINARY_MAX_MB` (or any upload that fails) **falls back to the local volume** and says so on the backup row rather than failing the backup. `BACKUP_STORAGE_DIR` must therefore be a durable volume in production.
+- **Schedules.** Expressed as frequency + wall-clock time in an IANA timezone (`hourly` / `daily` / `weekly` / `monthly`), not cron — DST and month-length clamping (“the 31st” in February) are handled in `schedules.helpers.ts`. Each row carries a precomputed `next_run_at`, and a one-minute ticker (`BACKUP_SCHEDULER_CRON`) claims and runs what's due.
+- **Retention.** After each successful backup, all but the newest `retentionCount` succeeded backups for that database are deleted, artifact and all. Failed rows are kept — they're the record of why a night was missed.
+
+Restoring:
+
+```bash
+# custom format
+pg_restore -d "$TARGET_DATABASE_URL" --clean --if-exists backup.dump
+# plain format
+gunzip -c backup.sql.gz | psql "$TARGET_DATABASE_URL"
+```
+
+`pg_dump` must be installed on the API host and be **at least as new as the servers being dumped** — an older client refuses with `server version X; pg_dump version Y`. The Docker image installs the PostgreSQL 17 client (good for servers 13→17) and sets `PG_DUMP_PATH` accordingly; locally, `brew install postgresql@17` or equivalent. `GET /databases/capabilities` reports what the running host actually has, and the UI warns from it.
+
 ## Docker
 
 ```bash

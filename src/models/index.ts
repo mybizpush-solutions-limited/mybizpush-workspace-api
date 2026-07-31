@@ -854,6 +854,186 @@ BlogEditor.init(
   { sequelize, tableName: "blog_editors" },
 );
 
+// ---- Managed databases -----------------------------------------------------
+export const DB_ENVIRONMENTS = ["development", "staging", "production"] as const;
+export type DbEnvironment = (typeof DB_ENVIRONMENTS)[number];
+
+export const DB_STATUSES = ["unknown", "ok", "error"] as const;
+export type DbStatus = (typeof DB_STATUSES)[number];
+
+export const BACKUP_STATUSES = ["running", "succeeded", "failed"] as const;
+export type BackupStatus = (typeof BACKUP_STATUSES)[number];
+
+export const BACKUP_TRIGGERS = ["manual", "scheduled"] as const;
+export type BackupTrigger = (typeof BACKUP_TRIGGERS)[number];
+
+export const BACKUP_STORAGES = ["cloudinary", "local"] as const;
+export type BackupStorage = (typeof BACKUP_STORAGES)[number];
+
+export const BACKUP_FREQUENCIES = ["hourly", "daily", "weekly", "monthly"] as const;
+export type BackupFrequency = (typeof BACKUP_FREQUENCIES)[number];
+
+// A Postgres database a project depends on. `connectionString` is the only
+// secret and is stored encrypted; every other column is a non-secret projection
+// of it so the console never has to decrypt just to render a row.
+export class ProjectDatabase extends Model<
+  InferAttributes<ProjectDatabase>,
+  InferCreationAttributes<ProjectDatabase>
+> {
+  declare id: CreationOptional<string>;
+  declare projectId: string;
+  declare name: string;
+  declare environment: CreationOptional<DbEnvironment>;
+  declare provider: CreationOptional<string>;
+  declare connectionString: string;
+  declare host: CreationOptional<string>;
+  declare port: CreationOptional<number>;
+  declare databaseName: CreationOptional<string>;
+  declare username: CreationOptional<string>;
+  declare sslMode: CreationOptional<string>;
+  declare status: CreationOptional<DbStatus>;
+  declare lastCheckedAt: CreationOptional<Date | null>;
+  declare lastError: CreationOptional<string>;
+  declare sizeBytes: CreationOptional<number>;
+  declare tableCount: CreationOptional<number>;
+  declare serverVersion: CreationOptional<string>;
+  declare retentionCount: CreationOptional<number>;
+  declare notes: CreationOptional<string>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+ProjectDatabase.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    projectId: { type: DataTypes.UUID, allowNull: false },
+    name: { type: DataTypes.STRING(160), allowNull: false },
+    environment: { type: DataTypes.STRING(32), allowNull: false, defaultValue: "development" },
+    provider: { type: DataTypes.STRING(40), allowNull: false, defaultValue: "" },
+    connectionString: { type: DataTypes.TEXT, allowNull: false },
+    host: { type: DataTypes.STRING(255), allowNull: false, defaultValue: "" },
+    port: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 5432 },
+    databaseName: { type: DataTypes.STRING(255), allowNull: false, defaultValue: "" },
+    username: { type: DataTypes.STRING(255), allowNull: false, defaultValue: "" },
+    sslMode: { type: DataTypes.STRING(32), allowNull: false, defaultValue: "require" },
+    status: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "unknown" },
+    lastCheckedAt: { type: DataTypes.DATE, allowNull: true },
+    lastError: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    // BIGINT comes back as a string from pg; the services coerce on read.
+    sizeBytes: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 },
+    tableCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    serverVersion: { type: DataTypes.STRING(32), allowNull: false, defaultValue: "" },
+    retentionCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 7 },
+    notes: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "project_databases" },
+);
+
+// One dump attempt. Rows are written before the dump starts (status "running")
+// so a crash mid-backup is visible rather than silently absent.
+export class DatabaseBackup extends Model<
+  InferAttributes<DatabaseBackup>,
+  InferCreationAttributes<DatabaseBackup>
+> {
+  declare id: CreationOptional<string>;
+  declare databaseId: string;
+  declare projectId: string;
+  declare status: CreationOptional<BackupStatus>;
+  declare trigger: CreationOptional<BackupTrigger>;
+  declare format: CreationOptional<string>;
+  declare storage: CreationOptional<BackupStorage>;
+  declare storageNote: CreationOptional<string>;
+  declare fileName: CreationOptional<string>;
+  declare fileSizeBytes: CreationOptional<number>;
+  declare checksum: CreationOptional<string>;
+  declare cloudinaryPublicId: CreationOptional<string>;
+  declare cloudinaryFormat: CreationOptional<string>;
+  declare localPath: CreationOptional<string>;
+  declare startedAt: Date;
+  declare finishedAt: CreationOptional<Date | null>;
+  declare durationMs: CreationOptional<number>;
+  declare error: CreationOptional<string>;
+  declare pgDumpVersion: CreationOptional<string>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+DatabaseBackup.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    databaseId: { type: DataTypes.UUID, allowNull: false },
+    projectId: { type: DataTypes.UUID, allowNull: false },
+    status: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "running" },
+    trigger: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "manual" },
+    format: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "custom" },
+    storage: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "local" },
+    storageNote: { type: DataTypes.STRING(300), allowNull: false, defaultValue: "" },
+    fileName: { type: DataTypes.STRING(300), allowNull: false, defaultValue: "" },
+    fileSizeBytes: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 },
+    checksum: { type: DataTypes.STRING(64), allowNull: false, defaultValue: "" },
+    cloudinaryPublicId: { type: DataTypes.STRING(400), allowNull: false, defaultValue: "" },
+    cloudinaryFormat: { type: DataTypes.STRING(32), allowNull: false, defaultValue: "" },
+    localPath: { type: DataTypes.STRING(700), allowNull: false, defaultValue: "" },
+    startedAt: { type: DataTypes.DATE, allowNull: false },
+    finishedAt: { type: DataTypes.DATE, allowNull: true },
+    durationMs: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    error: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    pgDumpVersion: { type: DataTypes.STRING(32), allowNull: false, defaultValue: "" },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "database_backups" },
+);
+
+// At most one schedule per database. `nextRunAt` is precomputed from the
+// frequency + wall-clock fields so the ticker is a single indexed query.
+export class DatabaseBackupSchedule extends Model<
+  InferAttributes<DatabaseBackupSchedule>,
+  InferCreationAttributes<DatabaseBackupSchedule>
+> {
+  declare id: CreationOptional<string>;
+  declare databaseId: string;
+  declare enabled: CreationOptional<boolean>;
+  declare frequency: CreationOptional<BackupFrequency>;
+  declare hour: CreationOptional<number>;
+  declare minute: CreationOptional<number>;
+  declare dayOfWeek: CreationOptional<number>;
+  declare dayOfMonth: CreationOptional<number>;
+  declare timezone: CreationOptional<string>;
+  declare format: CreationOptional<string>;
+  declare storageTarget: CreationOptional<BackupStorage>;
+  declare lastRunAt: CreationOptional<Date | null>;
+  declare nextRunAt: CreationOptional<Date | null>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+DatabaseBackupSchedule.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    databaseId: { type: DataTypes.UUID, allowNull: false, unique: true },
+    enabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    frequency: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "daily" },
+    hour: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 2 },
+    minute: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    dayOfWeek: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+    dayOfMonth: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+    timezone: { type: DataTypes.STRING(64), allowNull: false, defaultValue: "Africa/Lagos" },
+    format: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "custom" },
+    storageTarget: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "cloudinary" },
+    lastRunAt: { type: DataTypes.DATE, allowNull: true },
+    nextRunAt: { type: DataTypes.DATE, allowNull: true },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "database_backup_schedules" },
+);
+
 // ---- Join (through) models -------------------------------------------------
 // Defined explicitly with timestamps:false so they match the migration's
 // timestamp-free join tables (the global define() default adds timestamps).
@@ -934,6 +1114,13 @@ Project.hasMany(AnalyticsSite, { as: "analyticsSites", foreignKey: "projectId" }
 AnalyticsEvent.belongsTo(AnalyticsSite, { as: "site", foreignKey: "siteId" });
 AnalyticsDaily.belongsTo(AnalyticsSite, { as: "site", foreignKey: "siteId" });
 
+ProjectDatabase.belongsTo(Project, { as: "project", foreignKey: "projectId" });
+Project.hasMany(ProjectDatabase, { as: "databases", foreignKey: "projectId" });
+DatabaseBackup.belongsTo(ProjectDatabase, { as: "database", foreignKey: "databaseId" });
+ProjectDatabase.hasMany(DatabaseBackup, { as: "backups", foreignKey: "databaseId" });
+ProjectDatabase.hasOne(DatabaseBackupSchedule, { as: "schedule", foreignKey: "databaseId" });
+DatabaseBackupSchedule.belongsTo(ProjectDatabase, { as: "database", foreignKey: "databaseId" });
+
 Notification.belongsTo(User, { as: "recipient", foreignKey: "userId" });
 Notification.belongsTo(User, { as: "fromUser", foreignKey: "fromUserId" });
 
@@ -942,4 +1129,5 @@ export const models = {
   PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount, GithubAccount, ProjectRepo,
   BlacklistedEmail, CustomRole, DocumentationLink,
   AnalyticsSite, AnalyticsEvent, AnalyticsDaily, BlogChannel, BlogEditor,
+  ProjectDatabase, DatabaseBackup, DatabaseBackupSchedule,
 };

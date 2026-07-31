@@ -95,6 +95,40 @@ const schema = z.object({
   ANALYTICS_ROLLUP_CRON: z.string().default("*/15 * * * *"), // every 15 minutes
   ANALYTICS_PRUNE_CRON: z.string().default("30 3 * * *"), // 03:30 every day
   ANALYTICS_RETENTION_DAYS: z.coerce.number().int().positive().default(400),
+
+  // ---- Database backups ------------------------------------------------
+  // Key used to encrypt stored Postgres connection strings at rest
+  // (AES-256-GCM). 32 bytes as hex (64 chars) or base64. Generate with:
+  //   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  // Empty = derive from JWT_ACCESS_SECRET, which works but ties the ciphertext
+  // to that secret — rotating it would orphan every stored connection string.
+  SECRET_ENCRYPTION_KEY: z.string().optional().default(""),
+
+  // Absolute or relative path where dumps are written before upload, and where
+  // they stay when Cloudinary can't take them. Must be a durable volume in prod.
+  BACKUP_STORAGE_DIR: z.string().default(".backups"),
+  // pg_dump binary (override if it isn't on PATH, e.g. a versioned install).
+  PG_DUMP_PATH: z.string().default("pg_dump"),
+  // Hard stop for a single dump, so a wedged connection can't pin a worker.
+  BACKUP_TIMEOUT_MS: z.coerce.number().int().positive().default(30 * 60 * 1000),
+  // Dumps larger than this stay on the local volume instead of going to
+  // Cloudinary (whose raw-file cap is 10MB free / ~100MB on paid plans).
+  BACKUP_CLOUDINARY_MAX_MB: z.coerce.number().int().positive().default(90),
+  // Keep the local copy after a successful Cloudinary upload (belt and braces).
+  BACKUP_KEEP_LOCAL_COPY: z
+    .string()
+    .default("false")
+    .transform((s) => s === "true"),
+  // How long a generated download link stays valid.
+  BACKUP_DOWNLOAD_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+  // Ticker that runs due backup schedules.
+  ENABLE_BACKUP_SCHEDULER: z
+    .string()
+    .default("true")
+    .transform((s) => s !== "false"),
+  BACKUP_SCHEDULER_CRON: z.string().default("* * * * *"), // every minute
+  // Default IANA timezone new schedules are expressed in.
+  BACKUP_DEFAULT_TIMEZONE: z.string().default("Africa/Lagos"),
 });
 
 const parsed = schema.safeParse(process.env);

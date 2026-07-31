@@ -38,6 +38,10 @@ services:
       REDIS_URL: redis://redis:6379
     ports:
       - "4000:4000"
+    # Dumps too large for Cloudinary live here — a named volume so they survive
+    # a redeploy. Losing this is losing those backups.
+    volumes:
+      - backups:/var/lib/mybizpush/backups
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,3 +50,4 @@ services:
 
 volumes:
   pgdata:
+  backups:

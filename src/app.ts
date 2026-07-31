@@ -27,6 +27,7 @@ import { healthRouter } from "./modules/health/health.routes";
 import { analyticsRouter } from "./modules/analytics/analytics.routes";
 import { analyticsCollectRouter } from "./modules/analytics/analytics.collect.routes";
 import { blogsRouter } from "./modules/blogs/blogs.routes";
+import { databasesRouter } from "./modules/databases/databases.routes";
 
 // All versioned business endpoints live under this prefix.
 export const API_PREFIX = "/api/v1";
@@ -84,6 +85,7 @@ export function createApp() {
   v1.use("/github", githubRouter);
   v1.use("/analytics", analyticsRouter);
   v1.use("/blogs", blogsRouter);
+  v1.use("/databases", databasesRouter);
   app.use(API_PREFIX, v1);
 
   // Fallbacks

@@ -24,6 +24,20 @@ export async function assertCanManageProject(projectId: string, auth: Auth): Pro
   throw forbidden("Only the project manager, a department head, or an executive admin can do this");
 }
 
+// Managing database credentials and backups is deliberately NOT a project-level
+// capability. A project manager or department head can run their project
+// without ever holding the keys to its production data, so this gate is on
+// access level alone: admins, chiefs and executive admins. Ordinary members are
+// excluded even on projects they manage.
+export function canManageDatabases(auth: Auth): boolean {
+  return auth.accessLevel === "admin" || isOrgManager(auth.accessLevel);
+}
+
+export function assertCanManageDatabases(auth: Auth): void {
+  if (canManageDatabases(auth)) return;
+  throw forbidden("Only an admin, chief, or executive admin can manage databases");
+}
+
 // The same rule as canManageProject, answered for every project at once. Use
 // this instead of calling canManageProject in a loop — that costs one query per
 // project. Returns "all" for org managers, who can manage everything.
