@@ -88,23 +88,51 @@ export interface ConnectionProbe {
   tableCount: number;
 }
 
+// Reject after `ms` regardless of what the underlying driver decides to do.
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`Timed out after ${ms / 1000}s connecting to the database`)),
+        ms,
+      );
+      timer.unref();
+    }),
+  ]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
 // Open a short-lived connection to a *managed* database (never our own) to
 // confirm the credential still works and collect the couple of numbers the
 // console shows. Deliberately single-connection and short-timeout: this runs on
 // demand from the UI and must never hold resources open.
+export const PROBE_TIMEOUT_MS = 10_000;
+
 export async function probeConnection(parsed: ParsedConnection): Promise<ConnectionProbe> {
   const probe = new Sequelize(parsed.database, parsed.user, parsed.password, {
     host: parsed.host,
     port: parsed.port,
     dialect: "postgres",
     logging: false,
-    pool: { max: 1, min: 0, idle: 1_000 },
-    dialectOptions: { ssl: sslOptionsFor(parsed.sslMode), connectTimeout: 10_000 },
+    // `acquire` bounds how long Sequelize waits for a pooled connection;
+    // `connectionTimeoutMillis` is node-postgres's own dial timeout. Both are
+    // needed — `connectTimeout` is a MySQL option and is silently ignored here.
+    pool: { max: 1, min: 0, idle: 1_000, acquire: PROBE_TIMEOUT_MS },
+    dialectOptions: {
+      ssl: sslOptionsFor(parsed.sslMode),
+      connectionTimeoutMillis: PROBE_TIMEOUT_MS,
+      query_timeout: PROBE_TIMEOUT_MS,
+      statement_timeout: PROBE_TIMEOUT_MS,
+    },
     retry: { max: 0 },
   });
 
   try {
-    await probe.authenticate();
+    // Last line of defence. A firewalled host black-holes the SYN, and without
+    // this the request would sit on the OS TCP timeout (over a minute) while
+    // someone waits on a form that's really just reporting a typo'd address.
+    await withTimeout(probe.authenticate(), PROBE_TIMEOUT_MS);
     // QueryTypes.SELECT makes this resolve to the rows themselves rather than
     // Sequelize's [results, metadata] tuple.
     const rows = await probe.query<{ version: string; size: string; tables: string }>(

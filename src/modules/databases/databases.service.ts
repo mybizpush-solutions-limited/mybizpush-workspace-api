@@ -181,13 +181,23 @@ export const databasesService = {
     if (!(await Project.findByPk(input.projectId))) throw notFound("Project not found");
     const parsed = parseConnectionString(input.connectionString);
 
-    // Two entries for the same host+database on one project is nearly always a
-    // duplicate paste rather than an intent.
+    // Two entries for the same database on one project is nearly always a
+    // duplicate paste rather than an intent. The identity is host+PORT+database:
+    // one box routinely runs several instances on different ports, all of them
+    // serving a database called "postgres" — dev on :5488 and prod on :7654 is
+    // an ordinary setup, not a duplicate.
     const existing = await ProjectDatabase.findOne({
-      where: { projectId: input.projectId, host: parsed.host, databaseName: parsed.database },
+      where: {
+        projectId: input.projectId,
+        host: parsed.host,
+        port: parsed.port,
+        databaseName: parsed.database,
+      },
     });
     if (existing) {
-      throw conflict(`${parsed.database} on ${parsed.host} is already registered as "${existing.name}"`);
+      throw conflict(
+        `${parsed.database} on ${parsed.host}:${parsed.port} is already registered as "${existing.name}"`,
+      );
     }
 
     const sslMode = resolveSslMode(parsed.sslMode, input.ssl);
