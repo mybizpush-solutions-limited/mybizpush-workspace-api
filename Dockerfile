@@ -14,9 +14,14 @@ FROM node:20-bookworm-slim AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 
-# pg_dump for the database-backup console. Bookworm ships client 15, which
-# refuses to dump a newer server ("server version X; pg_dump version 15"), so we
-# pull 17 from PGDG — it can dump every server from 13 up.
+# pg_dump for the database-backup console.
+#
+# pg_dump refuses to dump a server NEWER than itself ("aborting because of
+# server version mismatch"), so this must be >= the highest server version we
+# back up. Bookworm's own package is 15, hence PGDG. Bump PG_MAJOR when we start
+# running a newer Postgres anywhere — an older client is a hard failure, while a
+# newer client dumps older servers fine.
+ARG PG_MAJOR=18
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
     && install -d /usr/share/postgresql-common/pgdg \
@@ -25,11 +30,12 @@ RUN apt-get update \
     && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
          > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client-17 \
+    && apt-get install -y --no-install-recommends "postgresql-client-${PG_MAJOR}" \
     && apt-get purge -y curl gnupg \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
-ENV PG_DUMP_PATH=/usr/lib/postgresql/17/bin/pg_dump
+ENV PG_MAJOR=${PG_MAJOR}
+ENV PG_DUMP_PATH=/usr/lib/postgresql/${PG_MAJOR}/bin/pg_dump
 
 # Backups that are too large for Cloudinary land here, so it must be a volume —
 # otherwise they disappear with the container.

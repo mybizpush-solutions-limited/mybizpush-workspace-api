@@ -72,14 +72,31 @@ export function resolveSslMode(derived: string, ssl?: boolean): string {
   return derived === "disable" ? "require" : derived;
 }
 
-// Postgres says this when it's built or configured without TLS. It's a common
-// and completely fixable state for a self-hosted database, so the raw message
-// gets the fix appended rather than leaving someone to guess.
+// Two failures are common, fixable, and unhelpfully phrased by Postgres itself.
+// Append the actual fix rather than leaving someone to work it out from a
+// message that reads like an internal assertion.
 export function annotateConnectionError(message: string): string {
   if (/does not support SSL/i.test(message)) {
     return `${message} — turn SSL off for this database and try again.`;
   }
+  // pg_dump refuses to dump a server newer than itself. The fix is always on
+  // the API host, never on the database being backed up.
+  if (/server version mismatch/i.test(message)) {
+    const server = message.match(/server version:\s*([\d.]+)/i)?.[1];
+    const client = message.match(/pg_dump version:\s*([\d.]+)/i)?.[1];
+    const versions = server && client ? ` (server ${server}, pg_dump ${client})` : "";
+    return (
+      `${message}\n\nThe API server's pg_dump is older than this database${versions}. ` +
+      `Rebuild the API image with a matching client — \`ARG PG_MAJOR\` in the Dockerfile — ` +
+      `or point PG_DUMP_PATH at a newer pg_dump. A newer client can dump older servers, so it's safe to go up.`
+    );
+  }
   return message;
+}
+
+// Major version of a "18.1" / "16.14" style version string; 0 when unknown.
+export function majorVersion(version: string): number {
+  return Number(version.split(".")[0]) || 0;
 }
 
 export interface ConnectionProbe {

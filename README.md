@@ -167,7 +167,7 @@ pg_restore -d "$TARGET_DATABASE_URL" --clean --if-exists backup.dump
 gunzip -c backup.sql.gz | psql "$TARGET_DATABASE_URL"
 ```
 
-`pg_dump` must be installed on the API host and be **at least as new as the servers being dumped** — an older client refuses with `server version X; pg_dump version Y`. The Docker image installs the PostgreSQL 17 client (good for servers 13→17) and sets `PG_DUMP_PATH` accordingly; locally, `brew install postgresql@17` or equivalent. `GET /databases/capabilities` reports what the running host actually has, and the UI warns from it.
+`pg_dump` must be installed on the API host and be **at least as new as the newest server being dumped** — an older client aborts with `aborting because of server version mismatch`, and the fix is always on the API host, never on the database. A newer client dumps older servers fine, so it's always safe to go up. The Docker image installs the client via `ARG PG_MAJOR` (currently **18**) and sets `PG_DUMP_PATH` to match — bump that arg and rebuild when we start running a newer Postgres anywhere. Locally, `brew install postgresql@18` or equivalent. The console compares each database's reported server version against the host's `pg_dump` and warns on the card *before* a scheduled backup fails. `GET /databases/capabilities` reports what the running host actually has, and the UI warns from it.
 
 ## Docker
 
