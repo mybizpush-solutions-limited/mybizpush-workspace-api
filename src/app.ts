@@ -35,6 +35,11 @@ export const API_PREFIX = "/api/v1";
 export function createApp() {
   const app = express();
 
+  // TLS is terminated by the proxy in front of us, so req.secure/req.ip only
+  // reflect reality once we trust its X-Forwarded-* headers. The refresh cookie
+  // depends on this to decide whether it may be Secure + SameSite=None.
+  app.set("trust proxy", 1);
+
   // The analytics tracker and beacon endpoint are mounted FIRST, ahead of helmet
   // and the CORS allow-list. They're served to our public marketing sites from
   // arbitrary origins, so they carry their own permissive CORS and body parser

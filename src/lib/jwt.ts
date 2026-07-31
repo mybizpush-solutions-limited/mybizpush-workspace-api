@@ -60,14 +60,28 @@ export async function revokeRefreshToken(userId: string, jti: string): Promise<v
   await redis.del(redisKeys.refreshToken(userId, jti));
 }
 
+// How long a just-rotated refresh token keeps working. Two tabs that hit an
+// expired access token at the same moment both send the SAME cookie: the first
+// rotates it, and without this window the second is told its token was revoked
+// and the user is bounced to /login mid-edit. The window is short enough that a
+// genuinely stolen token is still useless.
+const ROTATION_GRACE_SECONDS = 60;
+
 // Revoke every refresh token for a user (e.g. after a password reset).
 export async function revokeAllRefreshTokens(userId: string): Promise<void> {
   const keys = await redis.keys(`refresh:${userId}:*`);
   if (keys.length) await redis.del(...keys);
 }
 
-// Rotate: revoke the presented refresh token and issue a fresh one.
+// Rotate: expire the presented refresh token after a short grace window and
+// issue a fresh one. Expiring rather than deleting lets a concurrent request
+// that raced with this rotation still succeed instead of logging the user out.
 export async function rotateRefreshToken(userId: string, oldJti: string): Promise<string> {
-  await revokeRefreshToken(userId, oldJti);
+  const oldKey = redisKeys.refreshToken(userId, oldJti);
+  const ttl = await redis.ttl(oldKey);
+  // Only shorten the window — never extend a token that is already expiring.
+  if (ttl < 0 || ttl > ROTATION_GRACE_SECONDS) {
+    await redis.expire(oldKey, ROTATION_GRACE_SECONDS);
+  }
   return issueRefreshToken(userId);
 }
