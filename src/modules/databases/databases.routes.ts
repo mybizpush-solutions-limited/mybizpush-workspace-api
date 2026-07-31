@@ -38,6 +38,8 @@ const createSchema = z.object({
   projectId: z.string().uuid(),
   name: z.string().trim().min(1).max(160),
   connectionString: connectionField,
+  // Off for servers with no TLS ("the server does not support SSL connections").
+  ssl: z.boolean().optional(),
   environment: z.enum(DB_ENVIRONMENTS).optional(),
   provider: z.string().trim().max(40).optional(),
   retentionCount: z.number().int().min(1).max(90).optional(),
@@ -48,6 +50,8 @@ const updateSchema = z.object({
   name: z.string().trim().min(1).max(160).optional(),
   // Omit to keep the stored credential — the UI never receives it to send back.
   connectionString: connectionField.optional(),
+  // Sendable on its own — flipping SSL is the usual fix after a failed probe.
+  ssl: z.boolean().optional(),
   environment: z.enum(DB_ENVIRONMENTS).optional(),
   provider: z.string().trim().max(40).optional(),
   retentionCount: z.number().int().min(1).max(90).optional(),

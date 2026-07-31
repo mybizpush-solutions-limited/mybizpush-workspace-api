@@ -1,7 +1,12 @@
 import { Op } from "sequelize";
 import { conflict, notFound } from "../../lib/errors";
 import { encryptSecret, decryptSecret } from "../../lib/crypto";
-import { connectionErrorMessage, parseConnectionString, probeConnection } from "../../lib/pgconn";
+import {
+  connectionErrorMessage,
+  parseConnectionString,
+  probeConnection,
+  resolveSslMode,
+} from "../../lib/pgconn";
 import { isCloudinaryConfigured } from "../../lib/cloudinary";
 import { pgDumpVersion } from "../../lib/pgdump";
 import { env } from "../../config/env";
@@ -30,6 +35,8 @@ export interface SerializedDatabase {
   databaseName: string;
   username: string;
   sslMode: string;
+  /** Convenience view of sslMode for the toggle in the UI. */
+  ssl: boolean;
   status: string;
   lastCheckedAt: string | null;
   lastError: string;
@@ -66,6 +73,7 @@ function serialize(db: ProjectDatabase, extras: Extras = {}): SerializedDatabase
     databaseName: db.databaseName,
     username: db.username,
     sslMode: db.sslMode,
+    ssl: db.sslMode !== "disable",
     status: db.status,
     lastCheckedAt: db.lastCheckedAt?.toISOString() ?? null,
     lastError: db.lastError,
@@ -95,8 +103,14 @@ export async function loadManaged(id: string, auth: Auth): Promise<ProjectDataba
 }
 
 // Decrypt on demand, never as part of a read path that returns to the client.
+//
+// The stored sslMode wins over whatever the connection string implies: the
+// string usually says nothing about TLS, and parseConnectionString then assumes
+// "require" — which is wrong for the self-hosted databases that answer
+// "the server does not support SSL connections". The toggle is the authority.
 export function connectionFor(db: ProjectDatabase) {
-  return parseConnectionString(decryptSecret(db.connectionString));
+  const parsed = parseConnectionString(decryptSecret(db.connectionString));
+  return { ...parsed, sslMode: db.sslMode || parsed.sslMode };
 }
 
 // Attach the counts / last backup / schedule that the console renders, for a
@@ -137,6 +151,8 @@ export interface CreateDatabaseInput {
   projectId: string;
   name: string;
   connectionString: string;
+  /** Off for servers built without TLS; omitted means "trust the URL". */
+  ssl?: boolean;
   environment?: DbEnvironment;
   provider?: string;
   retentionCount?: number;
@@ -174,6 +190,7 @@ export const databasesService = {
       throw conflict(`${parsed.database} on ${parsed.host} is already registered as "${existing.name}"`);
     }
 
+    const sslMode = resolveSslMode(parsed.sslMode, input.ssl);
     const db = await ProjectDatabase.create({
       projectId: input.projectId,
       name: input.name,
@@ -184,15 +201,16 @@ export const databasesService = {
       port: parsed.port,
       databaseName: parsed.database,
       username: parsed.user,
-      sslMode: parsed.sslMode,
+      sslMode,
       retentionCount: input.retentionCount ?? 7,
       notes: input.notes ?? "",
       createdBy: auth.sub,
     });
 
     // Probe immediately so a typo'd credential surfaces on the card the moment
-    // it's added, not the first time a scheduled backup fails at 2am.
-    await probeAndSave(db, parsed);
+    // it's added, not the first time a scheduled backup fails at 2am. Probe with
+    // the *resolved* mode — `parsed` still carries the URL's assumption.
+    await probeAndSave(db, { ...parsed, sslMode });
     return (await decorate([db]))[0]!;
   },
 
@@ -206,7 +224,13 @@ export const databasesService = {
       db.port = parsed.port;
       db.databaseName = parsed.database;
       db.username = parsed.user;
-      db.sslMode = parsed.sslMode;
+      db.sslMode = resolveSslMode(parsed.sslMode, patch.ssl);
+      db.status = "unknown";
+      db.lastError = "";
+    } else if (patch.ssl !== undefined) {
+      // Toggling SSL on its own is the common fix after a failed probe, so it
+      // must work without re-entering the credential.
+      db.sslMode = resolveSslMode(db.sslMode, patch.ssl);
       db.status = "unknown";
       db.lastError = "";
     }
@@ -217,7 +241,9 @@ export const databasesService = {
     if (patch.notes !== undefined) db.notes = patch.notes;
     await db.save();
 
-    if (patch.connectionString) await probeAndSave(db, connectionFor(db));
+    if (patch.connectionString || patch.ssl !== undefined) {
+      await probeAndSave(db, connectionFor(db));
+    }
     return (await decorate([db]))[0]!;
   },
 

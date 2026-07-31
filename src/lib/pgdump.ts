@@ -7,7 +7,7 @@ import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { env } from "../config/env";
 import { AppError } from "./errors";
-import type { ParsedConnection } from "./pgconn";
+import { annotateConnectionError, type ParsedConnection } from "./pgconn";
 
 // Thin wrapper around the real pg_dump binary. We shell out rather than
 // reimplementing a dump in JS because only pg_dump produces something we'd
@@ -143,7 +143,7 @@ export async function runPgDump(
     if (code !== 0) {
       throw new AppError(
         502,
-        `pg_dump exited with code ${code}: ${stderr.trim() || "no output"}`,
+        annotateConnectionError(`pg_dump exited with code ${code}: ${stderr.trim() || "no output"}`),
         "pg_dump_failed",
       );
     }
@@ -166,7 +166,7 @@ export async function runPgDump(
     // pg_dump explains itself, so prefer it over the stream error.
     throw new AppError(
       502,
-      stderr.trim() || (err as Error).message || "pg_dump failed",
+      annotateConnectionError(stderr.trim() || (err as Error).message || "pg_dump failed"),
       "pg_dump_failed",
     );
   } finally {

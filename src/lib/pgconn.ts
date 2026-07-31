@@ -42,7 +42,9 @@ export function parseConnectionString(raw: string): ParsedConnection {
   const port = url.port ? Number(url.port) : DEFAULT_PORT;
 
   // Providers spell this a few ways (?sslmode=, ?ssl=true). Hosted Postgres is
-  // TLS-only in practice, so "require" is the right default when unstated.
+  // TLS-only in practice, so "require" is the right default when unstated — but
+  // a self-hosted or LAN database often has no TLS at all, which is why the
+  // stored sslMode can override this (see resolveSslMode).
   const sslParam = url.searchParams.get("sslmode") ?? url.searchParams.get("ssl_mode");
   const sslMode = sslParam ?? (url.searchParams.get("ssl") === "false" ? "disable" : "require");
 
@@ -58,6 +60,26 @@ export function sslOptionsFor(sslMode: string) {
   if (sslMode === "disable") return false;
   if (sslMode === "verify-full" || sslMode === "verify-ca") return { require: true };
   return { require: true, rejectUnauthorized: false };
+}
+
+// Reconcile the mode derived from the connection string with the explicit
+// on/off toggle held against the database. Undefined = no opinion, keep what
+// the string said. Turning SSL on preserves a stricter mode (verify-full) if
+// one was already set, rather than quietly relaxing it to plain "require".
+export function resolveSslMode(derived: string, ssl?: boolean): string {
+  if (ssl === undefined) return derived;
+  if (!ssl) return "disable";
+  return derived === "disable" ? "require" : derived;
+}
+
+// Postgres says this when it's built or configured without TLS. It's a common
+// and completely fixable state for a self-hosted database, so the raw message
+// gets the fix appended rather than leaving someone to guess.
+export function annotateConnectionError(message: string): string {
+  if (/does not support SSL/i.test(message)) {
+    return `${message} — turn SSL off for this database and try again.`;
+  }
+  return message;
 }
 
 export interface ConnectionProbe {
@@ -108,5 +130,6 @@ export async function probeConnection(parsed: ParsedConnection): Promise<Connect
 // (e.g. "password authentication failed for user"). Surface that to the UI.
 export function connectionErrorMessage(err: unknown): string {
   const e = err as { original?: { message?: string }; parent?: { message?: string }; message?: string };
-  return (e?.original?.message ?? e?.parent?.message ?? e?.message ?? "Connection failed").slice(0, 500);
+  const raw = e?.original?.message ?? e?.parent?.message ?? e?.message ?? "Connection failed";
+  return annotateConnectionError(raw).slice(0, 500);
 }
