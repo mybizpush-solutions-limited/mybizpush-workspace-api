@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "check": "npm run lint && npm run build",
-    "migrate": "tsx src/db/migrate.ts",
+    "migrate": "node dist/db/migrate.js",
     "seed": "tsx src/db/seed.ts"
   },
   "dependencies": {

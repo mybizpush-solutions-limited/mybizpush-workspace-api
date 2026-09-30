@@ -2,7 +2,7 @@
 set -e
 
 echo "→ Running database migrations…"
-node dist/db/migrate.js
+npm run migrate
 
 echo "→ Starting MyBizPush Dev Space API…"
 exec node dist/index.js
