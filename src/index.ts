@@ -5,6 +5,8 @@ import { redis } from "./redis/client";
 import { startDigestScheduler } from "./modules/digests/digests.scheduler";
 import { startAnalyticsScheduler } from "./modules/analytics/analytics.scheduler";
 import { startBackupScheduler } from "./modules/databases/databases.scheduler";
+import { startCommitsScheduler } from "./modules/github/commits.scheduler";
+import { startMeetingReportsScheduler } from "./modules/reports/meetingReports.scheduler";
 // Importing the models registers them with Sequelize and wires associations.
 import "./models";
 
@@ -20,6 +22,8 @@ async function start() {
   startDigestScheduler();
   startAnalyticsScheduler();
   startBackupScheduler();
+  startCommitsScheduler();
+  startMeetingReportsScheduler();
 
   const shutdown = async (signal: string) => {
     console.info(`\n${signal} received — shutting down…`);

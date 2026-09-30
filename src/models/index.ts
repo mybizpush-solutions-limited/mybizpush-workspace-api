@@ -1169,7 +1169,11 @@ Project.hasMany(Report, { as: "reports", foreignKey: "projectId" });
 
 // ---- MeetingReport ---------------------------------------------------------
 // A generated meeting report PDF (from an uploaded transcript). The PDF lives
-// in Cloudinary; this row is the metadata/provenance.
+// in Cloudinary; this row is the metadata/provenance. Generation is
+// asynchronous: the transcript is stored here, processed in the background
+// (fire-and-forget + cron sweeper), and `status` tracks the lifecycle.
+export const MEETING_REPORT_STATUSES = ["pending", "processing", "done", "failed"] as const;
+export type MeetingReportStatus = (typeof MEETING_REPORT_STATUSES)[number];
 export class MeetingReport extends Model<
   InferAttributes<MeetingReport>,
   InferCreationAttributes<MeetingReport>
@@ -1177,11 +1181,16 @@ export class MeetingReport extends Model<
   declare id: CreationOptional<string>;
   declare title: string;
   declare meetingDate: CreationOptional<string>;
-  declare name: string;
+  declare name: CreationOptional<string>;
   declare type: CreationOptional<string>;
   declare size: CreationOptional<number>;
   declare url: CreationOptional<string>;
   declare publicId: CreationOptional<string>;
+  declare status: CreationOptional<MeetingReportStatus>;
+  declare error: CreationOptional<string>;
+  declare transcript: CreationOptional<string | null>;
+  declare sourceName: CreationOptional<string>;
+  declare processedAt: CreationOptional<Date | null>;
   declare generatedById: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
@@ -1191,11 +1200,20 @@ MeetingReport.init(
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     title: { type: DataTypes.STRING(300), allowNull: false },
     meetingDate: { type: DataTypes.STRING(120), allowNull: false, defaultValue: "" },
-    name: { type: DataTypes.STRING(300), allowNull: false },
+    name: { type: DataTypes.STRING(300), allowNull: false, defaultValue: "" },
     type: { type: DataTypes.STRING(120), allowNull: false, defaultValue: "application/pdf" },
     size: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 },
     url: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
     publicId: { type: DataTypes.STRING(400), allowNull: false, defaultValue: "" },
+    status: {
+      type: DataTypes.ENUM(...MEETING_REPORT_STATUSES),
+      allowNull: false,
+      defaultValue: "pending",
+    },
+    error: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    transcript: { type: DataTypes.TEXT, allowNull: true },
+    sourceName: { type: DataTypes.STRING(300), allowNull: false, defaultValue: "" },
+    processedAt: { type: DataTypes.DATE, allowNull: true },
     generatedById: { type: DataTypes.UUID, allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
@@ -1205,6 +1223,58 @@ MeetingReport.init(
 
 MeetingReport.belongsTo(User, { as: "generatedBy", foreignKey: "generatedById" });
 
+// ---- ProjectCommit ---------------------------------------------------------
+// GitHub commits synced from a project's linked repos, with the author matched
+// to a workspace user where possible (see github/commits.sync.service).
+export class ProjectCommit extends Model<
+  InferAttributes<ProjectCommit>,
+  InferCreationAttributes<ProjectCommit>
+> {
+  declare id: CreationOptional<string>;
+  declare projectId: string;
+  declare repoFullName: string;
+  declare sha: string;
+  declare message: CreationOptional<string>;
+  declare body: CreationOptional<string>;
+  declare url: CreationOptional<string>;
+  declare authorName: CreationOptional<string>;
+  declare authorLogin: CreationOptional<string>;
+  declare authorEmail: CreationOptional<string>;
+  declare authorUserId: CreationOptional<string | null>;
+  declare committedAt: CreationOptional<Date | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+ProjectCommit.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    projectId: { type: DataTypes.UUID, allowNull: false },
+    repoFullName: { type: DataTypes.STRING(300), allowNull: false },
+    sha: { type: DataTypes.STRING(40), allowNull: false },
+    message: { type: DataTypes.STRING(500), allowNull: false, defaultValue: "" },
+    body: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    url: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    authorName: { type: DataTypes.STRING(200), allowNull: false, defaultValue: "" },
+    authorLogin: { type: DataTypes.STRING(200), allowNull: false, defaultValue: "" },
+    authorEmail: { type: DataTypes.STRING(320), allowNull: false, defaultValue: "" },
+    authorUserId: { type: DataTypes.UUID, allowNull: true },
+    committedAt: { type: DataTypes.DATE, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  {
+    sequelize,
+    tableName: "project_commits",
+    updatedAt: false,
+    // The composite unique index (repo_full_name, sha) lives in the migration;
+    // commit upserts pre-filter existing shas rather than relying on it.
+  },
+);
+
+ProjectCommit.belongsTo(User, { as: "author", foreignKey: "authorUserId" });
+ProjectCommit.belongsTo(Project, { as: "project", foreignKey: "projectId" });
+Project.hasMany(ProjectCommit, { as: "commits", foreignKey: "projectId" });
+
 export const models = {
   User, Department, Project, Label, Task, Issue, Comment, Activity,
   PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount, GithubAccount, ProjectRepo,
@@ -1213,4 +1283,5 @@ export const models = {
   ProjectDatabase, DatabaseBackup, DatabaseBackupSchedule,
   Report,
   MeetingReport,
+  ProjectCommit,
 };

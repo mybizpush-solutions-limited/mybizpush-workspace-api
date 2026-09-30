@@ -6,6 +6,7 @@ import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { isMonth } from "./staffReport.service";
 import { reportsService } from "./reports.service";
+import { commitsSyncService } from "../github/commits.sync.service";
 
 export const reportsRouter = Router();
 reportsRouter.use(requireAuth);
@@ -70,5 +71,28 @@ reportsRouter.get(
   asyncHandler(async (req, res) => {
     await assertCanManageProject(req.params.id!, req.auth!);
     res.json({ reports: await reportsService.listSaved(req.params.id!) });
+  }),
+);
+
+// Per-member commit activity (the workspace's synced commit record). This is
+// the "this person is working" signal that does not depend on tasks being
+// logged in the workspace.
+reportsRouter.get(
+  "/:id/commits-activity",
+  asyncHandler(async (req, res) => {
+    await assertCanManageProject(req.params.id!, req.auth!);
+    const daysRaw = Number(req.query.days ?? 30);
+    const days =
+      Number.isFinite(daysRaw) && daysRaw > 0 && daysRaw <= 365 ? Math.floor(daysRaw) : 30;
+    res.json({ activity: await commitsSyncService.activity(req.params.id!, days) });
+  }),
+);
+
+// On-demand commit sync (PM / head / exec) — also runs nightly on cron.
+reportsRouter.post(
+  "/:id/commits-sync",
+  asyncHandler(async (req, res) => {
+    await assertCanManageProject(req.params.id!, req.auth!);
+    res.json({ synced: await commitsSyncService.syncProject(req.params.id!) });
   }),
 );

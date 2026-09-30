@@ -72,6 +72,7 @@ export async function listBranches(owner: string, repo: string): Promise<Branch[
 export interface Commit {
   sha: string;
   message: string;
+  body: string; // remaining message lines (the description), "" if none
   url: string;
   authorName: string | null;
   authorLogin: string | null;
@@ -99,15 +100,68 @@ export async function listCommits(
       author?: { login?: string } | null;
     }>
   >(`/repos/${owner}/${repo}/commits?${params.toString()}`);
-  return (arr ?? []).map((c) => ({
-    sha: c.sha,
-    message: c.commit.message.split("\n")[0] ?? c.commit.message,
-    url: c.html_url,
-    authorName: c.commit.author?.name ?? null,
-    authorEmail: c.commit.author?.email ?? null,
-    authorLogin: c.author?.login ?? null,
-    date: c.commit.author?.date ?? null,
-  }));
+  return (arr ?? []).map((c) => {
+    const lines = c.commit.message.split("\n");
+    return {
+      sha: c.sha,
+      message: lines[0] ?? c.commit.message,
+      body: lines.slice(1).join("\n").trim(),
+      url: c.html_url,
+      authorName: c.commit.author?.name ?? null,
+      authorEmail: c.commit.author?.email ?? null,
+      authorLogin: c.author?.login ?? null,
+      date: c.commit.author?.date ?? null,
+    };
+  });
+}
+
+// PRs merged inside a window, with title + description. Used to summarise what
+// a staff member actually delivered (a merge is the meaningful unit of work).
+export interface MergedPullRequest {
+  number: number;
+  title: string;
+  body: string;
+  mergedAt: string | null;
+  authorLogin: string | null;
+  url: string;
+}
+
+export async function listMergedPullRequests(
+  owner: string,
+  repo: string,
+  opts: { since?: string; until?: string; perPage?: number; author?: string } = {},
+): Promise<MergedPullRequest[]> {
+  const arr = await ghJson<
+    Array<{
+      number: number;
+      title: string;
+      body: string | null;
+      merged_at: string | null;
+      html_url: string;
+      user?: { login?: string } | null;
+    }>
+  >(
+    `/repos/${owner}/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=${opts.perPage ?? 50}`,
+  );
+  const since = opts.since ? new Date(opts.since).getTime() : 0;
+  const until = opts.until ? new Date(opts.until).getTime() : Number.MAX_SAFE_INTEGER;
+  const author = opts.author?.toLowerCase() ?? null;
+  return (arr ?? [])
+    .filter((p) => {
+      if (!p.merged_at) return false;
+      const t = new Date(p.merged_at).getTime();
+      if (t < since || t >= until) return false;
+      if (author && (p.user?.login ?? "").toLowerCase() !== author) return false;
+      return true;
+    })
+    .map((p) => ({
+      number: p.number,
+      title: p.title,
+      body: (p.body ?? "").trim(),
+      mergedAt: p.merged_at,
+      authorLogin: p.user?.login ?? null,
+      url: p.html_url,
+    }));
 }
 
 // ---- CI / checks -----------------------------------------------------------

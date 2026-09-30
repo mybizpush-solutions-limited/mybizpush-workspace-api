@@ -68,6 +68,15 @@ const payload: StaffReportPayload = {
   },
   tasks,
   issues,
+  pulls: [
+    { number: 42, title: "feat(admin): role-based access control for admin permissions", body: "Adds an RBAC layer to the admin dashboard: permission matrix, invite roles and guards on admin routes.", repo: "mybizpush/hyparrow-admin", mergedAt: day(11), url: "https://github.com/x/pull/42" },
+    { number: 43, title: "fix(wallet): deposit replay + notifications for unnotified transactions", body: "Replays missed deposit webhooks and emails users whose transactions settled without notification.", repo: "mybizpush/hyparrow-api", mergedAt: day(19), url: "https://github.com/x/pull/43" },
+  ],
+  workDelivered: [
+    "Role-based access control for the admin dashboard: a permission matrix, role guards on admin routes and cleaner invite handling.",
+    "Deposit replay and notification system for unnotified transactions, plus a DepositBackfill component that processes missed deposits.",
+    "Channel profit projection reporting with tiered transfer fee schedules, and a fix to the 9,999 naira tier logic.",
+  ],
   commits: [
     { sha: "a1b2c3d", message: "Fix wallet balance flicker on refresh", repo: "mybizpush/hempay-app", date: day(9), url: "https://github.com/x/commit/a1b2c3d" },
     { sha: "e4f5a6b", message: "Add CSV export to the reports page", repo: "mybizpush/hempay-app", date: day(14), url: "https://github.com/x/commit/e4f5a6b" },

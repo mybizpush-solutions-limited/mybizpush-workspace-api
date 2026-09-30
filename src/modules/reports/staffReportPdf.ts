@@ -245,63 +245,66 @@ function overview(doc: PDFKit.PDFDocument, p: StaffReportPayload) {
   }
 }
 
-// The staff member's commits across every repo linked to the project.
-function commitsSection(doc: PDFKit.PDFDocument, p: StaffReportPayload) {
+// Work delivered: the report model's grouping of the staff member's commits
+// and merged PRs into the actual pieces of work (a merge counts as one). Falls
+// back to raw commit titles when the model is unavailable. No hashes: managers
+// read outcomes, not shas.
+function workDelivered(doc: PDFKit.PDFDocument, p: StaffReportPayload) {
+  const prWord = p.pulls.length === 1 ? "PR" : "PRs";
   h1(
     doc,
-    `GitHub commits: ${p.commits.length} across ${p.commitRepos.length} ${
-      p.commitRepos.length === 1 ? "repo" : "repos"
-    }`,
+    `Work delivered: ${p.commits.length} commits, ${p.pulls.length} merged ${prWord} across ${
+      p.commitRepos.length
+    } ${p.commitRepos.length === 1 ? "repo" : "repos"}`,
   );
-  if (!p.commits.length) {
+  if (!p.commits.length && !p.pulls.length) {
     doc
       .font("reg")
       .fontSize(8.5)
       .fillColor(FAINT)
       .text(
-        `No commits matched ${p.staff.name} in ${p.period.label} across the project's linked repos.`,
+        `No commits or merged PRs matched ${p.staff.name} in ${p.period.label} across the project's linked repos.`,
         M,
         doc.y,
       );
     return;
   }
-  const shown = p.commits.slice(0, 40);
-  let y = doc.y;
-  for (const { repo, count } of p.commitRepos) {
-    doc.y = y; // keep the cursor in sync so need() sees the real position
-    need(doc, 40);
-    y = doc.y;
-    doc.font("bold").fontSize(9).fillColor(PURPLE).text(`${repo} (${count})`, M, y, {
-      lineBreak: false,
-    });
-    y += 16;
-    for (const c of shown.filter((x) => x.repo === repo)) {
-      doc.y = y;
-      need(doc, 18);
-      y = doc.y; // fresh top-margin if a page break just happened
-      const when = c.date
-        ? new Date(c.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })
-        : "";
-      doc.font("reg").fontSize(7.5).fillColor(FAINT).text(`${when}  ${c.sha}`, M + 4, y, {
-        lineBreak: false,
-      });
-      doc
-        .font("reg")
-        .fontSize(8.6)
-        .fillColor(INK)
-        .text(fit(doc, c.message, CW - 92), M + 88, y, { lineBreak: false });
-      y += 13;
-    }
-    y += 6;
+
+  const items = p.workDelivered.length ? p.workDelivered : p.commits.slice(0, 25).map((c) => c.message);
+  if (!p.workDelivered.length) {
+    doc
+      .font("reg")
+      .fontSize(7.6)
+      .fillColor(FAINT)
+      .text("Summarised items are unavailable; the commit titles follow.", M, doc.y);
+    doc.moveDown(0.2);
   }
-  doc.y = y;
-  const more = p.commits.length - shown.length;
-  if (more > 0) {
+  for (const item of items) {
+    need(doc, 40);
+    const y = doc.y;
+    doc.rect(M + 1, y + 4, 4, 4).fill(PURPLE);
+    doc.font("reg").fontSize(9).fillColor(INK).text(item, M + 14, y, { width: CW - 14, lineGap: 2 });
+    doc.moveDown(0.25);
+  }
+  if (p.workDelivered.length) {
     doc
       .font("reg")
       .fontSize(7.4)
       .fillColor(FAINT)
-      .text(`Plus ${more} older commit${more === 1 ? "" : "s"} not listed here.`, M, doc.y);
+      .text(
+        "Summarised from the commit messages and merged PR descriptions by the report model.",
+        M,
+        doc.y,
+      );
+  } else {
+    const unlisted = p.commits.length - 25;
+    if (unlisted > 0) {
+      doc
+        .font("reg")
+        .fontSize(7.4)
+        .fillColor(FAINT)
+        .text(`Plus ${unlisted} older commit${unlisted === 1 ? "" : "s"} not listed.`, M, doc.y);
+    }
   }
 }
 
@@ -328,7 +331,7 @@ export async function renderStaffReportPdf(p: StaffReportPayload): Promise<Rende
   );
   itemTable(doc, p.issues, "issue");
 
-  commitsSection(doc, p);
+  workDelivered(doc, p);
 
   h1(doc, "Activity timeline");
   timeline(doc, p.timeline);
@@ -342,19 +345,20 @@ export async function renderStaffReportPdf(p: StaffReportPayload): Promise<Rende
       `Compiled from the MyBizPush Dev Space database on ${new Date(p.generatedAt).toLocaleDateString(
         "en-GB",
         { day: "numeric", month: "long", year: "numeric" },
-      )}. Tasks and issues are those currently assigned to ${p.staff.name} on ${p.project.name}; "completed in month" reflects recorded status changes to Done during ${p.period.label}. Commits are matched across the project's linked GitHub repos by the staff member's linked GitHub account, git author email or author name. Where the record is empty, this report says so rather than filling the gap.`,
+      )}. Tasks and issues are those currently assigned to ${p.staff.name} on ${p.project.name}; "completed in month" reflects recorded status changes to Done during ${p.period.label}. Commits are matched across the project's linked GitHub repos by the staff member's linked GitHub account, git author email or author name, and the work-delivered list is summarised from commit messages and merged PR descriptions. Where the record is empty, this report says so rather than filling the gap.`,
       M,
       doc.y,
       { width: CW, lineGap: 1.5 },
     );
 
   decorate(doc, docTitle);
-  const buffer = await finish(doc, chunks);
   const slug = (s: string) =>
     s
       .replace(/[^a-zA-Z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 60);
-  const filename = `MyBizPush-Staff-Report-${slug(p.project.name)}-${slug(p.staff.name)}-${p.month}.pdf`;
+  // Naming convention: MyBizPush-Staff-Report-<Staff>-<Project>-<Month>.pdf
+  const filename = `MyBizPush-Staff-Report-${slug(p.staff.name)}-${slug(p.project.name)}-${p.month}.pdf`;
+  const buffer = await finish(doc, chunks);
   return { buffer, filename };
 }

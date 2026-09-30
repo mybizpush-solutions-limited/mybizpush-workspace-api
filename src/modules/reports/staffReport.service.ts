@@ -1,9 +1,19 @@
 import { Op } from "sequelize";
-import { Activity, GithubAccount, Issue, Project, ProjectRepo, Task, User } from "../../models";
+import {
+  Activity,
+  GithubAccount,
+  Issue,
+  Project,
+  ProjectCommit,
+  ProjectRepo,
+  Task,
+  User,
+} from "../../models";
 import { notFound } from "../../lib/errors";
 import type { WorkStatus } from "../../models";
-import { listCommits } from "../../lib/github.features";
-import { generateStaffNarrative } from "./narrative";
+import { listMergedPullRequests } from "../../lib/github.features";
+import { commitsSyncService } from "../github/commits.sync.service";
+import { generateStaffNarrative, generateWorkDelivered } from "./narrative";
 
 // ------------------------------------------------------------------ helpers --
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -54,8 +64,19 @@ export interface TimelineEntry {
 export interface CommitRow {
   sha: string;
   message: string;
+  body?: string; // commit description (remaining message lines), when stored
   repo: string;
   date: string | null;
+  url: string;
+}
+
+// A merged PR authored by the staff member (attributed by GitHub login).
+export interface PullRow {
+  number: number;
+  title: string;
+  body: string;
+  repo: string;
+  mergedAt: string | null;
   url: string;
 }
 
@@ -90,6 +111,12 @@ export interface StaffReportPayload {
   // project in the month, newest first (capped at 200).
   commits: CommitRow[];
   commitRepos: { repo: string; count: number }[];
+  // Merged PRs authored by the staff member in the month (by GitHub login).
+  pulls: PullRow[];
+  // Human-readable list of the work actually delivered, generated from commit
+  // messages + merged PR descriptions by the report model (GLM 5.3 flash,
+  // high reasoning). Empty when unavailable; the PDF falls back to raw titles.
+  workDelivered: string[];
   // Human-readable overview written by the report model (GLM 5.3 flash, high
   // reasoning). Null when OpenRouter is unconfigured or the call failed.
   narrative?: string | null;
@@ -179,7 +206,7 @@ export const staffReportService = {
         .catch(() => [])) ?? [];
     const staffDepartments = staffDepts.map((d) => d.name);
 
-    // ---- Git activity: the staff member's commits across the project's repos --
+    // ---- Git activity: sync, then read the workspace's commit record ----------
     const [ghAccount, repos] = await Promise.all([
       GithubAccount.findOne({ where: { userId } }),
       ProjectRepo.findAll({ where: { projectId } }),
@@ -195,44 +222,82 @@ export const staffReportService = {
     );
     const nameLc = staff.name.toLowerCase();
 
-    const commitLists = await Promise.all(
-      repos.map(async (r) => {
-        try {
-          // Two passes per repo: GitHub's author filter (exact for a linked
-          // login) plus an unfiltered pass matched locally on git email or
-          // author name, catching commits pushed under an unlinked identity.
-          const byLogin = login
-            ? await listCommits(r.owner, r.repo, { perPage: 100, author: login, since, until })
-            : [];
-          const all = await listCommits(r.owner, r.repo, { perPage: 100, since, until });
-          const seen = new Set<string>();
-          const merged: CommitRow[] = [];
-          for (const c of [...byLogin, ...all]) {
-            if (seen.has(c.sha)) continue;
-            seen.add(c.sha);
-            const lc = (c.authorLogin ?? "").toLowerCase();
-            const mail = (c.authorEmail ?? "").toLowerCase();
-            const nm = (c.authorName ?? "").toLowerCase();
-            if ((login && lc && lc === login) || (mail && emailSet.has(mail)) || (nm && nm === nameLc)) {
-              merged.push({ sha: c.sha.slice(0, 7), message: c.message, repo: r.fullName, date: c.date, url: c.url });
-            }
-          }
-          return merged;
-        } catch (err) {
-          // One unreachable repo must not sink the whole report.
-          console.error(`[reports] commit fetch failed for ${r.fullName}:`, err);
-          return [];
-        }
-      }),
-    );
+    // Make sure the reporting window is synced (no-op when already covered).
+    await commitsSyncService
+      .syncProject(projectId, range.start)
+      .catch((err) =>
+        console.error(`[reports] commit sync failed for project ${projectId}:`, err),
+      );
 
-    const allCommits = commitLists
-      .flat()
-      .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
-    const commits = allCommits.slice(0, 200);
-    const commitRepos = [...commits.reduce((m, c) => m.set(c.repo, (m.get(c.repo) ?? 0) + 1), new Map<string, number>())]
+    // The staff member's commits in the month: rows matched to them at sync
+    // time, plus rows re-matched here on their identity (covers records synced
+    // before their GitHub account was linked).
+    const commitRows = repos.length
+      ? await ProjectCommit.findAll({
+          where: {
+            projectId,
+            committedAt: { [Op.gte]: range.start, [Op.lt]: range.end },
+          },
+          order: [["committedAt", "DESC"]],
+        })
+      : [];
+    const commits: CommitRow[] = commitRows
+      .filter((r) => {
+        const lc = (r.authorLogin ?? "").toLowerCase();
+        const mail = (r.authorEmail ?? "").toLowerCase();
+        const nm = (r.authorName ?? "").toLowerCase();
+        return (
+          r.authorUserId === userId ||
+          (login && lc && lc === login) ||
+          (mail && emailSet.has(mail)) ||
+          (nm && nm === nameLc)
+        );
+      })
+      .map((r) => ({
+        sha: r.sha.slice(0, 7),
+        message: r.message,
+        body: r.body || undefined,
+        repo: r.repoFullName,
+        date: r.committedAt ? r.committedAt.toISOString() : null,
+        url: r.url,
+      }));
+    const commitRepos = [
+      ...commits
+        .reduce((m, c) => m.set(c.repo, (m.get(c.repo) ?? 0) + 1), new Map<string, number>())
+        .entries(),
+    ]
       .map(([repo, count]) => ({ repo, count }))
       .sort((a, b) => b.count - a.count);
+
+    // Merged PRs are the meaningful unit of delivered work; fetch them live
+    // and attribute by GitHub login (unreliable without a linked account, so
+    // they are skipped entirely in that case).
+    const pulls: PullRow[] = login
+      ? (
+          await Promise.all(
+            repos.map(async (r) => {
+              try {
+                return (await listMergedPullRequests(r.owner, r.repo, { since, until }))
+                  .filter((p) => (p.authorLogin ?? "").toLowerCase() === login)
+                  .map((p) => ({
+                    number: p.number,
+                    title: p.title,
+                    body: p.body,
+                    repo: r.fullName,
+                    mergedAt: p.mergedAt,
+                    url: p.url,
+                  }));
+              } catch (err) {
+                console.error(`[reports] PR fetch failed for ${r.fullName}:`, err);
+                return [] as PullRow[];
+              }
+            }),
+          )
+        )
+          .flat()
+          .sort((a, b) => (b.mergedAt ?? "").localeCompare(a.mergedAt ?? ""))
+          .slice(0, 100)
+      : [];
 
     const inMonth = (d: Date | null | undefined) => !!d && d >= range.start && d < range.end;
 
@@ -343,11 +408,14 @@ export const staffReportService = {
       timeline,
       commits,
       commitRepos,
+      pulls,
+      workDelivered: [],
       generatedAt: new Date().toISOString(),
     };
 
-    // The AI overview is generated from everything above; a failure or a
-    // missing OpenRouter key leaves it null and the report still renders.
+    // The work-delivered list and narrative come from the report model; both
+    // degrade gracefully (empty list / null) when OpenRouter is unavailable.
+    payload.workDelivered = await generateWorkDelivered(commits, pulls);
     payload.narrative = await generateStaffNarrative(payload);
 
     return payload;

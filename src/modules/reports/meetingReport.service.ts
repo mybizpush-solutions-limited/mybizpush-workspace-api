@@ -1,7 +1,8 @@
+import { Op } from "sequelize";
 import { z } from "zod";
 import { env } from "../../config/env";
-import { AppError, badRequest } from "../../lib/errors";
-import { destroyAsset, uploadBuffer, type ResourceType } from "../../lib/cloudinary";
+import { AppError, badRequest, notFound } from "../../lib/errors";
+import { uploadBuffer } from "../../lib/cloudinary";
 import { chatCompletion } from "../../lib/openrouter";
 import { MeetingReport } from "../../models";
 import { stripDashes } from "./narrative";
@@ -142,6 +143,11 @@ export async function draftMeetingReport(
   return { data, buffer, filename };
 }
 
+// ------------------------------------------------- background processing -----
+// In-process guard so the fire-and-forget kick and the cron sweeper never
+// process the same row twice.
+const inFlight = new Set<string>();
+
 function serialize(r: MeetingReport) {
   return {
     id: r.id,
@@ -151,32 +157,64 @@ function serialize(r: MeetingReport) {
     type: r.type,
     size: Number(r.size),
     url: r.url,
+    status: r.status,
+    error: r.error || null,
+    processedAt: r.processedAt,
     generatedById: r.generatedById,
     createdAt: r.createdAt,
   };
 }
 
 export const meetingReportService = {
-  // Turn an uploaded transcript into a letterheaded, confidential meeting
-  // report PDF, upload it to Cloudinary and persist the record. Mirrors the
-  // attachments service: a failed DB write cleans up the uploaded asset.
+  // Accept an uploaded transcript, store it, and hand the row over to
+  // background processing. Returns immediately with a pending row; the UI
+  // polls the list and the finished report appears when the model is done.
   async create(input: { buffer: Buffer; originalname: string; generatedById: string }) {
     if (!env.OPENROUTER_API_KEY) {
       throw new AppError(503, "OpenRouter is not configured", "openrouter_unconfigured");
     }
-
     const transcript = input.buffer.toString("utf8").replace(/\r\n/g, "\n").trim();
-    const { data, buffer, filename } = await draftMeetingReport(transcript, input.originalname);
-
-    const result = await uploadBuffer(buffer, {
-      folder: `${env.CLOUDINARY_UPLOAD_FOLDER}/meeting-reports`,
-      resourceType: "auto",
-      tags: ["meeting-report", input.generatedById],
-      filename,
+    if (transcript.length < 80) {
+      throw badRequest("That file does not look like a meeting transcript");
+    }
+    const row = await MeetingReport.create({
+      // Provisional title until the model names the meeting properly.
+      title: input.originalname.replace(/\.[^.]+$/, "").slice(0, 300) || "Meeting Report",
+      transcript,
+      sourceName: input.originalname.slice(0, 300),
+      status: "pending",
+      generatedById: input.generatedById,
     });
+    // Fire-and-forget: the sweeper cron covers crash/restart recovery.
+    void meetingReportService.process(row.id);
+    return serialize(row);
+  },
 
+  // Run the generation for one row: transcript → model → PDF → Cloudinary.
+  async process(id: string): Promise<void> {
+    if (inFlight.has(id)) return;
+    inFlight.add(id);
     try {
-      const row = await MeetingReport.create({
+      const row = await MeetingReport.findByPk(id);
+      if (!row || row.status === "done" || row.status === "processing") return;
+      await row.update({ status: "processing", error: "" });
+      if (!env.OPENROUTER_API_KEY) {
+        throw new AppError(503, "OpenRouter is not configured", "openrouter_unconfigured");
+      }
+
+      const { data, buffer, filename } = await draftMeetingReport(
+        row.transcript ?? "",
+        row.sourceName || row.name,
+      );
+
+      const result = await uploadBuffer(buffer, {
+        folder: `${env.CLOUDINARY_UPLOAD_FOLDER}/meeting-reports`,
+        resourceType: "auto",
+        tags: ["meeting-report", row.generatedById ?? ""],
+        filename,
+      });
+
+      await row.update({
         title: data.title,
         meetingDate: data.date,
         name: filename,
@@ -184,15 +222,48 @@ export const meetingReportService = {
         size: buffer.length,
         url: result.secure_url,
         publicId: result.public_id,
-        generatedById: input.generatedById,
+        status: "done",
+        error: "",
+        processedAt: new Date(),
       });
-      return serialize(row);
     } catch (err) {
-      await destroyAsset(result.public_id, (result.resource_type as ResourceType) ?? "raw").catch(
-        () => undefined,
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[meeting-reports] processing ${id} failed:`, message);
+      await MeetingReport.update(
+        { status: "failed", error: message.slice(0, 1000) },
+        { where: { id } },
       );
-      throw err;
+    } finally {
+      inFlight.delete(id);
     }
+  },
+
+  // Retry a failed report (resets to pending and re-processes).
+  async retry(id: string) {
+    const row = await MeetingReport.findByPk(id);
+    if (!row) throw notFound("Meeting report not found");
+    if (row.status !== "failed") throw badRequest("Only a failed report can be retried");
+    await row.update({ status: "pending", error: "" });
+    void meetingReportService.process(id);
+    return serialize(row);
+  },
+
+  // Cron sweeper: picks up rows still pending (or stale "processing" after a
+  // crash/restart) and processes them — a few per tick at most.
+  async processPending(): Promise<number> {
+    const staleBefore = new Date(Date.now() - 5 * 60_000);
+    const rows = await MeetingReport.findAll({
+      where: {
+        [Op.or]: [
+          { status: "pending" },
+          { status: "processing", createdAt: { [Op.lt]: staleBefore } },
+        ],
+      },
+      order: [["createdAt", "ASC"]],
+      limit: 5,
+    });
+    for (const row of rows) await meetingReportService.process(row.id);
+    return rows.length;
   },
 
   // Saved meeting reports, newest first.
