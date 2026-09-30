@@ -1167,6 +1167,44 @@ Report.belongsTo(User, { as: "staff", foreignKey: "userId" });
 Report.belongsTo(User, { as: "generatedBy", foreignKey: "generatedById" });
 Project.hasMany(Report, { as: "reports", foreignKey: "projectId" });
 
+// ---- MeetingReport ---------------------------------------------------------
+// A generated meeting report PDF (from an uploaded transcript). The PDF lives
+// in Cloudinary; this row is the metadata/provenance.
+export class MeetingReport extends Model<
+  InferAttributes<MeetingReport>,
+  InferCreationAttributes<MeetingReport>
+> {
+  declare id: CreationOptional<string>;
+  declare title: string;
+  declare meetingDate: CreationOptional<string>;
+  declare name: string;
+  declare type: CreationOptional<string>;
+  declare size: CreationOptional<number>;
+  declare url: CreationOptional<string>;
+  declare publicId: CreationOptional<string>;
+  declare generatedById: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+MeetingReport.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    title: { type: DataTypes.STRING(300), allowNull: false },
+    meetingDate: { type: DataTypes.STRING(120), allowNull: false, defaultValue: "" },
+    name: { type: DataTypes.STRING(300), allowNull: false },
+    type: { type: DataTypes.STRING(120), allowNull: false, defaultValue: "application/pdf" },
+    size: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 },
+    url: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    publicId: { type: DataTypes.STRING(400), allowNull: false, defaultValue: "" },
+    generatedById: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "meeting_reports" },
+);
+
+MeetingReport.belongsTo(User, { as: "generatedBy", foreignKey: "generatedById" });
+
 export const models = {
   User, Department, Project, Label, Task, Issue, Comment, Activity,
   PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount, GithubAccount, ProjectRepo,
@@ -1174,4 +1212,5 @@ export const models = {
   AnalyticsSite, AnalyticsEvent, AnalyticsDaily, BlogChannel, BlogEditor,
   ProjectDatabase, DatabaseBackup, DatabaseBackupSchedule,
   Report,
+  MeetingReport,
 };

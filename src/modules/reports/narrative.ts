@@ -3,8 +3,9 @@ import { chatCompletion } from "../../lib/openrouter";
 import type { StaffReportPayload } from "./staffReport.service";
 
 // The house style forbids em/en dashes in generated prose. Enforce it in the
-// prompt and strip any the model emits anyway.
-function stripDashes(text: string): string {
+// prompt and strip any the model emits anyway. Exported for reuse by the
+// meeting report generator.
+export function stripDashes(text: string): string {
   return text
     .replace(/\s*[\u2013\u2014]\s*/g, ", ")
     .replace(/,\s*,+/g, ",")
