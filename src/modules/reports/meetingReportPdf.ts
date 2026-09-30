@@ -6,7 +6,6 @@ import {
   decorate,
   FAINT,
   finish,
-  fit,
   GREY,
   h1,
   INK,
@@ -44,7 +43,6 @@ function cover(doc: PDFKit.PDFDocument, data: MeetingReportData) {
 
   need(doc, 130);
   doc.moveDown(0.6);
-  const y = doc.y;
   const attendees = data.attendees.length
     ? data.attendees.join(", ")
     : "Attendees not identified in the transcript";
@@ -57,10 +55,21 @@ function cover(doc: PDFKit.PDFDocument, data: MeetingReportData) {
       new Date(data.generatedAt).toLocaleString("en-GB", { timeZone: "Africa/Lagos" }) + " (WAT)",
     ],
   ];
-  const boxH = rows.length * 20 + 18;
-  doc.rect(M, y, CW, boxH).fill(LIGHT);
+  // Values wrap within the box instead of being truncated with an ellipsis —
+  // an attendee cut off mid-name defeats the purpose of the list. The box grows
+  // to fit the tallest wrapped value.
+  const valueX = M + 96;
+  const valueW = CW - 96 - 14;
+  doc.font("reg").fontSize(9);
+  const heights = rows.map(([, v]) =>
+    Math.max(doc.heightOfString(v, { width: valueW, lineGap: 2 }), 11),
+  );
+  const boxH = heights.reduce((acc, h) => acc + h + 10, 8);
+  need(doc, boxH + 10);
+  const by = doc.y;
+  doc.rect(M, by, CW, boxH).fill(LIGHT);
+  let ry = by + 8;
   rows.forEach(([k, v], i) => {
-    const ry = y + 12 + i * 20;
     doc.font("bold").fontSize(8.5).fillColor(PURPLE).text(k.toUpperCase(), M + 14, ry, {
       lineBreak: false,
     });
@@ -68,9 +77,10 @@ function cover(doc: PDFKit.PDFDocument, data: MeetingReportData) {
       .font("reg")
       .fontSize(9)
       .fillColor(INK)
-      .text(fit(doc, v, CW - 110), M + 110, ry - 0.5, { lineBreak: false });
+      .text(v, valueX, ry - 0.5, { width: valueW, lineGap: 2 });
+    ry += heights[i]! + 10;
   });
-  doc.y = y + boxH;
+  doc.y = by + boxH;
   doc.x = M;
 }
 
@@ -95,11 +105,16 @@ function numbered(doc: PDFKit.PDFDocument, items: string[]) {
   }
 }
 
-// Action points table: # | action | owner | due.
+// Action points table: # | action | owner | due. Every column wraps within its
+// own fixed width — nothing is truncated, and rows grow to fit the tallest
+// column so text can never collide with a neighbouring column or the next row.
 function actionTable(doc: PDFKit.PDFDocument, items: MeetingReportData["actionItems"]) {
-  const dueX = W - M - 90;
-  const ownerX = W - M - 210;
+  const dueW = 104;
+  const ownerW = 132;
+  const dueX = W - M - dueW;
+  const ownerX = dueX - ownerW;
   const actionX = M + 22;
+  const actionW = ownerX - actionX - 14;
 
   need(doc, 30);
   const hy = doc.y;
@@ -122,21 +137,42 @@ function actionTable(doc: PDFKit.PDFDocument, items: MeetingReportData["actionIt
 
   for (let i = 0; i < items.length; i++) {
     const a = items[i]!;
-    // Two text lines of room per row; wraps stay inside the row.
+    const actionText = a.action.trim();
+    const ownerText = a.owner || "Unassigned";
+    const dueText = a.due || "—";
+    // Measure every column's wrapped height at its final width up front, so the
+    // whole row can be kept together on one page.
+    doc.font("reg").fontSize(8.8);
+    const actionH = doc.heightOfString(actionText, { width: actionW, lineGap: 1.5 });
+    doc.font("reg").fontSize(8.4);
+    const ownerH = doc.heightOfString(ownerText, { width: ownerW - 8, lineGap: 1 });
+    const dueH = doc.heightOfString(dueText, { width: dueW, lineGap: 1 });
+    const rowH = Math.max(24, actionH, ownerH + 3, dueH + 3) + 8;
+
     doc.y = y;
-    need(doc, 30);
+    need(doc, rowH);
     y = doc.y;
-    doc.font("bold").fontSize(9).fillColor(PURPLE).text(String(i + 1), M, y + 1, { lineBreak: false });
-    const lines = doc
+
+    doc
+      .font("bold")
+      .fontSize(9)
+      .fillColor(PURPLE)
+      .text(String(i + 1), M, y + 1, { lineBreak: false });
+    doc
       .font("reg")
       .fontSize(8.8)
       .fillColor(INK)
-      .text(a.action, actionX, y, { width: ownerX - actionX - 12, lineGap: 1.5, height: 26, ellipsis: true });
-    void lines;
-    doc.font("reg").fontSize(8.4).fillColor(GREY);
-    doc.text(fit(doc, a.owner || "Unassigned", ownerX - actionX - 20), ownerX, y + 1, { lineBreak: false });
-    doc.text(a.due || "—", dueX, y + 1, { lineBreak: false });
-    const rowH = Math.max(24, (doc.y - y) + 8);
+      .text(actionText, actionX, y, { width: actionW, lineGap: 1.5 });
+    doc
+      .font("reg")
+      .fontSize(8.4)
+      .fillColor(GREY)
+      .text(ownerText, ownerX, y + 1, { width: ownerW - 8, lineGap: 1 });
+    doc
+      .font("reg")
+      .fontSize(8.4)
+      .fillColor(GREY)
+      .text(dueText, dueX, y + 1, { width: dueW, lineGap: 1 });
     doc.moveTo(M, y + rowH - 4).lineTo(W - M, y + rowH - 4).lineWidth(0.5).strokeColor("#efe6f2").stroke();
     y += rowH;
   }

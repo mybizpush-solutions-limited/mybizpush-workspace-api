@@ -158,8 +158,12 @@ export function h1(doc: PDFKit.PDFDocument, t: string) {
   if (doc.y > H - BOT - 70) doc.addPage();
   doc.moveDown(0.5);
   const y = doc.y;
-  doc.rect(M, y + 2, 4, 16).fill(PURPLE);
-  doc.font("bold").fontSize(14.5).fillColor(INK).text(t, M + 12, y, { width: CW - 12 });
+  doc.font("bold").fontSize(14.5);
+  // The accent bar spans the heading's full wrapped height, so two-line
+  // headings don't hang off a fixed-size bar.
+  const barH = Math.max(16, doc.heightOfString(t, { width: CW - 12 }));
+  doc.rect(M, y + 2, 4, barH).fill(PURPLE);
+  doc.fillColor(INK).text(t, M + 12, y, { width: CW - 12 });
   doc.moveDown(0.4);
 }
 
