@@ -1124,10 +1124,54 @@ DatabaseBackupSchedule.belongsTo(ProjectDatabase, { as: "database", foreignKey: 
 Notification.belongsTo(User, { as: "recipient", foreignKey: "userId" });
 Notification.belongsTo(User, { as: "fromUser", foreignKey: "fromUserId" });
 
+// ---- Report ----------------------------------------------------------------
+// A generated report snapshot (currently the letterheaded staff monthly report
+// PDF). The PDF lives in Cloudinary; this row carries metadata/provenance.
+export const REPORT_KINDS = ["staff"] as const;
+export class Report extends Model<InferAttributes<Report>, InferCreationAttributes<Report>> {
+  declare id: CreationOptional<string>;
+  declare projectId: string;
+  declare userId: string; // the staff member the report is about
+  declare month: string; // "YYYY-MM"
+  declare kind: CreationOptional<(typeof REPORT_KINDS)[number]>;
+  declare name: string;
+  declare type: CreationOptional<string>;
+  declare size: CreationOptional<number>;
+  declare url: CreationOptional<string>;
+  declare publicId: CreationOptional<string>;
+  declare generatedById: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+Report.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    projectId: { type: DataTypes.UUID, allowNull: false },
+    userId: { type: DataTypes.UUID, allowNull: false },
+    month: { type: DataTypes.STRING(7), allowNull: false, validate: { is: /^\d{4}-(0[1-9]|1[0-2])$/ } },
+    kind: { type: DataTypes.ENUM(...REPORT_KINDS), allowNull: false, defaultValue: "staff" },
+    name: { type: DataTypes.STRING(300), allowNull: false },
+    type: { type: DataTypes.STRING(120), allowNull: false, defaultValue: "application/pdf" },
+    size: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 },
+    url: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    publicId: { type: DataTypes.STRING(400), allowNull: false, defaultValue: "" },
+    generatedById: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "reports" },
+);
+
+Report.belongsTo(Project, { as: "project", foreignKey: "projectId" });
+Report.belongsTo(User, { as: "staff", foreignKey: "userId" });
+Report.belongsTo(User, { as: "generatedBy", foreignKey: "generatedById" });
+Project.hasMany(Report, { as: "reports", foreignKey: "projectId" });
+
 export const models = {
   User, Department, Project, Label, Task, Issue, Comment, Activity,
   PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount, GithubAccount, ProjectRepo,
   BlacklistedEmail, CustomRole, DocumentationLink,
   AnalyticsSite, AnalyticsEvent, AnalyticsDaily, BlogChannel, BlogEditor,
   ProjectDatabase, DatabaseBackup, DatabaseBackupSchedule,
+  Report,
 };

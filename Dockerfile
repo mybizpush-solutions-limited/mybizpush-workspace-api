@@ -49,6 +49,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 # Compiled output (includes compiled migrations under dist/db/migrations).
 COPY --from=builder /app/dist ./dist
+COPY assets ./assets
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x docker-entrypoint.sh
 

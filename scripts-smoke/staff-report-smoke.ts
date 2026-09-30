@@ -1,0 +1,84 @@
+// Scratch smoke test for the staff report PDF renderer.
+import fs from "node:fs";
+import { renderStaffReportPdf } from "/Users/samsonite/Documents/Sam/mybizpush/dev-team/api/src/modules/reports/staffReportPdf";
+import type { StaffReportPayload } from "/Users/samsonite/Documents/Sam/mybizpush/dev-team/api/src/modules/reports/staffReport.service";
+
+const day = (n: number) => new Date(Date.UTC(2026, 8, n)).toISOString();
+
+const tasks = Array.from({ length: 14 }, (_, i) => ({
+  id: `t${i}`,
+  type: "task" as const,
+  title: `Task number ${i + 1} — a reasonably long task title to test wrapping`,
+  status: (i < 6 ? "done" : i < 8 ? "in_progress" : i < 10 ? "blocked" : i < 12 ? "in_review" : "todo") as never,
+  priority: (["low", "medium", "high", "urgent"] as const)[i % 4],
+  severity: null,
+  dueDate: i % 3 === 0 ? day(10 + i) : null,
+  createdAt: day(2 + i),
+  departmentId: null,
+  overdue: i > 8,
+  completedInMonth: i < 6,
+}));
+
+const issues = Array.from({ length: 4 }, (_, i) => ({
+  id: `i${i}`,
+  type: "issue" as const,
+  title: `Issue ${i + 1} — reported defect needing attention`,
+  status: (i < 2 ? "done" : "blocked") as never,
+  priority: "high",
+  severity: (["critical", "major", "minor", "major"] as const)[i],
+  dueDate: null,
+  createdAt: day(5),
+  departmentId: null,
+  overdue: i === 2,
+  completedInMonth: i < 2,
+}));
+
+const byStatus = (rows: { status: string }[]) =>
+  Object.fromEntries(
+    ["todo", "in_progress", "in_review", "blocked", "done"].map((s) => [
+      s,
+      rows.filter((r) => r.status === s).length,
+    ]),
+  );
+
+const payload: StaffReportPayload = {
+  project: { id: "p1", name: "Hempay Mobile App", progress: 62 },
+  staff: { id: "u1", name: "Samuel Adewale", email: "samuel@mybizpush.com.ng", roles: ["Frontend"], avatarUrl: null },
+  staffDepartments: ["Frontend"],
+  month: "2026-09",
+  period: { start: day(1), end: day(30), label: "September 2026" },
+  summary: {
+    tasks: {
+      currentlyAssigned: tasks.length,
+      completedInMonth: 6,
+      openTouchedInMonth: tasks.length - 6,
+      overdue: tasks.filter((t) => t.overdue).length,
+      byStatus: byStatus(tasks) as never,
+    },
+    issues: {
+      currentlyAssigned: issues.length,
+      completedInMonth: 2,
+      openTouchedInMonth: 2,
+      overdue: 1,
+      byStatus: byStatus(issues) as never,
+    },
+    completionRate: 50,
+    activityEvents: 9,
+  },
+  tasks,
+  issues,
+  timeline: [
+    { at: day(3), kind: "assigned", itemType: "task", itemTitle: "Implement task Kanban board", actor: "Amaka Obi", from: null, to: null },
+    { at: day(7), kind: "status_changed", itemType: "task", itemTitle: "Implement task Kanban board", actor: "Samuel Adewale", from: "todo", to: "in_progress" },
+    { at: day(12), kind: "commented", itemType: "issue", itemTitle: "Wallet balance flickers on refresh", actor: "Samuel Adewale", from: null, to: null },
+    { at: day(18), kind: "status_changed", itemType: "task", itemTitle: "Onboarding flow redesign", actor: "Amaka Obi", from: "in_progress", to: "done" },
+    { at: day(24), kind: "pr_linked", itemType: "task", itemTitle: "Add CSV export", actor: "Samuel Adewale", from: null, to: null },
+  ],
+  generatedAt: new Date().toISOString(),
+};
+
+(async () => {
+  const { buffer, filename } = await renderStaffReportPdf(payload);
+  fs.writeFileSync("/tmp/staff-report-test.pdf", buffer);
+  console.log("OK", filename, `${(buffer.length / 1024).toFixed(0)} KB`);
+})();

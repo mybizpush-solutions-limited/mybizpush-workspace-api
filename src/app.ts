@@ -28,6 +28,7 @@ import { analyticsRouter } from "./modules/analytics/analytics.routes";
 import { analyticsCollectRouter } from "./modules/analytics/analytics.collect.routes";
 import { blogsRouter } from "./modules/blogs/blogs.routes";
 import { databasesRouter } from "./modules/databases/databases.routes";
+import { reportsRouter } from "./modules/reports/reports.routes";
 
 // All versioned business endpoints live under this prefix.
 export const API_PREFIX = "/api/v1";
@@ -74,6 +75,9 @@ export function createApp() {
   v1.use("/me", meRouter);
   v1.use("/departments", departmentsRouter);
   v1.use("/projects", projectsRouter);
+  // Report endpoints share the /projects prefix (distinct sub-paths) so URLs
+  // read /api/v1/projects/:id/report/staff/:userId.
+  v1.use("/projects", reportsRouter);
   v1.use("/tasks", tasksRouter);
   v1.use("/issues", issuesRouter);
   v1.use("/comments", commentsRouter);
