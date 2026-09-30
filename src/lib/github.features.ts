@@ -75,21 +75,27 @@ export interface Commit {
   url: string;
   authorName: string | null;
   authorLogin: string | null;
+  authorEmail: string | null;
   date: string | null;
 }
 
 export async function listCommits(
   owner: string,
   repo: string,
-  opts: { sha?: string; perPage?: number } = {},
+  opts: { sha?: string; perPage?: number; author?: string; since?: string; until?: string } = {},
 ): Promise<Commit[]> {
   const params = new URLSearchParams({ per_page: String(opts.perPage ?? 20) });
   if (opts.sha) params.set("sha", opts.sha);
+  // Server-side filters used by the staff report: commits by a linked GitHub
+  // login inside a window.
+  if (opts.author) params.set("author", opts.author);
+  if (opts.since) params.set("since", opts.since);
+  if (opts.until) params.set("until", opts.until);
   const arr = await ghJson<
     Array<{
       sha: string;
       html_url: string;
-      commit: { message: string; author?: { name?: string; date?: string } };
+      commit: { message: string; author?: { name?: string; email?: string; date?: string } };
       author?: { login?: string } | null;
     }>
   >(`/repos/${owner}/${repo}/commits?${params.toString()}`);
@@ -98,6 +104,7 @@ export async function listCommits(
     message: c.commit.message.split("\n")[0] ?? c.commit.message,
     url: c.html_url,
     authorName: c.commit.author?.name ?? null,
+    authorEmail: c.commit.author?.email ?? null,
     authorLogin: c.author?.login ?? null,
     date: c.commit.author?.date ?? null,
   }));

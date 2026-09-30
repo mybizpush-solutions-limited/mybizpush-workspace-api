@@ -30,6 +30,8 @@ const schema = z.object({
 
   OPENROUTER_API_KEY: z.string().optional().default(""),
   OPENROUTER_MODEL: z.string().default("openai/gpt-oss-20b"),
+  // Model for report narratives (GLM 5.3 flash, high reasoning effort).
+  OPENROUTER_REPORT_MODEL: z.string().default("z-ai/glm-5.3-flash"),
   // The assistant runs a tool-calling loop, which the small default model above
   // handles poorly (it tends to describe a tool call in prose instead of
   // emitting one). Kept separate so summaries/briefs can stay on the cheap model

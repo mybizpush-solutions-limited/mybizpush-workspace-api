@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import { renderStaffReportPdf } from "/Users/samsonite/Documents/Sam/mybizpush/dev-team/api/src/modules/reports/staffReportPdf";
 import type { StaffReportPayload } from "/Users/samsonite/Documents/Sam/mybizpush/dev-team/api/src/modules/reports/staffReport.service";
+import { generateStaffNarrative } from "/Users/samsonite/Documents/Sam/mybizpush/dev-team/api/src/modules/reports/narrative";
 
 const day = (n: number) => new Date(Date.UTC(2026, 8, n)).toISOString();
 
@@ -67,6 +68,15 @@ const payload: StaffReportPayload = {
   },
   tasks,
   issues,
+  commits: [
+    { sha: "a1b2c3d", message: "Fix wallet balance flicker on refresh", repo: "mybizpush/hempay-app", date: day(9), url: "https://github.com/x/commit/a1b2c3d" },
+    { sha: "e4f5a6b", message: "Add CSV export to the reports page", repo: "mybizpush/hempay-app", date: day(14), url: "https://github.com/x/commit/e4f5a6b" },
+    { sha: "b7c8d9e", message: "Onboarding flow: step indicator polish", repo: "mybizpush/hempay-web", date: day(21), url: "https://github.com/x/commit/b7c8d9e" },
+  ],
+  commitRepos: [
+    { repo: "mybizpush/hempay-app", count: 2 },
+    { repo: "mybizpush/hempay-web", count: 1 },
+  ],
   timeline: [
     { at: day(3), kind: "assigned", itemType: "task", itemTitle: "Implement task Kanban board", actor: "Amaka Obi", from: null, to: null },
     { at: day(7), kind: "status_changed", itemType: "task", itemTitle: "Implement task Kanban board", actor: "Samuel Adewale", from: "todo", to: "in_progress" },
@@ -78,6 +88,11 @@ const payload: StaffReportPayload = {
 };
 
 (async () => {
+  // Generate the narrative first so the PDF includes the Overview section.
+  payload.narrative = await generateStaffNarrative(payload);
+  console.log("NARRATIVE:", payload.narrative ? payload.narrative.slice(0, 300) : "(unavailable)");
+  if (payload.narrative) console.log("HAS_EM_DASH:", /[\u2013\u2014]/.test(payload.narrative));
+
   const { buffer, filename } = await renderStaffReportPdf(payload);
   fs.writeFileSync("/tmp/staff-report-test.pdf", buffer);
   console.log("OK", filename, `${(buffer.length / 1024).toFixed(0)} KB`);

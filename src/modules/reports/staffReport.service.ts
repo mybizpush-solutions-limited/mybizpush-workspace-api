@@ -1,7 +1,9 @@
 import { Op } from "sequelize";
-import { Activity, Issue, Project, Task, User } from "../../models";
+import { Activity, GithubAccount, Issue, Project, ProjectRepo, Task, User } from "../../models";
 import { notFound } from "../../lib/errors";
 import type { WorkStatus } from "../../models";
+import { listCommits } from "../../lib/github.features";
+import { generateStaffNarrative } from "./narrative";
 
 // ------------------------------------------------------------------ helpers --
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -48,6 +50,15 @@ export interface TimelineEntry {
   to: string | null;
 }
 
+// A git commit by the staff member, from one of the project's linked repos.
+export interface CommitRow {
+  sha: string;
+  message: string;
+  repo: string;
+  date: string | null;
+  url: string;
+}
+
 export interface StaffReportPayload {
   project: { id: string; name: string; progress: number };
   staff: { id: string; name: string; email: string; roles: string[]; avatarUrl: string | null };
@@ -75,6 +86,13 @@ export interface StaffReportPayload {
   tasks: ReportRow[];
   issues: ReportRow[];
   timeline: TimelineEntry[];
+  // Git activity: the staff member's commits across every repo linked to the
+  // project in the month, newest first (capped at 200).
+  commits: CommitRow[];
+  commitRepos: { repo: string; count: number }[];
+  // Human-readable overview written by the report model (GLM 5.3 flash, high
+  // reasoning). Null when OpenRouter is unconfigured or the call failed.
+  narrative?: string | null;
   generatedAt: string;
 }
 
@@ -161,6 +179,61 @@ export const staffReportService = {
         .catch(() => [])) ?? [];
     const staffDepartments = staffDepts.map((d) => d.name);
 
+    // ---- Git activity: the staff member's commits across the project's repos --
+    const [ghAccount, repos] = await Promise.all([
+      GithubAccount.findOne({ where: { userId } }),
+      ProjectRepo.findAll({ where: { projectId } }),
+    ]);
+
+    const since = range.start.toISOString();
+    const until = range.end.toISOString();
+    const login = (ghAccount?.login ?? "").toLowerCase() || null;
+    const emailSet = new Set(
+      [staff.email, staff.secondaryEmail]
+        .filter((e): e is string => !!e)
+        .map((e) => e.toLowerCase()),
+    );
+    const nameLc = staff.name.toLowerCase();
+
+    const commitLists = await Promise.all(
+      repos.map(async (r) => {
+        try {
+          // Two passes per repo: GitHub's author filter (exact for a linked
+          // login) plus an unfiltered pass matched locally on git email or
+          // author name, catching commits pushed under an unlinked identity.
+          const byLogin = login
+            ? await listCommits(r.owner, r.repo, { perPage: 100, author: login, since, until })
+            : [];
+          const all = await listCommits(r.owner, r.repo, { perPage: 100, since, until });
+          const seen = new Set<string>();
+          const merged: CommitRow[] = [];
+          for (const c of [...byLogin, ...all]) {
+            if (seen.has(c.sha)) continue;
+            seen.add(c.sha);
+            const lc = (c.authorLogin ?? "").toLowerCase();
+            const mail = (c.authorEmail ?? "").toLowerCase();
+            const nm = (c.authorName ?? "").toLowerCase();
+            if ((login && lc && lc === login) || (mail && emailSet.has(mail)) || (nm && nm === nameLc)) {
+              merged.push({ sha: c.sha.slice(0, 7), message: c.message, repo: r.fullName, date: c.date, url: c.url });
+            }
+          }
+          return merged;
+        } catch (err) {
+          // One unreachable repo must not sink the whole report.
+          console.error(`[reports] commit fetch failed for ${r.fullName}:`, err);
+          return [];
+        }
+      }),
+    );
+
+    const allCommits = commitLists
+      .flat()
+      .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+    const commits = allCommits.slice(0, 200);
+    const commitRepos = [...commits.reduce((m, c) => m.set(c.repo, (m.get(c.repo) ?? 0) + 1), new Map<string, number>())]
+      .map(([repo, count]) => ({ repo, count }))
+      .sort((a, b) => b.count - a.count);
+
     const inMonth = (d: Date | null | undefined) => !!d && d >= range.start && d < range.end;
 
     // Completed-in-month item ids from status_changed → done events.
@@ -243,7 +316,7 @@ export const staffReportService = {
       };
     });
 
-    return {
+    const payload: StaffReportPayload = {
       project: { id: project.id, name: project.name, progress: project.progress },
       staff: {
         id: staff.id,
@@ -268,7 +341,15 @@ export const staffReportService = {
       tasks: taskRows,
       issues: issueRows,
       timeline,
+      commits,
+      commitRepos,
       generatedAt: new Date().toISOString(),
     };
+
+    // The AI overview is generated from everything above; a failure or a
+    // missing OpenRouter key leaves it null and the report still renders.
+    payload.narrative = await generateStaffNarrative(payload);
+
+    return payload;
   },
 };

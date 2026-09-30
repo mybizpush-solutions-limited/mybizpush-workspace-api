@@ -191,7 +191,7 @@ function cover(doc: PDFKit.PDFDocument, p: StaffReportPayload) {
     .fontSize(10.5)
     .fillColor(GREY)
     .text(
-      `${p.staff.roles.length ? p.staff.roles.join(", ") + " — " : ""}Project: ${p.project.name}`,
+      `${p.staff.roles.length ? p.staff.roles.join(", ") + " · " : ""}Project: ${p.project.name}`,
       M,
       doc.y + 4,
     );
@@ -238,8 +238,11 @@ function metrics(doc: PDFKit.PDFDocument, p: StaffReportPayload) {
     { value: String(s.tasks.overdue), label: "Overdue" },
     { value: String(s.issues.completedInMonth), label: "Issues closed" },
     { value: String(s.issues.overdue), label: "Issues overdue" },
+    { value: String(p.commits.length), label: "Git commits" },
+    { value: String(s.activityEvents), label: "Activity events" },
   ];
-  need(doc, 2 * 52 + 8);
+  const rows = Math.ceil(cells.length / 3);
+  need(doc, rows * 52 + 8);
   doc.moveDown(0.5);
   const gap = 10;
   const bw = (CW - 2 * gap) / 3;
@@ -258,7 +261,7 @@ function metrics(doc: PDFKit.PDFDocument, p: StaffReportPayload) {
       .fillColor(GREY)
       .text(c.label.toUpperCase(), x + 12, y + 29, { lineBreak: false });
   });
-  doc.y = y0 + 2 * 52 + 6;
+  doc.y = y0 + rows * 52 + 6;
   doc.x = M;
 }
 
@@ -365,32 +368,113 @@ function timeline(doc: PDFKit.PDFDocument, entries: TimelineEntry[]) {
       .font("reg")
       .fontSize(8.6)
       .fillColor(INK)
-      .text(fit(doc, `${who} ${verb} — ${e.itemTitle}`, CW - 52), M + 52, y, { lineBreak: false });
+      .text(fit(doc, `${who} ${verb}: ${e.itemTitle}`, CW - 52), M + 52, y, { lineBreak: false });
     doc.y = y + 14;
   }
 }
 
+// The AI-written overview (GLM 5.3 flash, high reasoning). Skipped entirely
+// when the narrative is unavailable.
+function overview(doc: PDFKit.PDFDocument, p: StaffReportPayload) {
+  const text = (p.narrative ?? "").trim();
+  if (!text) return;
+  need(doc, 80);
+  h1(doc, "Overview");
+  for (const paraText of text.split(/\n\s*\n/)) {
+    need(doc, 50);
+    doc
+      .font("reg")
+      .fontSize(9.5)
+      .fillColor(INK)
+      .text(paraText.trim(), M, doc.y, { width: CW, lineGap: 3 });
+    doc.moveDown(0.3);
+  }
+}
+
+// The staff member's commits across every repo linked to the project.
+function commitsSection(doc: PDFKit.PDFDocument, p: StaffReportPayload) {
+  h1(
+    doc,
+    `GitHub commits: ${p.commits.length} across ${p.commitRepos.length} ${
+      p.commitRepos.length === 1 ? "repo" : "repos"
+    }`,
+  );
+  if (!p.commits.length) {
+    doc
+      .font("reg")
+      .fontSize(8.5)
+      .fillColor(FAINT)
+      .text(
+        `No commits matched ${p.staff.name} in ${p.period.label} across the project's linked repos.`,
+        M,
+        doc.y,
+      );
+    return;
+  }
+  const shown = p.commits.slice(0, 40);
+  let y = doc.y;
+  for (const { repo, count } of p.commitRepos) {
+    doc.y = y; // keep the cursor in sync so need() sees the real position
+    need(doc, 40);
+    y = doc.y;
+    doc.font("bold").fontSize(9).fillColor(PURPLE).text(`${repo} (${count})`, M, y, {
+      lineBreak: false,
+    });
+    y += 16;
+    for (const c of shown.filter((x) => x.repo === repo)) {
+      doc.y = y;
+      need(doc, 18);
+      y = doc.y; // fresh top-margin if a page break just happened
+      const when = c.date
+        ? new Date(c.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+        : "";
+      doc.font("reg").fontSize(7.5).fillColor(FAINT).text(`${when}  ${c.sha}`, M + 4, y, {
+        lineBreak: false,
+      });
+      doc
+        .font("reg")
+        .fontSize(8.6)
+        .fillColor(INK)
+        .text(fit(doc, c.message, CW - 92), M + 88, y, { lineBreak: false });
+      y += 13;
+    }
+    y += 6;
+  }
+  doc.y = y;
+  const more = p.commits.length - shown.length;
+  if (more > 0) {
+    doc
+      .font("reg")
+      .fontSize(7.4)
+      .fillColor(FAINT)
+      .text(`Plus ${more} older commit${more === 1 ? "" : "s"} not listed here.`, M, doc.y);
+  }
+}
+
 export async function renderStaffReportPdf(p: StaffReportPayload): Promise<RenderedPdf> {
-  const docTitle = `Staff Monthly Report — ${p.staff.name} — ${p.period.label}`;
+  const docTitle = `Staff Monthly Report: ${p.staff.name}, ${p.period.label}`;
   const { doc, chunks } = createDoc();
 
   letterhead(doc, docTitle);
   cover(doc, p);
+  overview(doc, p);
 
   h1(doc, "Summary");
   metrics(doc, p);
 
   h1(
     doc,
-    `Tasks — ${p.summary.tasks.completedInMonth} completed, ${p.summary.tasks.openTouchedInMonth} open`,
+    `Tasks: ${p.summary.tasks.completedInMonth} completed, ${p.summary.tasks.openTouchedInMonth} open`,
   );
   itemTable(doc, p.tasks, "task");
 
   h1(
     doc,
-    `Issues — ${p.summary.issues.completedInMonth} closed, ${p.summary.issues.openTouchedInMonth} open`,
+    `Issues: ${p.summary.issues.completedInMonth} closed, ${p.summary.issues.openTouchedInMonth} open`,
   );
   itemTable(doc, p.issues, "issue");
+
+  commitsSection(doc, p);
 
   h1(doc, "Activity timeline");
   timeline(doc, p.timeline);
@@ -404,7 +488,7 @@ export async function renderStaffReportPdf(p: StaffReportPayload): Promise<Rende
       `Compiled from the MyBizPush Dev Space database on ${new Date(p.generatedAt).toLocaleDateString(
         "en-GB",
         { day: "numeric", month: "long", year: "numeric" },
-      )}. Tasks and issues are those currently assigned to ${p.staff.name} on ${p.project.name}; "completed in month" reflects recorded status changes to Done during ${p.period.label}. Where the record is empty, this report says so rather than filling the gap.`,
+      )}. Tasks and issues are those currently assigned to ${p.staff.name} on ${p.project.name}; "completed in month" reflects recorded status changes to Done during ${p.period.label}. Commits are matched across the project's linked GitHub repos by the staff member's linked GitHub account, git author email or author name. Where the record is empty, this report says so rather than filling the gap.`,
       M,
       doc.y,
       { width: CW, lineGap: 1.5 },

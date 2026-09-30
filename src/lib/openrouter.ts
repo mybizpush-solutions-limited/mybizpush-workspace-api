@@ -67,12 +67,14 @@ async function post(body: Record<string, unknown>): Promise<ChatCompletionRespon
 // Call OpenRouter's chat-completions endpoint. Returns the assistant's text.
 export async function chatCompletion(
   messages: ChatMessage[],
-  opts: { model?: string; temperature?: number } = {},
+  opts: { model?: string; temperature?: number; reasoningEffort?: "low" | "medium" | "high" } = {},
 ): Promise<string> {
   const data = await post({
     model: opts.model ?? env.OPENROUTER_MODEL,
     messages,
     temperature: opts.temperature ?? 0.3,
+    // Reasoning-effort models (e.g. the report narrator) get the effort hint.
+    ...(opts.reasoningEffort ? { reasoning: { effort: opts.reasoningEffort } } : {}),
   });
   const content = data.choices?.[0]?.message?.content?.trim();
   if (!content) throw new AppError(502, "OpenRouter returned no content", "openrouter_empty");
