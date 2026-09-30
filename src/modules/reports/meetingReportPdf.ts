@@ -25,16 +25,23 @@ import {
 // Confidential: the cover chip plus the standard footer on every page.
 
 function cover(doc: PDFKit.PDFDocument, data: MeetingReportData) {
-  doc.moveDown(0.8);
-  const eyebrowY = doc.y;
+  // Eyebrow row: label on the left, confidential chip right-aligned to the
+  // margin on the same row. Positions are explicit — text() with lineBreak:false
+  // leaves doc.y where it was, so the title below must be placed from eyebrowY
+  // (a moveDown() from the tiny eyebrow font would drop it onto the label).
+  const eyebrowY = doc.y + 12;
   doc
     .font("bold")
     .fontSize(8.5)
     .fillColor(PURPLE)
     .text("M E E T I N G   R E P O R T", M, eyebrowY, { lineBreak: false });
-  confidentialChip(doc, W - M - doc.widthOfString("INTERNAL & CONFIDENTIAL") - 10, eyebrowY - 3);
-  doc.moveDown(0.7);
-  doc.font("bold").fontSize(21).fillColor(INK).text(data.title, M, doc.y, { width: CW });
+  // Measure with the font the chip actually draws in (bold 7), so its right
+  // edge lands exactly on the page margin.
+  doc.font("bold").fontSize(7);
+  const chipW = doc.widthOfString("INTERNAL & CONFIDENTIAL");
+  confidentialChip(doc, W - M - chipW - 10, eyebrowY + 1);
+  const titleY = eyebrowY + 22;
+  doc.font("bold").fontSize(21).fillColor(INK).text(data.title, M, titleY, { width: CW });
   doc
     .font("reg")
     .fontSize(10.5)
