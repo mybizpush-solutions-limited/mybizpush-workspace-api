@@ -1,6 +1,8 @@
 import type { CookieOptions, Request, Response } from "express";
 import { unauthorized } from "../../lib/errors";
 import { authService } from "./auth.service";
+import { mfaService } from "./mfa.service";
+import type { AuthStep } from "./session";
 
 const REFRESH_COOKIE = "refresh_token";
 
@@ -31,6 +33,18 @@ function setRefreshCookie(req: Request, res: Response, token: string) {
   res.cookie(REFRESH_COOKIE, token, refreshCookieOptions(req));
 }
 
+// Every sign-in step answers the same way: either the session (refresh token in
+// the cookie, never the body) or the challenge for the next step.
+function sendStep(req: Request, res: Response, step: AuthStep, status = 200) {
+  if (step.status === "complete") {
+    const { refreshToken, ...body } = step;
+    setRefreshCookie(req, res, refreshToken);
+    res.status(status).json(body);
+    return;
+  }
+  res.json(step);
+}
+
 export const authController = {
   // Step 1 — email a verification code.
   async registerStart(req: Request, res: Response) {
@@ -43,20 +57,41 @@ export const authController = {
     res.json({ ok: true });
   },
 
-  // Step 2 — verify the code, create the account, and sign in.
+  // Step 2 — verify the code and create the account; MFA enrollment is next.
   async registerVerify(req: Request, res: Response) {
-    const { user, accessToken, refreshToken } = await authService.verifyRegistration(
-      req.body.email,
-      req.body.otp,
-    );
-    setRefreshCookie(req, res, refreshToken);
-    res.status(201).json({ user, accessToken });
+    sendStep(req, res, await authService.verifyRegistration(req.body.email, req.body.otp));
   },
 
   async login(req: Request, res: Response) {
-    const { user, accessToken, refreshToken } = await authService.login(req.body);
-    setRefreshCookie(req, res, refreshToken);
-    res.json({ user, accessToken });
+    sendStep(req, res, await authService.login(req.body));
+  },
+
+  async completePasswordChange(req: Request, res: Response) {
+    sendStep(
+      req,
+      res,
+      await authService.completeForcedPasswordChange(req.body.challengeToken, req.body.newPassword),
+    );
+  },
+
+  async mfaSetup(req: Request, res: Response) {
+    res.json(await mfaService.beginSetup(req.body.challengeToken));
+  },
+
+  async mfaConfirm(req: Request, res: Response) {
+    sendStep(req, res, await mfaService.confirmSetup(req.body.challengeToken, req.body.code));
+  },
+
+  async mfaVerify(req: Request, res: Response) {
+    sendStep(req, res, await mfaService.verifyChallenge(req.body.challengeToken, req.body.code));
+  },
+
+  async mfaStatus(req: Request, res: Response) {
+    res.json(await mfaService.status(req.auth!.sub));
+  },
+
+  async mfaRegenerateRecoveryCodes(req: Request, res: Response) {
+    res.json({ recoveryCodes: await mfaService.regenerateRecoveryCodes(req.auth!.sub, req.body.code) });
   },
 
   async refresh(req: Request, res: Response) {

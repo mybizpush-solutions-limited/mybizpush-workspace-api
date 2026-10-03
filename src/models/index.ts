@@ -55,6 +55,16 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   // Cosmetic golden "Chief" badge — auto for the chief access level, but can be
   // granted independently to any user by an executive admin.
   declare chiefBadge: CreationOptional<boolean>;
+  // False until a sign-in proves the password meets the 12-character policy —
+  // bcrypt can't be inspected, so it can only be judged from the plaintext.
+  declare passwordMeetsPolicy: CreationOptional<boolean>;
+  // Authenticator-app MFA. The secret is AES-GCM encrypted (lib/crypto) and
+  // only set once enrollment starts; totpEnabled flips when a code confirms it.
+  declare totpSecretEncrypted: CreationOptional<string | null>;
+  declare totpEnabled: CreationOptional<boolean>;
+  declare totpConfirmedAt: CreationOptional<Date | null>;
+  // Last accepted 30s step (replay guard). BIGINT comes back from pg as a string.
+  declare totpLastStep: CreationOptional<string>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -71,10 +81,41 @@ User.init(
     roles: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
     onboarded: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     chiefBadge: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    passwordMeetsPolicy: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    totpSecretEncrypted: { type: DataTypes.TEXT, allowNull: true },
+    totpEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    totpConfirmedAt: { type: DataTypes.DATE, allowNull: true },
+    totpLastStep: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },
   { sequelize, tableName: "users" },
+);
+
+// ---- MfaRecoveryCode -------------------------------------------------------
+// One-time codes for signing in without the authenticator app. Only bcrypt
+// hashes are stored; the plaintext is shown once, at generation.
+export class MfaRecoveryCode extends Model<
+  InferAttributes<MfaRecoveryCode>,
+  InferCreationAttributes<MfaRecoveryCode>
+> {
+  declare id: CreationOptional<string>;
+  declare userId: string;
+  declare codeHash: string;
+  declare usedAt: CreationOptional<Date | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+MfaRecoveryCode.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    userId: { type: DataTypes.UUID, allowNull: false },
+    codeHash: { type: DataTypes.STRING, allowNull: false },
+    usedAt: { type: DataTypes.DATE, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "mfa_recovery_codes" },
 );
 
 // ---- Department -----------------------------------------------------------
@@ -1276,7 +1317,7 @@ ProjectCommit.belongsTo(Project, { as: "project", foreignKey: "projectId" });
 Project.hasMany(ProjectCommit, { as: "commits", foreignKey: "projectId" });
 
 export const models = {
-  User, Department, Project, Label, Task, Issue, Comment, Activity,
+  User, MfaRecoveryCode, Department, Project, Label, Task, Issue, Comment, Activity,
   PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount, GithubAccount, ProjectRepo,
   BlacklistedEmail, CustomRole, DocumentationLink,
   AnalyticsSite, AnalyticsEvent, AnalyticsDaily, BlogChannel, BlogEditor,

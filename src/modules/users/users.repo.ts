@@ -24,6 +24,7 @@ export interface PublicUser {
   googleConnected: boolean;
   githubConnected: boolean;
   chiefBadge: boolean;
+  mfaEnabled: boolean;
 }
 
 // Serialize a User model (optionally with its `departments`/`projects`
@@ -46,6 +47,7 @@ export function toPublicUser(user: User): PublicUser {
     googleConnected: Boolean(user.get("googleAccount")),
     githubConnected: Boolean(user.get("githubAccount")),
     chiefBadge: user.chiefBadge,
+    mfaEnabled: user.totpEnabled,
   };
 }
 

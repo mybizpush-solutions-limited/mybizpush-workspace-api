@@ -5,6 +5,7 @@ import { requireAuth, requireAccessLevel } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { usersRepo } from "./users.repo";
 import { usersService } from "./users.service";
+import { mfaService } from "../auth/mfa.service";
 
 export const usersRouter = Router();
 
@@ -32,6 +33,19 @@ usersRouter.get(
 usersRouter.get(
   "/:id",
   asyncHandler(async (req, res) => {
+    const user = await usersRepo.publicById(req.params.id!);
+    if (!user) throw notFound("User not found");
+    res.json({ user });
+  }),
+);
+
+// Exec-only: clear a member's two-factor setup (lost phone, no recovery codes
+// left). Signs them out everywhere; they enroll again at their next sign-in.
+usersRouter.post(
+  "/:id/mfa/reset",
+  requireAccessLevel("executive_admin"),
+  asyncHandler(async (req, res) => {
+    await mfaService.resetForUser(req.auth!.sub, req.params.id!);
     const user = await usersRepo.publicById(req.params.id!);
     if (!user) throw notFound("User not found");
     res.json({ user });
