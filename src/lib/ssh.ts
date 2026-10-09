@@ -39,12 +39,29 @@ const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 
 let cachedKey: { pem: string; parsed: ParsedKey } | null = null;
 
+// Env editors mangle multi-line values in different ways: newlines escaped as
+// "\n", flattened to spaces, CRLF, wrapped in quotes, or the whole file
+// base64-encoded. ssh2 only accepts the exact layout (header line, body, footer
+// line), so rebuild that from whatever arrived.
+export function normalizePrivateKey(input: string): string {
+  let raw = input.trim().replace(/^["']|["']$/g, "").trim();
+  if (!raw.includes("-----BEGIN")) {
+    const decoded = Buffer.from(raw, "base64").toString("utf8");
+    if (decoded.includes("-----BEGIN")) raw = decoded.trim();
+  }
+  raw = raw.replace(/\\r/g, "").replace(/\\n/g, "\n").replace(/\r/g, "");
+  const m = raw.match(/-----BEGIN ([A-Z0-9 ]+)-----([\s\S]*?)-----END \1-----/);
+  if (!m) return raw;
+  const label = m[1]!;
+  const body = m[2]!.replace(/\s+/g, "");
+  const lines = body.match(/.{1,70}/g) ?? [];
+  return `-----BEGIN ${label}-----\n${lines.join("\n")}\n-----END ${label}-----`;
+}
+
 function privateKey(): { pem: string; parsed: ParsedKey } | null {
-  const raw = env.SERVER_SSH_PRIVATE_KEY.trim();
-  if (!raw) return null;
+  if (!env.SERVER_SSH_PRIVATE_KEY.trim()) return null;
   if (cachedKey) return cachedKey;
-  // Env files flatten newlines; accept the escaped form too.
-  const pem = raw.includes("\\n") ? raw.replace(/\\n/g, "\n") : raw;
+  const pem = normalizePrivateKey(env.SERVER_SSH_PRIVATE_KEY);
   const parsed = utils.parseKey(pem);
   if (parsed instanceof Error) {
     throw new AppError(500, `SERVER_SSH_PRIVATE_KEY can't be read: ${parsed.message}`, "bad_ssh_key");
