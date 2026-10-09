@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
@@ -9,7 +9,24 @@ import { serversService } from "./servers.service";
 // The server console. Every route checks canManageServers (admins, chiefs,
 // executive admins, DevOps) in the service, since that rule needs a DB lookup.
 export const serversRouter = Router();
+
+// Fetched by curl on the server being set up, so no bearer token: the
+// unguessable, 30-minute link from POST /:id/bootstrap-link is the credential.
+serversRouter.get(
+  "/bootstrap/:token",
+  asyncHandler(async (req, res) => {
+    const script = await serversService.bootstrapByToken(req.params.token!);
+    res.type("text/x-shellscript").send(script);
+  }),
+);
+
 serversRouter.use(requireAuth);
+
+// Origin of this API as the outside world sees it (behind the TLS proxy).
+function apiOrigin(req: Request): string {
+  const proto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0] ?? req.protocol;
+  return `${proto}://${req.get("host")}`;
+}
 
 // A hostname or an IPv4/IPv6 literal. Nothing that could smuggle ssh options.
 const host = z
@@ -94,6 +111,13 @@ serversRouter.get(
   "/:id/bootstrap",
   asyncHandler(async (req, res) => {
     res.json(await serversService.bootstrap(req.params.id!, req.auth!));
+  }),
+);
+
+serversRouter.post(
+  "/:id/bootstrap-link",
+  asyncHandler(async (req, res) => {
+    res.json(await serversService.bootstrapLink(req.params.id!, req.auth!, apiOrigin(req)));
   }),
 );
 

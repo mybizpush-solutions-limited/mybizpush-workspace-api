@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { Op } from "sequelize";
 import { env } from "../../config/env";
 import { badRequest, conflict, forbidden, notFound } from "../../lib/errors";
@@ -13,6 +14,7 @@ import {
   type ServerJobKind,
   type ServerMode,
 } from "../../models";
+import { redis } from "../../redis/client";
 import { bootstrapScript } from "./bootstrap";
 import {
   findings,
@@ -346,6 +348,22 @@ export async function pollJob(job: ServerJob): Promise<ServerJob> {
   return job;
 }
 
+const BOOTSTRAP_TOKEN_PREFIX = "mbpboot:";
+const BOOTSTRAP_TOKEN_TTL_SECONDS = 30 * 60;
+
+function scriptFor(server: Server): string {
+  const publicKey = workspacePublicKey();
+  if (!publicKey) throw badRequest("Set SERVER_SSH_PRIVATE_KEY on the API first; the script embeds its public half");
+  if (!env.SERVER_SSH_SOURCE_IP) throw badRequest("Set SERVER_SSH_SOURCE_IP on the API first (the central VPS's public IP)");
+  return bootstrapScript({
+    serverName: server.name,
+    mode: server.mode,
+    rebootTime: server.maintenanceStart ?? "",
+    sourceIp: env.SERVER_SSH_SOURCE_IP,
+    publicKey,
+  });
+}
+
 // ---- Service API --------------------------------------------------------------------
 
 export interface ServerInput {
@@ -469,21 +487,32 @@ export const serversService = {
     return this.get(id, auth);
   },
 
+  // A short-lived link the server itself downloads the script from, so setup
+  // is one pasted command instead of a 400-line paste into a terminal (which
+  // terminals mangle). The script holds no secrets — the public key and source
+  // IP — so the link only needs to be unguessable and to expire.
+  async bootstrapLink(id: string, auth: Auth, apiOrigin: string) {
+    await this.bootstrap(id, auth); // same checks: key and source IP configured
+    const token = randomBytes(24).toString("base64url");
+    await redis.set(`${BOOTSTRAP_TOKEN_PREFIX}${token}`, id, "EX", BOOTSTRAP_TOKEN_TTL_SECONDS);
+    const url = `${apiOrigin}/api/v1/servers/bootstrap/${token}`;
+    return {
+      command: `curl -fsSL '${url}' -o mbp-bootstrap.sh && sudo bash mbp-bootstrap.sh`,
+      url,
+      expiresAt: new Date(Date.now() + BOOTSTRAP_TOKEN_TTL_SECONDS * 1000).toISOString(),
+    };
+  },
+
+  async bootstrapByToken(token: string): Promise<string> {
+    const id = await redis.get(`${BOOTSTRAP_TOKEN_PREFIX}${token}`);
+    const server = id ? await Server.findByPk(id) : null;
+    if (!server) throw notFound("This setup link has expired. Generate a new one on the server's Setup tab.");
+    return scriptFor(server);
+  },
+
   async bootstrap(id: string, auth: Auth): Promise<{ fileName: string; script: string }> {
     const server = await loadServer(id, auth);
-    const publicKey = workspacePublicKey();
-    if (!publicKey) throw badRequest("Set SERVER_SSH_PRIVATE_KEY on the API first; the script embeds its public half");
-    if (!env.SERVER_SSH_SOURCE_IP) throw badRequest("Set SERVER_SSH_SOURCE_IP on the API first (the central VPS's public IP)");
-    return {
-      fileName: "mbp-bootstrap.sh",
-      script: bootstrapScript({
-        serverName: server.name,
-        mode: server.mode,
-        rebootTime: server.maintenanceStart ?? "",
-        sourceIp: env.SERVER_SSH_SOURCE_IP,
-        publicKey,
-      }),
-    };
+    return { fileName: "mbp-bootstrap.sh", script: scriptFor(server) };
   },
 
   // Connect now and take a snapshot. Also how a new server's host key is pinned.

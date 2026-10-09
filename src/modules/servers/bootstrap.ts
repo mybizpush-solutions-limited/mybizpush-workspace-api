@@ -417,5 +417,5 @@ echo "Server time zone: $(timedatectl show -p Timezone --value 2>/dev/null || da
 echo "Host key fingerprints (compare with the one the workspace shows on first connect):"
 for k in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$k"; done
 echo
-echo "Now press 'Test connection' in the workspace."
+echo "Now press 'Test connection' on this server's page in the workspace."
 `;

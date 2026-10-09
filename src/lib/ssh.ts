@@ -91,6 +91,24 @@ export function fingerprint(hostKey: Buffer): string {
   return `SHA256:${createHash("sha256").update(hostKey).digest("base64").replace(/=+$/, "")}`;
 }
 
+// Turn ssh2's terse errors into the next thing to check. sshd never tells the
+// client why it refused a key, but it logs the reason on the server.
+function describeSshError(target: SshTarget, err: Error): string {
+  const base = `SSH to ${target.host} failed: ${err.message}.`;
+  if (/authentication methods failed/i.test(err.message)) {
+    return (
+      `${base} The server refused the workspace key. Check the setup script ran to the end, ` +
+      `then see why on the server: journalctl -u ssh --since -30min | grep -i ${target.username} ` +
+      `("not from a permitted host" means SERVER_SSH_SOURCE_IP isn't the IP this API connects from).`
+    );
+  }
+  if (/ECONNREFUSED/.test(err.message)) return `${base} Nothing is listening on port ${target.port}.`;
+  if (/ETIMEDOUT|EHOSTUNREACH|timed out/i.test(err.message)) {
+    return `${base} The port didn't answer; a firewall may be dropping connections from the workspace.`;
+  }
+  return base;
+}
+
 // Run one mbp verb. The remote side ignores anything but the exact verb, so
 // `command` is never a shell line.
 export function runRemote(target: SshTarget, command: string, timeoutMs = env.SERVER_SSH_TIMEOUT_MS): Promise<SshResult> {
@@ -137,7 +155,7 @@ export function runRemote(target: SshTarget, command: string, timeoutMs = env.SE
         });
       })
       .on("error", (err) =>
-        finish(() => reject(mismatch ?? new AppError(502, `SSH to ${target.host} failed: ${err.message}`, "ssh_failed"))),
+        finish(() => reject(mismatch ?? new AppError(502, describeSshError(target, err), "ssh_failed"))),
       )
       .connect({
         host: target.host,
