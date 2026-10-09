@@ -140,6 +140,36 @@ const schema = z.object({
   BACKUP_SCHEDULER_CRON: z.string().default("* * * * *"), // every minute
   // Default IANA timezone new schedules are expressed in.
   BACKUP_DEFAULT_TIMEZONE: z.string().default("Africa/Lagos"),
+
+  // ---- Server console (agentless SSH) ------------------------------------
+  // Private half of the workspace's SSH key, OpenSSH format. Generate on the
+  // central VPS with `ssh-keygen -t ed25519 -N "" -C mybizpush-workspace -f mbp-ops`
+  // and paste the private file here (literal "\n" sequences are accepted).
+  // Empty = the console runs but cannot reach any server.
+  SERVER_SSH_PRIVATE_KEY: z.string().optional().default(""),
+  // Public IP the workspace's SSH connections leave from (the central VPS).
+  // Written into each server's authorized_keys as from="…", so the key is
+  // useless from anywhere else.
+  SERVER_SSH_SOURCE_IP: z.string().optional().default(""),
+  SERVER_SSH_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
+  ENABLE_SERVER_SCHEDULER: z
+    .string()
+    .default("true")
+    .transform((s) => s !== "false"),
+  SERVER_SCHEDULER_CRON: z.string().default("* * * * *"), // every minute
+  // How often each server's health snapshot is refreshed.
+  SERVER_STATS_INTERVAL_MINUTES: z.coerce.number().int().positive().default(5),
+  // Hour (UTC) the daily security scan runs. Kept clear of 03:00–05:00 UTC,
+  // when the Hyparrow hosts take their automatic security reboots.
+  SERVER_SCAN_HOUR_UTC: z.coerce.number().int().min(0).max(23).default(1),
+  SERVER_SNAPSHOT_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+
+  // ---- Sentry (error + performance monitoring) ---------------------------
+  // Empty DSN = Sentry stays off. The environment is separate from NODE_ENV
+  // because the deployed API runs with NODE_ENV=development.
+  SENTRY_DSN: z.string().optional().default(""),
+  SENTRY_ENVIRONMENT: z.string().optional().default(""),
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
 });
 
 const parsed = schema.safeParse(process.env);

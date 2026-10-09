@@ -1,5 +1,5 @@
 import { forbidden, notFound } from "./errors";
-import { Department, Project, isOrgManager } from "../models";
+import { Department, Project, User, isOrgManager } from "../models";
 
 export type Auth = { sub: string; accessLevel: string };
 
@@ -36,6 +36,30 @@ export function canManageDatabases(auth: Auth): boolean {
 export function assertCanManageDatabases(auth: Auth): void {
   if (canManageDatabases(auth)) return;
   throw forbidden("Only an admin, chief, or executive admin can manage databases");
+}
+
+// The server console reaches production hosts as root-capable SSH, so it
+// follows the database rule (admins, chiefs, executive admins) and adds the
+// people whose job it is: anyone with the DevOps role or in the DevOps
+// department. Both, because DevOps is a role today and a department too.
+export const DEVOPS_DEPARTMENT_SLUG = "devops";
+export const DEVOPS_ROLE = "DevOps";
+
+export async function canManageServers(auth: Auth): Promise<boolean> {
+  if (canManageDatabases(auth)) return true;
+  const user = await User.findByPk(auth.sub, {
+    attributes: ["id", "roles"],
+    include: [{ model: Department, as: "departments", attributes: ["slug"], through: { attributes: [] } }],
+  });
+  if (!user) return false;
+  if (user.roles.some((r) => r.toLowerCase() === DEVOPS_ROLE.toLowerCase())) return true;
+  const depts = (user.get("departments") as Department[] | undefined) ?? [];
+  return depts.some((d) => d.slug === DEVOPS_DEPARTMENT_SLUG);
+}
+
+export async function assertCanManageServers(auth: Auth): Promise<void> {
+  if (await canManageServers(auth)) return;
+  throw forbidden("Only DevOps, admins, chiefs and executive admins can manage servers");
 }
 
 // The same rule as canManageProject, answered for every project at once. Use
