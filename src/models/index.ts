@@ -832,6 +832,11 @@ AnalyticsDaily.init(
 );
 
 // ---- Blog console ----------------------------------------------------------
+// The lowest automated-review severity that stops an author sending a post to a
+// publisher. "low" blocks on any finding; "off" lets everything through.
+export const BLOG_AI_GATE_SEVERITIES = ["off", "critical", "high", "medium", "low"] as const;
+export type BlogAIGateSeverity = (typeof BLOG_AI_GATE_SEVERITIES)[number];
+
 // A project's connection to the blog API that powers its public website. Posts
 // themselves are never stored here — the site's own API stays authoritative.
 export class BlogChannel extends Model<
@@ -845,6 +850,7 @@ export class BlogChannel extends Model<
   declare apiBaseUrl: string;
   declare serviceToken: string;
   declare siteUrl: CreationOptional<string>;
+  declare aiGateSeverity: CreationOptional<BlogAIGateSeverity>;
   declare createdBy: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
@@ -858,6 +864,7 @@ BlogChannel.init(
     apiBaseUrl: { type: DataTypes.STRING(500), allowNull: false },
     serviceToken: { type: DataTypes.TEXT, allowNull: false },
     siteUrl: { type: DataTypes.STRING(500), allowNull: false, defaultValue: "" },
+    aiGateSeverity: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "low" },
     createdBy: { type: DataTypes.UUID, allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,

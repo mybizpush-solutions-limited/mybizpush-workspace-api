@@ -1,11 +1,20 @@
-import { BlogChannel, BlogEditor, Project, User, type BlogEditorRole } from "../../models";
+import {
+  BlogChannel,
+  BlogEditor,
+  Project,
+  User,
+  type BlogAIGateSeverity,
+  type BlogEditorRole,
+} from "../../models";
 import { badRequest, forbidden, notFound } from "../../lib/errors";
 import { tasksService } from "../workitems/workitems.service";
 import { canManageProject, manageableProjectIds, type Auth } from "../../lib/permissions";
 import {
   BlogChannelClient,
+  type AIReview,
   type ChannelActor,
   type PostInput,
+  type RemotePost,
   type ReviewCommentInput,
   type ReviewCommentPatch,
 } from "./blogs.channel";
@@ -18,6 +27,7 @@ function serializeChannel(c: BlogChannel) {
     kind: c.kind,
     apiBaseUrl: c.apiBaseUrl,
     siteUrl: c.siteUrl,
+    aiGateSeverity: c.aiGateSeverity,
     // The service token is write-only — it is never returned to the browser.
     hasToken: Boolean(c.serviceToken),
     createdAt: c.createdAt.toISOString(),
@@ -121,6 +131,52 @@ async function onPublished(
   }
 }
 
+const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+
+// The findings that stop a post going to a publisher under this channel's gate.
+// A "fail" verdict always blocks, even if the model forgot to itemise why.
+function blockingFindings(review: AIReview, gate: BlogAIGateSeverity) {
+  if (gate === "off") return { blocked: false, count: 0 };
+  const limit = SEVERITY_RANK[gate]!;
+  // An unrecognised severity counts as "low" rather than slipping through.
+  const count = review.findings.filter((f) => (SEVERITY_RANK[f.severity] ?? 3) <= limit).length;
+  return { blocked: count > 0 || review.verdict === "fail", count };
+}
+
+export type SubmitGate = {
+  passed: boolean;
+  /** How many findings have to be fixed before the post can be submitted. */
+  blocking: number;
+  review: AIReview | null;
+};
+
+// Submitting a post runs it through the automated review first, and only a
+// clean result reaches a publisher. The post is saved either way — the author
+// never loses work — but a blocked one keeps its previous status (or drops back
+// to draft if it was live or queued) instead of joining the review queue.
+async function submitThroughGate(
+  client: BlogChannelClient,
+  channel: BlogChannel,
+  saved: RemotePost,
+): Promise<{ post: RemotePost; gate: SubmitGate }> {
+  if (channel.aiGateSeverity === "off") {
+    const post = await client.update(saved.id, { status: "pending" });
+    return { post, gate: { passed: true, blocking: 0, review: null } };
+  }
+
+  // Reuse a review that still matches the content — re-running one costs a
+  // model call and would give the same answer.
+  const bundle = await client.review(saved.id);
+  const review =
+    bundle.aiReview && !bundle.aiReviewStale ? bundle.aiReview : await client.runAIReview(saved.id);
+
+  const { blocked, count } = blockingFindings(review, channel.aiGateSeverity);
+  if (blocked) return { post: saved, gate: { passed: false, blocking: count, review } };
+
+  const post = await client.update(saved.id, { status: "pending" });
+  return { post, gate: { passed: true, blocking: 0, review } };
+}
+
 async function clientFor(projectId: string, auth: Auth) {
   const [channel, access] = await Promise.all([
     BlogChannel.findOne({ where: { projectId } }),
@@ -198,6 +254,7 @@ export const blogsService = {
       apiBaseUrl: string;
       serviceToken?: string;
       siteUrl?: string;
+      aiGateSeverity?: BlogAIGateSeverity;
     },
     auth: Auth,
   ) {
@@ -216,6 +273,7 @@ export const blogsService = {
       kind: input.kind?.trim() || "hyparrow",
       apiBaseUrl: input.apiBaseUrl.trim().replace(/\/+$/, ""),
       siteUrl: input.siteUrl?.trim() ?? "",
+      ...(input.aiGateSeverity ? { aiGateSeverity: input.aiGateSeverity } : {}),
       // An omitted token on update means "keep the current one".
       ...(input.serviceToken?.trim() ? { serviceToken: input.serviceToken.trim() } : {}),
     };
@@ -326,22 +384,37 @@ export const blogsService = {
   },
 
   async createPost(projectId: string, input: PostInput, auth: Auth) {
-    const { client, access } = await clientFor(projectId, auth);
+    const { client, access, channel } = await clientFor(projectId, auth);
     const status = guardStatus(access.role, input.status);
     assertPublishable({ ...input, status });
-    return client.create({ ...input, status });
+    if (status !== "pending") return { post: await client.create({ ...input, status }), gate: null };
+    // It has to exist on the site before it can be reviewed, so it starts as a
+    // draft and is promoted only if the review comes back clean.
+    const draft = await client.create({ ...input, status: "draft" });
+    return submitThroughGate(client, channel, draft);
   },
 
   async updatePost(projectId: string, postId: string, input: PostInput, auth: Auth) {
-    const { client, access } = await clientFor(projectId, auth);
+    const { client, access, channel } = await clientFor(projectId, auth);
     const status = guardStatus(access.role, input.status);
-    if (status) {
-      // Validate against the merged post, not just the patch — the image may
-      // already be set from an earlier save.
-      const current = await client.get(postId);
-      assertPublishable({ ...current, ...input, status });
+    if (!status) return { post: await client.update(postId, input), gate: null };
+
+    // Validate against the merged post, not just the patch — the image may
+    // already be set from an earlier save.
+    const current = await client.get(postId);
+    assertPublishable({ ...current, ...input, status });
+    if (status !== "pending") {
+      return { post: await client.update(postId, { ...input, status }), gate: null };
     }
-    return client.update(postId, { ...input, status });
+
+    // Save the edits before reviewing them. A draft or a sent-back post keeps
+    // its status (so the publisher's feedback stays in front of the author);
+    // a live or queued one comes off the site and out of the queue, because
+    // its new content hasn't passed yet.
+    const holdStatus =
+      current.status === "approved" || current.status === "pending" ? "draft" : undefined;
+    const saved = await client.update(postId, { ...input, status: holdStatus });
+    return submitThroughGate(client, channel, saved);
   },
 
   async deletePost(projectId: string, postId: string, auth: Auth) {
@@ -380,8 +453,9 @@ export const blogsService = {
     return client.review(postId);
   },
 
-  // Running the check costs a model call on the remote, so it's the reviewer's
-  // tool rather than something an author can spam before submitting.
+  // The on-demand re-run is the reviewer's tool. Authors get the same check
+  // when they submit (see submitThroughGate), which is the only point it can
+  // change anything for them, so it can't be spammed from the editor.
   async runAIReview(projectId: string, postId: string, auth: Auth) {
     const { client, access } = await clientFor(projectId, auth);
     if (access.role !== "publisher") {

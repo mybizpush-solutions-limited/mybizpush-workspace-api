@@ -4,7 +4,7 @@ import { z } from "zod";
 import { asyncHandler, badRequest } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
-import { BLOG_EDITOR_ROLES } from "../../models";
+import { BLOG_AI_GATE_SEVERITIES, BLOG_EDITOR_ROLES } from "../../models";
 import { blogsService } from "./blogs.service";
 
 export const blogsRouter = Router();
@@ -19,6 +19,7 @@ const channelSchema = z.object({
   // Optional on update — omitting it keeps the stored token.
   serviceToken: z.string().trim().min(8).max(500).optional(),
   siteUrl: z.string().trim().url().max(500).or(z.literal("")).optional(),
+  aiGateSeverity: z.enum(BLOG_AI_GATE_SEVERITIES).optional(),
 });
 
 const editorSchema = z.object({
@@ -52,7 +53,13 @@ const decisionSchema = z.object({
 const reviewCommentSchema = z.object({
   // The id of the block the note is pinned to, stamped by the editor.
   anchorId: z.string().trim().max(64).optional(),
-  quote: z.string().trim().max(400).optional(),
+  // Clipped rather than rejected: quotes come from the AI review's findings, and
+  // a note shouldn't fail because the model quoted a long passage.
+  quote: z
+    .string()
+    .trim()
+    .transform((s) => s.slice(0, 400))
+    .optional(),
   body: z.string().trim().min(1).max(5000),
 });
 
@@ -159,8 +166,10 @@ blogsRouter.post(
     if (!req.body.title?.trim() || !req.body.content?.trim()) {
       throw badRequest("A title and some content are required");
     }
-    const post = await blogsService.createPost(req.params.projectId!, req.body, req.auth!);
-    res.status(201).json({ post });
+    // `gate` is the automated review a submission went through, and whether
+    // the post got past it; null when the post was only saved.
+    const { post, gate } = await blogsService.createPost(req.params.projectId!, req.body, req.auth!);
+    res.status(201).json({ post, gate });
   }),
 );
 
@@ -168,13 +177,13 @@ blogsRouter.patch(
   "/projects/:projectId/posts/:postId",
   validateBody(postSchema),
   asyncHandler(async (req, res) => {
-    const post = await blogsService.updatePost(
+    const { post, gate } = await blogsService.updatePost(
       req.params.projectId!,
       req.params.postId!,
       req.body,
       req.auth!,
     );
-    res.json({ post });
+    res.json({ post, gate });
   }),
 );
 
