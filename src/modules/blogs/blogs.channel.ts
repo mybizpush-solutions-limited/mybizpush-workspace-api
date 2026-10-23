@@ -50,6 +50,14 @@ export type ReviewFinding = {
   /** The section the quote came from, when the reviewer could place it. */
   anchorId: string;
   suggestion: string;
+  /**
+   * Where the site API found the quote when it checked it against the post:
+   * "body", "title", "subtitle", "seo_title", "seo_description", or "" for the
+   * post as a whole.
+   */
+  field: string;
+  /** The quote isn't anywhere in the post — the model misquoted it. */
+  unverified: boolean;
 };
 
 export type AIReview = {
@@ -130,6 +138,8 @@ type HyparrowFinding = {
   quote?: string;
   anchor_id?: string;
   suggestion?: string;
+  field?: string;
+  unverified?: boolean;
 };
 
 type HyparrowAIReview = {
@@ -195,6 +205,8 @@ function reviewFromHyparrow(r: HyparrowAIReview): AIReview {
       quote: f.quote ?? "",
       anchorId: f.anchor_id ?? "",
       suggestion: f.suggestion ?? "",
+      field: f.field ?? "",
+      unverified: f.unverified ?? false,
     })),
     model: r.model ?? "",
     requestedByName: personName(r.requester ?? null),

@@ -133,13 +133,23 @@ async function onPublished(
 
 const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
+// Safety findings block even when their quote couldn't be matched — a
+// paraphrased slur is still a slur. Mirrors the site API's unsafe categories.
+const SAFETY_CATEGORIES = new Set(["profanity", "adult", "hate", "violence", "illegal", "privacy"]);
+
 // The findings that stop a post going to a publisher under this channel's gate.
 // A "fail" verdict always blocks, even if the model forgot to itemise why.
 function blockingFindings(review: AIReview, gate: BlogAIGateSeverity) {
   if (gate === "off") return { blocked: false, count: 0 };
   const limit = SEVERITY_RANK[gate]!;
-  // An unrecognised severity counts as "low" rather than slipping through.
-  const count = review.findings.filter((f) => (SEVERITY_RANK[f.severity] ?? 3) <= limit).length;
+  // An unrecognised severity counts as "low" rather than slipping through. A
+  // finding whose quote isn't in the post can't be fixed by editing the post,
+  // so it doesn't hold the author up unless it's a safety concern.
+  const count = review.findings.filter(
+    (f) =>
+      (SEVERITY_RANK[f.severity] ?? 3) <= limit &&
+      (!f.unverified || SAFETY_CATEGORIES.has(f.category)),
+  ).length;
   return { blocked: count > 0 || review.verdict === "fail", count };
 }
 
