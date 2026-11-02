@@ -27,20 +27,65 @@ const editorSchema = z.object({
   role: z.enum(BLOG_EDITOR_ROLES),
 });
 
+// A slug is normalised rather than rejected: "My Post: Part 2" becomes
+// "my-post-part-2". Refusing it sent authors round in circles at publish time.
+function normalizeSlug(raw: string): string {
+  return raw
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 const postSchema = z.object({
   title: z.string().trim().min(1).max(300).optional(),
   subtitle: z.string().trim().max(500).optional(),
-  slug: z
-    .string()
-    .trim()
-    .max(300)
-    .regex(/^[a-z0-9-]*$/, "Slug can only contain lowercase letters, numbers and hyphens")
-    .optional(),
+  slug: z.string().trim().max(300).transform(normalizeSlug).optional(),
   content: z.string().max(200_000).optional(),
   imageUrl: z.string().trim().url().or(z.literal("")).optional(),
   status: z.enum(["draft", "pending", "approved", "rejected"]).optional(),
   seoTitle: z.string().trim().max(300).optional(),
   seoDescription: z.string().trim().max(500).optional(),
+  categoryId: z.string().uuid().or(z.literal("")).optional(),
+});
+
+const categorySchema = z.object({
+  name: z.string().trim().min(1).max(40),
+  slug: z.string().trim().max(60).optional(),
+  description: z.string().trim().max(300).optional(),
+  sortOrder: z.number().int().min(0).max(999).optional(),
+});
+
+const optionalDate = z.string().datetime({ offset: true }).or(z.literal("")).nullable();
+
+const adSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  imageUrl: z.string().trim().url().max(1000),
+  linkUrl: z.string().trim().url().max(1000).or(z.literal("")),
+  altText: z.string().trim().max(200),
+  size: z.string().trim().max(20),
+  placement: z.string().trim().max(20),
+  active: z.boolean(),
+  sortOrder: z.number().int().min(0).max(999),
+  startsAt: optionalDate,
+  endsAt: optionalDate,
+});
+
+const optionalUrl = z.string().trim().url().max(500).or(z.literal(""));
+const siteSettingsSchema = z.object({
+  instagramUrl: optionalUrl,
+  facebookUrl: optionalUrl,
+  xUrl: optionalUrl,
+  linkedinUrl: optionalUrl,
+  youtubeUrl: optionalUrl,
+  tiktokUrl: optionalUrl,
+  featuredVideoUrl: optionalUrl,
+  featuredInstagramUrl: optionalUrl,
+  commentsEnabled: z.boolean(),
+  latestCount: z.number().int().min(0).max(12),
+  randomCount: z.number().int().min(0).max(12),
+  relatedCount: z.number().int().min(0).max(12),
 });
 
 // Feedback the reviewer leaves with a decision. Optional on approve ("nice
@@ -297,5 +342,96 @@ blogsRouter.post(
     if (!req.file) throw badRequest("No file uploaded");
     const url = await blogsService.uploadImage(req.params.projectId!, req.file, req.auth!);
     res.json({ url });
+  }),
+);
+
+// ---- Site furniture ---------------------------------------------------------
+// Categories, banners and sidebar settings live on the site API; these proxy
+// them so the media team can run the blog without the site's admin dashboard.
+
+blogsRouter.get(
+  "/projects/:projectId/categories",
+  asyncHandler(async (req, res) => {
+    res.json({ categories: await blogsService.listCategories(req.params.projectId!, req.auth!) });
+  }),
+);
+
+blogsRouter.post(
+  "/projects/:projectId/categories",
+  validateBody(categorySchema),
+  asyncHandler(async (req, res) => {
+    const category = await blogsService.createCategory(req.params.projectId!, req.body, req.auth!);
+    res.status(201).json({ category });
+  }),
+);
+
+blogsRouter.put(
+  "/projects/:projectId/categories/:categoryId",
+  validateBody(categorySchema),
+  asyncHandler(async (req, res) => {
+    const category = await blogsService.updateCategory(
+      req.params.projectId!,
+      req.params.categoryId!,
+      req.body,
+      req.auth!,
+    );
+    res.json({ category });
+  }),
+);
+
+blogsRouter.delete(
+  "/projects/:projectId/categories/:categoryId",
+  asyncHandler(async (req, res) => {
+    await blogsService.deleteCategory(req.params.projectId!, req.params.categoryId!, req.auth!);
+    res.status(204).end();
+  }),
+);
+
+blogsRouter.get(
+  "/projects/:projectId/ads",
+  asyncHandler(async (req, res) => {
+    res.json(await blogsService.listAds(req.params.projectId!, req.auth!));
+  }),
+);
+
+blogsRouter.post(
+  "/projects/:projectId/ads",
+  validateBody(adSchema),
+  asyncHandler(async (req, res) => {
+    const ad = await blogsService.createAd(req.params.projectId!, req.body, req.auth!);
+    res.status(201).json({ ad });
+  }),
+);
+
+blogsRouter.put(
+  "/projects/:projectId/ads/:adId",
+  validateBody(adSchema),
+  asyncHandler(async (req, res) => {
+    const ad = await blogsService.updateAd(req.params.projectId!, req.params.adId!, req.body, req.auth!);
+    res.json({ ad });
+  }),
+);
+
+blogsRouter.delete(
+  "/projects/:projectId/ads/:adId",
+  asyncHandler(async (req, res) => {
+    await blogsService.deleteAd(req.params.projectId!, req.params.adId!, req.auth!);
+    res.status(204).end();
+  }),
+);
+
+blogsRouter.get(
+  "/projects/:projectId/site-settings",
+  asyncHandler(async (req, res) => {
+    res.json({ settings: await blogsService.getSiteSettings(req.params.projectId!, req.auth!) });
+  }),
+);
+
+blogsRouter.put(
+  "/projects/:projectId/site-settings",
+  validateBody(siteSettingsSchema),
+  asyncHandler(async (req, res) => {
+    const settings = await blogsService.updateSiteSettings(req.params.projectId!, req.body, req.auth!);
+    res.json({ settings });
   }),
 );

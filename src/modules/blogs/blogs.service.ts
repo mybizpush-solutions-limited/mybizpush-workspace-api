@@ -11,9 +11,12 @@ import { tasksService } from "../workitems/workitems.service";
 import { canManageProject, manageableProjectIds, type Auth } from "../../lib/permissions";
 import {
   BlogChannelClient,
+  type AdInput,
   type AIReview,
+  type CategoryInput,
   type ChannelActor,
   type PostInput,
+  type SiteSettings,
   type RemotePost,
   type ReviewCommentInput,
   type ReviewCommentPatch,
@@ -137,8 +140,16 @@ const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2,
 // paraphrased slur is still a slur. Mirrors the site API's unsafe categories.
 const SAFETY_CATEGORIES = new Set(["profanity", "adult", "hate", "violence", "illegal", "privacy"]);
 
+// Craft notes from the reviewer: SEO, readability, polish. They are shown to
+// the author as suggestions but never hold a post back. A language model will
+// always find something to improve in a title or meta description, and each
+// edit produces a fresh review with fresh nitpicks, so gating on them meant a
+// post could bounce indefinitely. The live SEO checklist in the editor covers
+// the hard limits deterministically instead.
+const ADVISORY_CATEGORIES = new Set(["seo", "readability", "professionalism"]);
+
 // The findings that stop a post going to a publisher under this channel's gate.
-// A "fail" verdict always blocks, even if the model forgot to itemise why.
+// SEO, readability and polish notes never block (see ADVISORY_CATEGORIES).
 function blockingFindings(review: AIReview, gate: BlogAIGateSeverity) {
   if (gate === "off") return { blocked: false, count: 0 };
   const limit = SEVERITY_RANK[gate]!;
@@ -147,10 +158,15 @@ function blockingFindings(review: AIReview, gate: BlogAIGateSeverity) {
   // so it doesn't hold the author up unless it's a safety concern.
   const count = review.findings.filter(
     (f) =>
+      !ADVISORY_CATEGORIES.has(f.category) &&
       (SEVERITY_RANK[f.severity] ?? 3) <= limit &&
       (!f.unverified || SAFETY_CATEGORIES.has(f.category)),
   ).length;
-  return { blocked: count > 0 || review.verdict === "fail", count };
+  // A "fail" with nothing itemised still blocks. One explained entirely by
+  // craft notes (a "critical" SEO note can produce it) does not.
+  const failOnCraftOnly =
+    review.findings.length > 0 && review.findings.every((f) => ADVISORY_CATEGORIES.has(f.category));
+  return { blocked: count > 0 || (review.verdict === "fail" && !failOnCraftOnly), count };
 }
 
 export type SubmitGate = {
@@ -198,6 +214,16 @@ async function clientFor(projectId: string, auth: Auth) {
     channel,
     access,
   };
+}
+
+// The site's categories, banners and sidebar shape what every reader sees, so
+// only publishers may change them. The site API checks the role too.
+async function publisherClient(projectId: string, auth: Auth) {
+  const { client, access } = await clientFor(projectId, auth);
+  if (access.role !== "publisher") {
+    throw forbidden("Only a blog publisher can change the site's categories, ads and sidebar");
+  }
+  return client;
 }
 
 export const blogsService = {
@@ -498,6 +524,50 @@ export const blogsService = {
   async deleteReviewComment(projectId: string, postId: string, commentId: string, auth: Auth) {
     const { client } = await clientFor(projectId, auth);
     await client.deleteComment(postId, commentId);
+  },
+
+  // ---- Site furniture (categories, banners, sidebar settings) -------------
+
+  // Every writer picks a category in the editor, so anyone with access can list.
+  async listCategories(projectId: string, auth: Auth) {
+    const { client } = await clientFor(projectId, auth);
+    return client.listCategories();
+  },
+
+  async createCategory(projectId: string, input: CategoryInput, auth: Auth) {
+    return (await publisherClient(projectId, auth)).createCategory(input);
+  },
+
+  async updateCategory(projectId: string, categoryId: string, input: CategoryInput, auth: Auth) {
+    return (await publisherClient(projectId, auth)).updateCategory(categoryId, input);
+  },
+
+  async deleteCategory(projectId: string, categoryId: string, auth: Auth) {
+    await (await publisherClient(projectId, auth)).deleteCategory(categoryId);
+  },
+
+  async listAds(projectId: string, auth: Auth) {
+    return (await publisherClient(projectId, auth)).listAds();
+  },
+
+  async createAd(projectId: string, input: AdInput, auth: Auth) {
+    return (await publisherClient(projectId, auth)).createAd(input);
+  },
+
+  async updateAd(projectId: string, adId: string, input: AdInput, auth: Auth) {
+    return (await publisherClient(projectId, auth)).updateAd(adId, input);
+  },
+
+  async deleteAd(projectId: string, adId: string, auth: Auth) {
+    await (await publisherClient(projectId, auth)).deleteAd(adId);
+  },
+
+  async getSiteSettings(projectId: string, auth: Auth) {
+    return (await publisherClient(projectId, auth)).getSiteSettings();
+  },
+
+  async updateSiteSettings(projectId: string, input: SiteSettings, auth: Auth) {
+    return (await publisherClient(projectId, auth)).updateSiteSettings(input);
   },
 
   async uploadImage(

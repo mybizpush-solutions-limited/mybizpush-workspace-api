@@ -14,6 +14,9 @@ export type RemotePost = {
   status: "draft" | "pending" | "approved" | "rejected";
   seoTitle: string;
   seoDescription: string;
+  /** The site's category id, or "" for none. */
+  categoryId: string;
+  categoryName: string;
   authorName: string;
   authorEmail: string;
   viewCount: number;
@@ -26,7 +29,15 @@ export type RemotePost = {
 export type PostInput = Partial<
   Pick<
     RemotePost,
-    "title" | "subtitle" | "slug" | "content" | "imageUrl" | "status" | "seoTitle" | "seoDescription"
+    | "title"
+    | "subtitle"
+    | "slug"
+    | "content"
+    | "imageUrl"
+    | "status"
+    | "seoTitle"
+    | "seoDescription"
+    | "categoryId"
   >
 >;
 
@@ -120,8 +131,156 @@ type HyparrowBlog = {
   comment_count?: number;
   created_at?: string;
   updated_at?: string;
+  category_id?: string | null;
+  category?: { name?: string } | null;
   author?: { firstName?: string; lastName?: string; email?: string; name?: string } | null;
 };
+
+// ---- Site furniture: categories, banners, sidebar settings -----------------
+
+export type BlogCategory = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  sortOrder: number;
+  postCount: number;
+};
+
+export type CategoryInput = { name: string; slug?: string; description?: string; sortOrder?: number };
+
+export type BlogAd = {
+  id: string;
+  name: string;
+  imageUrl: string;
+  linkUrl: string;
+  altText: string;
+  size: string;
+  placement: string;
+  active: boolean;
+  sortOrder: number;
+  startsAt: string | null;
+  endsAt: string | null;
+};
+
+export type AdInput = Omit<BlogAd, "id">;
+
+export type AdOptions = { sizes: string[]; placements: string[] };
+
+export type SiteSettings = {
+  instagramUrl: string;
+  facebookUrl: string;
+  xUrl: string;
+  linkedinUrl: string;
+  youtubeUrl: string;
+  tiktokUrl: string;
+  featuredVideoUrl: string;
+  featuredInstagramUrl: string;
+  commentsEnabled: boolean;
+  latestCount: number;
+  randomCount: number;
+  relatedCount: number;
+};
+
+type HyparrowCategory = {
+  id: string;
+  name?: string;
+  slug?: string;
+  description?: string;
+  sort_order?: number;
+  post_count?: number;
+};
+
+type HyparrowAd = {
+  id: string;
+  name?: string;
+  image_url?: string;
+  link_url?: string;
+  alt_text?: string;
+  size?: string;
+  placement?: string;
+  active?: boolean;
+  sort_order?: number;
+  starts_at?: string | null;
+  ends_at?: string | null;
+};
+
+// Settings travel as the site's snake_case keys; this table is the whole map.
+const SETTINGS_KEYS: [keyof SiteSettings, string][] = [
+  ["instagramUrl", "instagram_url"],
+  ["facebookUrl", "facebook_url"],
+  ["xUrl", "x_url"],
+  ["linkedinUrl", "linkedin_url"],
+  ["youtubeUrl", "youtube_url"],
+  ["tiktokUrl", "tiktok_url"],
+  ["featuredVideoUrl", "featured_video_url"],
+  ["featuredInstagramUrl", "featured_instagram_url"],
+  ["commentsEnabled", "comments_enabled"],
+  ["latestCount", "latest_count"],
+  ["randomCount", "random_count"],
+  ["relatedCount", "related_count"],
+];
+
+function categoryFromHyparrow(c: HyparrowCategory): BlogCategory {
+  return {
+    id: c.id,
+    name: c.name ?? "",
+    slug: c.slug ?? "",
+    description: c.description ?? "",
+    sortOrder: c.sort_order ?? 0,
+    postCount: c.post_count ?? 0,
+  };
+}
+
+function adFromHyparrow(a: HyparrowAd): BlogAd {
+  return {
+    id: a.id,
+    name: a.name ?? "",
+    imageUrl: a.image_url ?? "",
+    linkUrl: a.link_url ?? "",
+    altText: a.alt_text ?? "",
+    size: a.size ?? "",
+    placement: a.placement ?? "",
+    active: a.active ?? false,
+    sortOrder: a.sort_order ?? 0,
+    startsAt: a.starts_at ?? null,
+    endsAt: a.ends_at ?? null,
+  };
+}
+
+function categoryToHyparrow(c: CategoryInput): Record<string, unknown> {
+  return { name: c.name, slug: c.slug ?? "", description: c.description ?? "", sort_order: c.sortOrder ?? 0 };
+}
+
+function settingsFromHyparrow(raw: Record<string, unknown>): SiteSettings {
+  const out = {} as Record<keyof SiteSettings, unknown>;
+  for (const [ours, theirs] of SETTINGS_KEYS) out[ours] = raw[theirs];
+  return {
+    ...(out as SiteSettings),
+    ...Object.fromEntries(
+      SETTINGS_KEYS.filter(([k]) => k.endsWith("Url")).map(([k]) => [k, String(out[k] ?? "")]),
+    ),
+    commentsEnabled: Boolean(out.commentsEnabled),
+    latestCount: Number(out.latestCount ?? 0),
+    randomCount: Number(out.randomCount ?? 0),
+    relatedCount: Number(out.relatedCount ?? 0),
+  };
+}
+
+function adToHyparrow(a: AdInput): Record<string, unknown> {
+  return {
+    name: a.name,
+    image_url: a.imageUrl,
+    link_url: a.linkUrl,
+    alt_text: a.altText,
+    size: a.size,
+    placement: a.placement,
+    active: a.active,
+    sort_order: a.sortOrder,
+    starts_at: a.startsAt || null,
+    ends_at: a.endsAt || null,
+  };
+}
 
 type HyparrowUser = {
   firstName?: string;
@@ -250,6 +409,8 @@ function fromHyparrow(b: HyparrowBlog): RemotePost {
     status: status as RemotePost["status"],
     seoTitle: b.seo_title ?? "",
     seoDescription: b.seo_description ?? "",
+    categoryId: b.category_id ?? "",
+    categoryName: b.category?.name ?? "",
     authorName: authorName(b.author),
     authorEmail: b.author?.email ?? "",
     viewCount: b.view_count ?? 0,
@@ -272,6 +433,7 @@ function toHyparrow(input: PostInput): Record<string, unknown> {
   if (input.status !== undefined) out.status = input.status;
   if (input.seoTitle !== undefined) out.seo_title = input.seoTitle;
   if (input.seoDescription !== undefined) out.seo_description = input.seoDescription;
+  if (input.categoryId !== undefined) out.category_id = input.categoryId;
   return out;
 }
 
@@ -455,6 +617,76 @@ export class BlogChannelClient {
 
   async deleteComment(id: string, commentId: string): Promise<void> {
     await this.request(`/${id}/review-comments/${commentId}`, { method: "DELETE" });
+  }
+
+  // ---- Site furniture -----------------------------------------------------
+
+  async listCategories(): Promise<BlogCategory[]> {
+    const body = await this.request<{ data: HyparrowCategory[] }>("/categories");
+    return (body.data ?? []).map(categoryFromHyparrow);
+  }
+
+  async createCategory(input: CategoryInput): Promise<BlogCategory> {
+    const body = await this.request<{ data: HyparrowCategory }>(
+      "/categories",
+      this.json({ method: "POST" }, categoryToHyparrow(input)),
+    );
+    return categoryFromHyparrow(body.data);
+  }
+
+  async updateCategory(id: string, input: CategoryInput): Promise<BlogCategory> {
+    const body = await this.request<{ data: HyparrowCategory }>(
+      `/categories/${id}`,
+      this.json({ method: "PUT" }, categoryToHyparrow(input)),
+    );
+    return categoryFromHyparrow(body.data);
+  }
+
+  async deleteCategory(id: string): Promise<void> {
+    await this.request(`/categories/${id}`, { method: "DELETE" });
+  }
+
+  async listAds(): Promise<{ ads: BlogAd[]; options: AdOptions }> {
+    const body = await this.request<{ data: HyparrowAd[]; options?: Partial<AdOptions> }>("/ads");
+    return {
+      ads: (body.data ?? []).map(adFromHyparrow),
+      options: { sizes: body.options?.sizes ?? [], placements: body.options?.placements ?? [] },
+    };
+  }
+
+  async createAd(input: AdInput): Promise<BlogAd> {
+    const body = await this.request<{ data: HyparrowAd }>(
+      "/ads",
+      this.json({ method: "POST" }, adToHyparrow(input)),
+    );
+    return adFromHyparrow(body.data);
+  }
+
+  async updateAd(id: string, input: AdInput): Promise<BlogAd> {
+    const body = await this.request<{ data: HyparrowAd }>(
+      `/ads/${id}`,
+      this.json({ method: "PUT" }, adToHyparrow(input)),
+    );
+    return adFromHyparrow(body.data);
+  }
+
+  async deleteAd(id: string): Promise<void> {
+    await this.request(`/ads/${id}`, { method: "DELETE" });
+  }
+
+  async getSiteSettings(): Promise<SiteSettings> {
+    const body = await this.request<{ data: Record<string, unknown> }>("/site-settings");
+    return settingsFromHyparrow(body.data ?? {});
+  }
+
+  async updateSiteSettings(input: SiteSettings): Promise<SiteSettings> {
+    const out: Record<string, unknown> = {};
+    for (const [ours, theirs] of SETTINGS_KEYS) out[theirs] = input[ours];
+    const body = await this.request<{ data: Record<string, unknown> }>(
+      "/site-settings",
+      this.json({ method: "PUT" }, out),
+    );
+    return settingsFromHyparrow(body.data ?? {});
   }
 
   // Cover images are uploaded straight through to the site's own media store
