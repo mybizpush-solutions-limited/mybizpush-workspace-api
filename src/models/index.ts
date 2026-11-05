@@ -632,6 +632,41 @@ BlacklistedEmail.init(
   { sequelize, tableName: "blacklisted_emails" },
 );
 
+// ---- DeviceToken -----------------------------------------------------------
+// A phone that can receive push notifications for a user (Expo push token).
+// A token belongs to whoever last registered it on that device; disabledAt is
+// set when Expo reports the app was uninstalled (DeviceNotRegistered).
+export const DEVICE_PLATFORMS = ["ios", "android", "web"] as const;
+export type DevicePlatform = (typeof DEVICE_PLATFORMS)[number];
+
+export class DeviceToken extends Model<InferAttributes<DeviceToken>, InferCreationAttributes<DeviceToken>> {
+  declare id: CreationOptional<string>;
+  declare userId: string;
+  declare token: string;
+  declare platform: DevicePlatform;
+  declare deviceName: CreationOptional<string | null>;
+  declare appVersion: CreationOptional<string | null>;
+  declare lastSeenAt: CreationOptional<Date>;
+  declare disabledAt: CreationOptional<Date | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+DeviceToken.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    userId: { type: DataTypes.UUID, allowNull: false },
+    token: { type: DataTypes.STRING(255), allowNull: false, unique: true },
+    platform: { type: DataTypes.ENUM(...DEVICE_PLATFORMS), allowNull: false },
+    deviceName: { type: DataTypes.STRING(120), allowNull: true },
+    appVersion: { type: DataTypes.STRING(40), allowNull: true },
+    lastSeenAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    disabledAt: { type: DataTypes.DATE, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "device_tokens" },
+);
+
 // ---- CustomRole ------------------------------------------------------------
 // Team roles an executive admin has added beyond the built-in ROLES list. The
 // effective role catalog is ROLES + these, and everyone picks from it.

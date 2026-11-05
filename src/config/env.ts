@@ -105,6 +105,14 @@ const schema = z.object({
     .default("true")
     .transform((s) => s !== "false"),
 
+  // ---- Push notifications (Expo) ----
+  // Optional Expo access token (enable "enhanced push security" in Expo).
+  EXPO_ACCESS_TOKEN: z.string().optional().default(""),
+  PUSH_ENABLED: z
+    .string()
+    .default("true")
+    .transform((s) => s !== "false"),
+
   // ---- Website analytics ----
   // Rollup keeps the dashboards fast; prune keeps the raw event log bounded.
   ENABLE_ANALYTICS_SCHEDULER: z

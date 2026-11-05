@@ -2,7 +2,7 @@
   "name": "mybizpush-dev-space-api",
   "version": "0.1.0",
   "private": true,
-  "description": "API for MyBizPush Dev Space \u2014 Node.js + TypeScript + Postgres + Redis + Cloudinary + Resend + JWT",
+  "description": "API for MyBizPush Dev Space — Node.js + TypeScript + Postgres + Redis + Cloudinary + Resend + JWT",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -24,6 +24,7 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "expo-server-sdk": "3.15.0",
     "express": "^4.21.2",
     "googleapis": "^144.0.0",
     "helmet": "^8.0.0",
