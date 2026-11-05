@@ -1,0 +1,177 @@
+import { Op, QueryTypes } from "sequelize";
+import { sequelize } from "../../db/sequelize";
+import { redis } from "../../redis/client";
+import { Activity, Meeting, Notification, Product, Project, Task, User } from "../../models";
+import { productsService } from "../products/products.service";
+import { grantsFor, roleIndex } from "../access/engine";
+
+// Home, workspace switcher and badges (API-CHANGES A108, HOME-01, SYS-02).
+// Everything is scoped to the caller and, when given, to one product.
+
+const RECENT_KEY = (userId: string) => `contexts:recent:${userId}`;
+
+export interface WorkspaceContext {
+  type: "organization" | "product";
+  id: string | null;
+  name: string;
+  logoUrl: string | null;
+  tint: string | null;
+  roles: string[]; // role names the user holds here
+}
+
+async function projectIdsIn(productId: string | undefined): Promise<string[] | null> {
+  if (!productId) return null; // no filter
+  return (await Project.findAll({ where: { productId }, attributes: ["id"] })).map((p) => p.id);
+}
+
+async function assignedTaskIds(userId: string): Promise<string[]> {
+  const rows = await sequelize.query<{ task_id: string }>(`SELECT task_id FROM task_assignees WHERE user_id = :userId`, {
+    replacements: { userId },
+    type: QueryTypes.SELECT,
+  });
+  return rows.map((r) => r.task_id);
+}
+
+// Projects where the user may approve work: org-wide approvers see all.
+async function approvableProjectIds(userId: string): Promise<string[] | "all"> {
+  const { grants, overrides } = await grantsFor(userId);
+  const roles = await roleIndex();
+  const permits = (key: string) => {
+    const r = roles.byKey.get(key);
+    return !!r && (r.permissions.includes("*") || r.permissions.includes("task.approve"));
+  };
+  if (overrides.some((o) => o.permission === "task.approve" && o.effect === "deny" && o.scope.type === "organization")) return [];
+  if (grants.some((g) => g.scope.type === "organization" && permits(g.role))) return "all";
+  const ids = new Set<string>();
+  for (const g of grants.filter((x) => permits(x.role) && x.scope.id)) {
+    if (g.scope.type === "project") ids.add(g.scope.id!);
+    if (g.scope.type === "product") (await Project.findAll({ where: { productId: g.scope.id! }, attributes: ["id"] })).forEach((p) => ids.add(p.id));
+    if (g.scope.type === "department") {
+      const rows = await sequelize.query<{ project_id: string }>(`SELECT project_id FROM project_departments WHERE department_id = :id`, { replacements: { id: g.scope.id }, type: QueryTypes.SELECT });
+      rows.forEach((r) => ids.add(r.project_id));
+    }
+    if (g.scope.type === "team") {
+      const rows = await sequelize.query<{ project_id: string }>(`SELECT project_id FROM team_projects WHERE team_id = :id`, { replacements: { id: g.scope.id }, type: QueryTypes.SELECT });
+      rows.forEach((r) => ids.add(r.project_id));
+    }
+  }
+  return [...ids];
+}
+
+function intersect(ids: string[] | "all", within: string[] | null): string[] | "all" {
+  if (!within) return ids;
+  if (ids === "all") return within;
+  const set = new Set(within);
+  return ids.filter((i) => set.has(i));
+}
+
+const startOfDay = (d = new Date()) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const endOfDay = (d = new Date()) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+
+export const homeService = {
+  async contexts(userId: string): Promise<{ current: WorkspaceContext[]; recent: { type: string; id: string | null }[] }> {
+    const { grants } = await grantsFor(userId);
+    const products = await productsService.forUser(userId);
+    const rolesAt = (type: string, id: string | null) => [...new Set(grants.filter((g) => g.scope.type === type && (g.scope.id ?? null) === id).map((g) => g.roleName))];
+    const org: WorkspaceContext = { type: "organization", id: null, name: "MyBizPush", logoUrl: null, tint: null, roles: rolesAt("organization", null) };
+    const productContexts: WorkspaceContext[] = products.map((p) => {
+      const title = p.members.find((m) => m.userId === userId)?.title;
+      const roles = rolesAt("product", p.id);
+      return { type: "product", id: p.id, name: p.name, logoUrl: p.logoUrl, tint: p.tint, roles: roles.length ? roles : title ? [title] : ["Member"] };
+    });
+    const recentRaw = await redis.lrange(RECENT_KEY(userId), 0, 4);
+    const recent = recentRaw.map((r) => JSON.parse(r) as { type: string; id: string | null });
+    return { current: [...productContexts, org], recent };
+  },
+
+  async rememberContext(userId: string, ctx: { type: string; id: string | null }): Promise<void> {
+    const value = JSON.stringify(ctx);
+    await redis.lrem(RECENT_KEY(userId), 0, value);
+    await redis.lpush(RECENT_KEY(userId), value);
+    await redis.ltrim(RECENT_KEY(userId), 0, 9);
+  },
+
+  async badges(userId: string) {
+    const [mine, approvable, notifications, meetings] = await Promise.all([
+      assignedTaskIds(userId),
+      approvableProjectIds(userId),
+      Notification.count({ where: { userId, read: false } }),
+      this.meetingsToday(userId),
+    ]);
+    const myOpen = mine.length ? await Task.count({ where: { id: mine, status: { [Op.ne]: "done" } } }) : 0;
+    const toApprove =
+      approvable === "all"
+        ? await Task.count({ where: { status: "in_review" } })
+        : approvable.length
+          ? await Task.count({ where: { status: "in_review", projectId: approvable } })
+          : 0;
+    return { tasks: myOpen + toApprove, notifications, calendar: meetings.length, chat: 0 };
+  },
+
+  async meetingsToday(userId: string) {
+    return Meeting.findAll({
+      where: { startsAt: { [Op.gte]: startOfDay(), [Op.lt]: endOfDay() } },
+      include: [{ model: User, as: "attendees", attributes: ["id"], where: { id: userId }, through: { attributes: [] } }],
+      order: [["startsAt", "ASC"]],
+    });
+  },
+
+  // HOME-01: stats, needs-your-attention and recent activity, optionally
+  // narrowed to one product.
+  async dashboard(userId: string, productId?: string) {
+    const scopeProjects = await projectIdsIn(productId);
+    const inScope = scopeProjects ? { projectId: scopeProjects } : {};
+    const mine = await assignedTaskIds(userId);
+    const approvable = intersect(await approvableProjectIds(userId), scopeProjects);
+    const now = new Date();
+
+    const [myOpen, toApprove, overdue, dueToday, meetings, unread, activity] = await Promise.all([
+      mine.length ? Task.count({ where: { id: mine, status: { [Op.ne]: "done" }, ...inScope } }) : 0,
+      approvable === "all" || approvable.length
+        ? Task.findAll({
+            where: { status: "in_review", ...(approvable === "all" ? inScope : { projectId: approvable }) },
+            attributes: ["id", "title", "projectId", "dueDate", "updatedAt"],
+            order: [["updatedAt", "DESC"]],
+            limit: 10,
+          })
+        : [],
+      mine.length
+        ? Task.findAll({ where: { id: mine, status: { [Op.ne]: "done" }, dueDate: { [Op.lt]: startOfDay(now) }, ...inScope }, attributes: ["id", "title", "projectId", "dueDate"], limit: 10 })
+        : [],
+      mine.length
+        ? Task.findAll({ where: { id: mine, status: { [Op.ne]: "done" }, dueDate: { [Op.gte]: startOfDay(now), [Op.lt]: endOfDay(now) }, ...inScope }, attributes: ["id", "title", "projectId", "dueDate"], limit: 10 })
+        : [],
+      this.meetingsToday(userId),
+      Notification.count({ where: { userId, read: false } }),
+      Activity.findAll({ order: [["createdAt", "DESC"]], limit: 15 }),
+    ]);
+
+    const projectNames = new Map(
+      (await Project.findAll({ attributes: ["id", "name"], where: { id: [...new Set([...toApprove, ...overdue, ...dueToday].map((t) => t.projectId))] } })).map((p) => [p.id, p.name]),
+    );
+
+    const attention = [
+      ...toApprove.map((t) => ({ kind: "approval" as const, itemType: "task", itemId: t.id, title: t.title, meta: projectNames.get(t.projectId) ?? "", dueAt: t.dueDate?.toISOString() ?? null })),
+      ...meetings
+        .filter((m) => m.startsAt > now)
+        .map((m) => ({ kind: "meeting" as const, itemType: "meeting", itemId: m.id, title: m.title, meta: m.startsAt.toISOString(), dueAt: m.startsAt.toISOString() })),
+      ...overdue.map((t) => ({ kind: "overdue" as const, itemType: "task", itemId: t.id, title: t.title, meta: projectNames.get(t.projectId) ?? "", dueAt: t.dueDate?.toISOString() ?? null })),
+      ...dueToday.map((t) => ({ kind: "due_today" as const, itemType: "task", itemId: t.id, title: t.title, meta: projectNames.get(t.projectId) ?? "", dueAt: t.dueDate?.toISOString() ?? null })),
+    ];
+
+    // Activity on items in scope only.
+    const scopedTaskIds = scopeProjects ? new Set((await Task.findAll({ where: { projectId: scopeProjects }, attributes: ["id"] })).map((t) => t.id)) : null;
+    const recent = activity
+      .filter((a) => !scopedTaskIds || scopedTaskIds.has(a.itemId))
+      .slice(0, 8)
+      .map((a) => ({ id: a.id, kind: a.kind, itemId: a.itemId, itemType: a.itemType, actorId: a.actorId, createdAt: a.createdAt.toISOString() }));
+
+    const product = productId ? await Product.findByPk(productId, { attributes: ["id", "name"] }) : null;
+    return {
+      context: product ? { type: "product", id: product.id, name: product.name } : { type: "organization", id: null, name: "MyBizPush" },
+      stats: { myTasks: myOpen, toApprove: toApprove.length, meetings: meetings.length, unread },
+      attention,
+      activity: recent,
+    };
+  },
+};

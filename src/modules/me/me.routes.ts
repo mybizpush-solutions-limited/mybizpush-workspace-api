@@ -5,6 +5,7 @@ import { asyncHandler, badRequest } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { meService } from "./me.service";
+import { homeService } from "./home.service";
 import { profileService } from "./profile.service";
 import { departmentsService } from "../departments/departments.service";
 import { authService } from "../auth/auth.service";
@@ -29,6 +30,25 @@ meRouter.get("/due-soon", asyncHandler(async (req, res) => {
 
 meRouter.get("/reported", asyncHandler(async (req, res) => {
   res.json({ items: await meService.reported(req.auth!.sub) });
+}));
+
+// ---- Home, workspace switcher, badges (A108) -------------------------------
+meRouter.get("/contexts", asyncHandler(async (req, res) => {
+  res.json(await homeService.contexts(req.auth!.sub));
+}));
+
+meRouter.post("/contexts/recent", validateBody(z.object({ type: z.enum(["organization", "product"]), id: z.string().uuid().nullable() })), asyncHandler(async (req, res) => {
+  await homeService.rememberContext(req.auth!.sub, req.body);
+  res.status(204).end();
+}));
+
+meRouter.get("/dashboard", asyncHandler(async (req, res) => {
+  const productId = typeof req.query.productId === "string" ? req.query.productId : undefined;
+  res.json(await homeService.dashboard(req.auth!.sub, productId));
+}));
+
+meRouter.get("/badges", asyncHandler(async (req, res) => {
+  res.json(await homeService.badges(req.auth!.sub));
 }));
 
 // ---- Self-service profile + onboarding ------------------------------------
