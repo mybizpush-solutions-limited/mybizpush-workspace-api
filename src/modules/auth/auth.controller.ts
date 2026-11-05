@@ -31,6 +31,30 @@ function setRefreshCookie(req: Request, res: Response, token: string) {
   res.cookie(REFRESH_COOKIE, token, refreshCookieOptions(req));
 }
 
+// Native apps (the Expo mobile app) have no browser cookie jar, so they carry
+// the refresh token themselves: they identify with `X-Client: mobile`, or simply
+// send the token in the body. Those clients get the rotated token back in the
+// JSON body instead of a cookie. Browsers are unaffected: no header, no body
+// token, cookie flow exactly as before.
+function isTokenClient(req: Request): boolean {
+  return req.get("x-client")?.toLowerCase() === "mobile" || typeof req.body?.refreshToken === "string";
+}
+
+// The refresh token presented by the caller: body first (mobile), then cookie (web).
+function presentedRefreshToken(req: Request): string | undefined {
+  const fromBody = req.body?.refreshToken;
+  if (typeof fromBody === "string" && fromBody.length > 0) return fromBody;
+  return req.cookies?.[REFRESH_COOKIE];
+}
+
+// Delivers a refresh token the way the client can store it: JSON body for
+// native clients, httpOnly cookie for browsers. Returns the extra body fields.
+function deliverRefreshToken(req: Request, res: Response, token: string): { refreshToken?: string } {
+  if (isTokenClient(req)) return { refreshToken: token };
+  setRefreshCookie(req, res, token);
+  return {};
+}
+
 export const authController = {
   // Step 1 — email a verification code.
   async registerStart(req: Request, res: Response) {
@@ -49,27 +73,26 @@ export const authController = {
       req.body.email,
       req.body.otp,
     );
-    setRefreshCookie(req, res, refreshToken);
-    res.status(201).json({ user, accessToken });
+    res.status(201).json({ user, accessToken, ...deliverRefreshToken(req, res, refreshToken) });
   },
 
   async login(req: Request, res: Response) {
     const { user, accessToken, refreshToken } = await authService.login(req.body);
-    setRefreshCookie(req, res, refreshToken);
-    res.json({ user, accessToken });
+    res.json({ user, accessToken, ...deliverRefreshToken(req, res, refreshToken) });
   },
 
   async refresh(req: Request, res: Response) {
-    const token = req.cookies?.[REFRESH_COOKIE];
+    const token = presentedRefreshToken(req);
     if (!token) throw unauthorized("No refresh token");
     const { accessToken, refreshToken } = await authService.refresh(token);
-    setRefreshCookie(req, res, refreshToken);
-    res.json({ accessToken });
+    res.json({ accessToken, ...deliverRefreshToken(req, res, refreshToken) });
   },
 
   async logout(req: Request, res: Response) {
-    await authService.logout(req.cookies?.[REFRESH_COOKIE]);
-    res.clearCookie(REFRESH_COOKIE, { ...refreshCookieOptions(req), maxAge: undefined });
+    await authService.logout(presentedRefreshToken(req));
+    if (!isTokenClient(req)) {
+      res.clearCookie(REFRESH_COOKIE, { ...refreshCookieOptions(req), maxAge: undefined });
+    }
     res.status(204).end();
   },
 
