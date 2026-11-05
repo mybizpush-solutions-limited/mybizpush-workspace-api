@@ -34,6 +34,7 @@ import { auditRouter } from "./modules/audit/audit.routes";
 import { productsRouter } from "./modules/products/products.routes";
 import { teamsRouter } from "./modules/teams/teams.routes";
 import { accessRouter } from "./modules/access/access.routes";
+import { invitationsPublicRouter, staffRouter } from "./modules/staff/staff.routes";
 
 // All versioned business endpoints live under this prefix.
 export const API_PREFIX = "/api/v1";
@@ -105,6 +106,8 @@ export function createApp() {
   v1.use("/products", productsRouter);
   v1.use("/teams", teamsRouter);
   v1.use("/access", accessRouter);
+  v1.use("/staff", staffRouter);
+  v1.use("/invitations", invitationsPublicRouter);
   app.use(API_PREFIX, v1);
 
   // Fallbacks

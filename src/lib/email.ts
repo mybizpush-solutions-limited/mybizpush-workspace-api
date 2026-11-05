@@ -118,6 +118,24 @@ const APP = env.APP_URL;
 
 // ---- Templated sends -------------------------------------------------------
 export const emails = {
+  // Staff invitation (A106). The link opens the app's accept screen (AUTH-03)
+  // on mobile or the web app, which both read ?token=.
+  invitation: (to: string, inviterName: string, link: string, access: string[]) =>
+    sendEmail({
+      to,
+      subject: `${inviterName} invited you to MyBizPush Workspace`,
+      html: renderEmail({
+        preheader: `${inviterName} invited you to MyBizPush Workspace`,
+        heading: "You're invited",
+        bodyHtml:
+          p(`<strong>${inviterName}</strong> invited you to join MyBizPush Workspace.`) +
+          (access.length ? p(`You'll have access to: ${access.join(", ")}.`) : "") +
+          p("Set your password to get started. The link expires in 7 days."),
+        cta: { label: "Accept invitation", url: link },
+      }),
+      text: `${inviterName} invited you to MyBizPush Workspace. Accept: ${link} (expires in 7 days).`,
+    }),
+
   welcome: (to: string, name: string) =>
     sendEmail({
       to,

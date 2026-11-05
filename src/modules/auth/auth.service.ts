@@ -1,6 +1,6 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { env } from "../../config/env";
-import { badRequest, conflict, forbidden, unauthorized } from "../../lib/errors";
+import { AppError, badRequest, conflict, forbidden, unauthorized } from "../../lib/errors";
 import { hashPassword, verifyPassword } from "../../lib/password";
 import {
   issueRefreshToken,
@@ -16,6 +16,12 @@ import { usersRepo, toPublicUser, type PublicUser } from "../users/users.repo";
 import { usersService } from "../users/users.service";
 import { GoogleAccount, User } from "../../models";
 import type { LoginInput, RegisterInput } from "./auth.schemas";
+
+// Suspended staff can't sign in or refresh (A106). A distinct code lets the
+// app show the "account paused" screen (AUTH-07).
+function assertActive(user: User): void {
+  if (user.status === "suspended") throw new AppError(403, "Your account is suspended. Contact HR to restore access.", "account_suspended");
+}
 
 const RESET_PREFIX = "pwreset:";
 const RESET_TTL_SECONDS = 30 * 60;
@@ -127,6 +133,7 @@ export const authService = {
 
     const ok = await verifyPassword(input.password, user.passwordHash);
     if (!ok) throw unauthorized("Invalid email or password");
+    assertActive(user);
 
     const tokens = await buildTokens(user);
     const publicUser = (await usersRepo.publicById(user.id))!;
@@ -138,6 +145,7 @@ export const authService = {
     const decoded = await verifyRefreshToken(refreshToken);
     const user = await User.findByPk(decoded.sub);
     if (!user) throw unauthorized("User no longer exists");
+    assertActive(user);
 
     const newRefresh = await rotateRefreshToken(decoded.sub, decoded.jti);
     const accessToken = signAccessToken({ sub: user.id, email: user.email, accessLevel: user.accessLevel });

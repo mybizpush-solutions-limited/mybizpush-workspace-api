@@ -34,6 +34,10 @@ export const ROLES = [
 ] as const;
 
 export type AccessLevel = (typeof ACCESS_LEVELS)[number];
+export const EMPLOYMENT_STATUSES = ["active", "on_leave", "contract", "probation"] as const;
+export type EmploymentStatus = (typeof EMPLOYMENT_STATUSES)[number];
+export const ACCOUNT_STATUSES = ["active", "suspended"] as const;
+export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 export type WorkStatus = (typeof WORK_STATUSES)[number];
 export type Priority = (typeof PRIORITIES)[number];
 export type ItemType = (typeof ITEM_TYPES)[number];
@@ -55,6 +59,15 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   // Cosmetic golden "Chief" badge — auto for the chief access level, but can be
   // granted independently to any user by an executive admin.
   declare chiefBadge: CreationOptional<boolean>;
+  // Staff administration (A106).
+  declare phone: CreationOptional<string | null>;
+  declare employeeId: CreationOptional<string | null>;
+  declare employmentStatus: CreationOptional<EmploymentStatus>;
+  declare status: CreationOptional<AccountStatus>;
+  declare suspendedAt: CreationOptional<Date | null>;
+  declare suspendedReason: CreationOptional<string | null>;
+  declare dateJoined: CreationOptional<string | null>;
+  declare reportsToId: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -71,6 +84,14 @@ User.init(
     roles: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
     onboarded: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     chiefBadge: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    phone: { type: DataTypes.STRING(32), allowNull: true },
+    employeeId: { type: DataTypes.STRING(40), allowNull: true, unique: true },
+    employmentStatus: { type: DataTypes.ENUM(...EMPLOYMENT_STATUSES), allowNull: false, defaultValue: "active" },
+    status: { type: DataTypes.ENUM(...ACCOUNT_STATUSES), allowNull: false, defaultValue: "active" },
+    suspendedAt: { type: DataTypes.DATE, allowNull: true },
+    suspendedReason: { type: DataTypes.STRING(240), allowNull: true },
+    dateJoined: { type: DataTypes.DATEONLY, allowNull: true },
+    reportsToId: { type: DataTypes.UUID, allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },
@@ -827,6 +848,53 @@ AccessOverride.init(
   { sequelize, tableName: "access_overrides", updatedAt: false },
 );
 AccessAssignment.belongsTo(AccessRole, { as: "role", foreignKey: "roleId" });
+
+// ---- Invitation ----------------------------------------------------------------
+// A pending invite to join the workspace (A106). Only a hash of the token is
+// stored; the link in the email carries the raw token.
+export class Invitation extends Model<InferAttributes<Invitation>, InferCreationAttributes<Invitation>> {
+  declare id: CreationOptional<string>;
+  declare email: string;
+  declare name: CreationOptional<string | null>;
+  declare tokenHash: string;
+  declare invitedBy: CreationOptional<string | null>;
+  declare departmentId: CreationOptional<string | null>;
+  declare teamId: CreationOptional<string | null>;
+  declare productId: CreationOptional<string | null>;
+  declare productTitle: CreationOptional<string | null>;
+  declare roleId: CreationOptional<string | null>;
+  declare jobTitles: CreationOptional<string[]>;
+  declare source: CreationOptional<string>;
+  declare expiresAt: Date;
+  declare acceptedAt: CreationOptional<Date | null>;
+  declare acceptedUserId: CreationOptional<string | null>;
+  declare revokedAt: CreationOptional<Date | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+Invitation.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    email: { type: DataTypes.STRING, allowNull: false },
+    name: { type: DataTypes.STRING(120), allowNull: true },
+    tokenHash: { type: DataTypes.STRING(64), allowNull: false, unique: true },
+    invitedBy: { type: DataTypes.UUID, allowNull: true },
+    departmentId: { type: DataTypes.UUID, allowNull: true },
+    teamId: { type: DataTypes.UUID, allowNull: true },
+    productId: { type: DataTypes.UUID, allowNull: true },
+    productTitle: { type: DataTypes.STRING(80), allowNull: true },
+    roleId: { type: DataTypes.UUID, allowNull: true },
+    jobTitles: { type: DataTypes.ARRAY(DataTypes.STRING(40)), allowNull: false, defaultValue: [] },
+    source: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "manual" },
+    expiresAt: { type: DataTypes.DATE, allowNull: false },
+    acceptedAt: { type: DataTypes.DATE, allowNull: true },
+    acceptedUserId: { type: DataTypes.UUID, allowNull: true },
+    revokedAt: { type: DataTypes.DATE, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "invitations" },
+);
 
 // ---- CustomRole ------------------------------------------------------------
 // Team roles an executive admin has added beyond the built-in ROLES list. The
