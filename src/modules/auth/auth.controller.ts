@@ -1,5 +1,6 @@
 import type { CookieOptions, Request, Response } from "express";
-import { unauthorized } from "../../lib/errors";
+import { badRequest, unauthorized } from "../../lib/errors";
+import type { ClientInfo } from "../../lib/jwt";
 import { authService } from "./auth.service";
 
 const REFRESH_COOKIE = "refresh_token";
@@ -31,6 +32,42 @@ function setRefreshCookie(req: Request, res: Response, token: string) {
   res.cookie(REFRESH_COOKIE, token, refreshCookieOptions(req));
 }
 
+// Native apps (the Expo mobile app) have no browser cookie jar, so they carry
+// the refresh token themselves: they identify with `X-Client: mobile`, or simply
+// send the token in the body. Those clients get the rotated token back in the
+// JSON body instead of a cookie. Browsers are unaffected: no header, no body
+// token, cookie flow exactly as before.
+function isTokenClient(req: Request): boolean {
+  return req.get("x-client")?.toLowerCase() === "mobile" || typeof req.body?.refreshToken === "string";
+}
+
+// The refresh token presented by the caller: body first (mobile), then cookie (web).
+function presentedRefreshToken(req: Request): string | undefined {
+  const fromBody = req.body?.refreshToken;
+  if (typeof fromBody === "string" && fromBody.length > 0) return fromBody;
+  return req.cookies?.[REFRESH_COOKIE];
+}
+
+// Delivers a refresh token the way the client can store it: JSON body for
+// native clients, httpOnly cookie for browsers. Returns the extra body fields.
+function deliverRefreshToken(req: Request, res: Response, token: string): { refreshToken?: string } {
+  if (isTokenClient(req)) return { refreshToken: token };
+  setRefreshCookie(req, res, token);
+  return {};
+}
+
+// Where this request comes from, for session and login-history records. The
+// app sends X-Device-Name ("Pixel 8") and X-Platform (ios | android | web).
+function clientInfo(req: Request): ClientInfo {
+  const platform = req.get("x-platform")?.toLowerCase();
+  return {
+    ip: req.ip ?? null,
+    userAgent: req.get("user-agent") ?? null,
+    device: req.get("x-device-name")?.slice(0, 120) ?? null,
+    platform: platform && ["ios", "android", "web"].includes(platform) ? platform : null,
+  };
+}
+
 export const authController = {
   // Step 1 — email a verification code.
   async registerStart(req: Request, res: Response) {
@@ -48,29 +85,52 @@ export const authController = {
     const { user, accessToken, refreshToken } = await authService.verifyRegistration(
       req.body.email,
       req.body.otp,
+      clientInfo(req),
     );
-    setRefreshCookie(req, res, refreshToken);
-    res.status(201).json({ user, accessToken });
+    res.status(201).json({ user, accessToken, ...deliverRefreshToken(req, res, refreshToken) });
   },
 
   async login(req: Request, res: Response) {
-    const { user, accessToken, refreshToken } = await authService.login(req.body);
-    setRefreshCookie(req, res, refreshToken);
-    res.json({ user, accessToken });
+    const { user, accessToken, refreshToken } = await authService.login(req.body, clientInfo(req));
+    res.json({ user, accessToken, ...deliverRefreshToken(req, res, refreshToken) });
   },
 
   async refresh(req: Request, res: Response) {
-    const token = req.cookies?.[REFRESH_COOKIE];
+    const token = presentedRefreshToken(req);
     if (!token) throw unauthorized("No refresh token");
-    const { accessToken, refreshToken } = await authService.refresh(token);
-    setRefreshCookie(req, res, refreshToken);
-    res.json({ accessToken });
+    const { accessToken, refreshToken } = await authService.refresh(token, clientInfo(req));
+    res.json({ accessToken, ...deliverRefreshToken(req, res, refreshToken) });
   },
 
   async logout(req: Request, res: Response) {
-    await authService.logout(req.cookies?.[REFRESH_COOKIE]);
-    res.clearCookie(REFRESH_COOKIE, { ...refreshCookieOptions(req), maxAge: undefined });
+    await authService.logout(presentedRefreshToken(req));
+    if (!isTokenClient(req)) {
+      res.clearCookie(REFRESH_COOKIE, { ...refreshCookieOptions(req), maxAge: undefined });
+    }
     res.status(204).end();
+  },
+
+  async sessions(req: Request, res: Response) {
+    const sessions = await authService.sessions(req.auth!.sub, req.auth!.sid);
+    res.json({ sessions });
+  },
+
+  async revokeSession(req: Request, res: Response) {
+    const id = String(req.params.id ?? "");
+    if (!id) throw badRequest("Session id is required");
+    await authService.revokeSession(req.auth!.sub, id);
+    res.status(204).end();
+  },
+
+  async revokeOtherSessions(req: Request, res: Response) {
+    await authService.revokeOtherSessions(req.auth!.sub, req.auth!.sid);
+    res.status(204).end();
+  },
+
+  async loginHistory(req: Request, res: Response) {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+    const events = await authService.loginHistory(req.auth!.sub, limit);
+    res.json({ events });
   },
 
   async me(req: Request, res: Response) {
