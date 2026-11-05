@@ -30,6 +30,7 @@ import { blogsRouter } from "./modules/blogs/blogs.routes";
 import { databasesRouter } from "./modules/databases/databases.routes";
 import { reportsRouter } from "./modules/reports/reports.routes";
 import { meetingReportsRouter } from "./modules/reports/meetingReports.routes";
+import { jobsRouter } from "./modules/jobs/jobs.routes";
 
 // All versioned business endpoints live under this prefix.
 export const API_PREFIX = "/api/v1";
@@ -97,6 +98,7 @@ export function createApp() {
   v1.use("/blogs", blogsRouter);
   v1.use("/databases", databasesRouter);
   v1.use("/meeting-reports", meetingReportsRouter);
+  v1.use("/jobs", jobsRouter);
   app.use(API_PREFIX, v1);
 
   // Fallbacks

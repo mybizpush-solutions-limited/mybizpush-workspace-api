@@ -2,7 +2,7 @@
   "name": "mybizpush-dev-space-api",
   "version": "0.1.0",
   "private": true,
-  "description": "API for MyBizPush Dev Space — Node.js + TypeScript + Postgres + Redis + Cloudinary + Resend + JWT",
+  "description": "API for MyBizPush Dev Space \u2014 Node.js + TypeScript + Postgres + Redis + Cloudinary + Resend + JWT",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -13,10 +13,13 @@
     "lint:fix": "eslint . --fix",
     "check": "npm run lint && npm run build",
     "migrate": "node dist/db/migrate.js",
-    "seed": "tsx src/db/seed.ts"
+    "seed": "tsx src/db/seed.ts",
+    "worker": "node dist/worker.js",
+    "dev:worker": "tsx watch src/worker.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
+    "bullmq": "^5.81.5",
     "cloudinary": "^2.5.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

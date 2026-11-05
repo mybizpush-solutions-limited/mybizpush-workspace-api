@@ -97,6 +97,14 @@ const schema = z.object({
   // executives and project managers).
   HR_DEPARTMENT_SLUG: z.string().default("hr"),
 
+  // ---- Background jobs (BullMQ) ----
+  // Run job workers inside the API process. Set "false" when a separate
+  // `npm run worker` process handles jobs.
+  RUN_JOB_WORKERS: z
+    .string()
+    .default("true")
+    .transform((s) => s !== "false"),
+
   // ---- Website analytics ----
   // Rollup keeps the dashboards fast; prune keeps the raw event log bounded.
   ENABLE_ANALYTICS_SCHEDULER: z
