@@ -31,6 +31,12 @@ authRouter.post("/refresh", asyncHandler(authController.refresh));
 authRouter.post("/logout", asyncHandler(authController.logout));
 authRouter.get("/me", requireAuth, asyncHandler(authController.me));
 
+// Sessions and devices (A002). "Others" keeps the caller's own session.
+authRouter.get("/sessions", requireAuth, asyncHandler(authController.sessions));
+authRouter.post("/sessions/revoke-others", requireAuth, asyncHandler(authController.revokeOtherSessions));
+authRouter.delete("/sessions/:id", requireAuth, asyncHandler(authController.revokeSession));
+authRouter.get("/login-history", requireAuth, asyncHandler(authController.loginHistory));
+
 authRouter.post(
   "/forgot-password",
   resetLimiter,

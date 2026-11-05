@@ -632,6 +632,40 @@ BlacklistedEmail.init(
   { sequelize, tableName: "blacklisted_emails" },
 );
 
+// ---- LoginEvent ------------------------------------------------------------
+// One row per sign-in attempt (success or failure), for the "login history"
+// screen and security review. userId is null when the email matched no account.
+export const LOGIN_EVENT_KINDS = ["login", "register", "failed"] as const;
+export type LoginEventKind = (typeof LOGIN_EVENT_KINDS)[number];
+
+export class LoginEvent extends Model<InferAttributes<LoginEvent>, InferCreationAttributes<LoginEvent>> {
+  declare id: CreationOptional<string>;
+  declare userId: CreationOptional<string | null>;
+  declare email: string;
+  declare kind: LoginEventKind;
+  declare sessionId: CreationOptional<string | null>;
+  declare ip: CreationOptional<string | null>;
+  declare userAgent: CreationOptional<string | null>;
+  declare device: CreationOptional<string | null>;
+  declare platform: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+}
+LoginEvent.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    userId: { type: DataTypes.UUID, allowNull: true },
+    email: { type: DataTypes.STRING, allowNull: false },
+    kind: { type: DataTypes.ENUM(...LOGIN_EVENT_KINDS), allowNull: false },
+    sessionId: { type: DataTypes.STRING, allowNull: true },
+    ip: { type: DataTypes.STRING, allowNull: true },
+    userAgent: { type: DataTypes.STRING(400), allowNull: true },
+    device: { type: DataTypes.STRING(120), allowNull: true },
+    platform: { type: DataTypes.STRING(20), allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "login_events", updatedAt: false },
+);
+
 // ---- CustomRole ------------------------------------------------------------
 // Team roles an executive admin has added beyond the built-in ROLES list. The
 // effective role catalog is ROLES + these, and everyone picks from it.

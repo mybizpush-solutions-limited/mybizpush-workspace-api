@@ -68,10 +68,14 @@ Versioned business endpoints live under `/api/v1`. The infra health check stays 
 | ------ | ---------------------------- | --------------- | -------------------------------------- |
 | GET    | `/api/health`                | —               | db + redis status (unversioned)        |
 | POST   | `/api/v1/auth/register`      | —               | `@mybizpush.com` only                  |
-| POST   | `/api/v1/auth/login`         | —               | sets httpOnly refresh cookie           |
-| POST   | `/api/v1/auth/refresh`       | refresh cookie  | rotates refresh, returns new access    |
-| POST   | `/api/v1/auth/logout`        | refresh cookie  | revokes refresh token                  |
+| POST   | `/api/v1/auth/login`         | —               | sets httpOnly refresh cookie (mobile: returns `refreshToken` in body) |
+| POST   | `/api/v1/auth/refresh`       | refresh cookie or body | rotates refresh, returns new access (mobile: new `refreshToken` in body) |
+| POST   | `/api/v1/auth/logout`        | refresh cookie or body | revokes refresh token           |
 | GET    | `/api/v1/auth/me`            | Bearer          | current user                           |
+| GET    | `/api/v1/auth/sessions`      | Bearer          | my signed-in devices, `current` marks this one |
+| DELETE | `/api/v1/auth/sessions/:id`  | Bearer          | sign one device out                    |
+| POST   | `/api/v1/auth/sessions/revoke-others` | Bearer | sign out every other device            |
+| GET    | `/api/v1/auth/login-history` | Bearer          | my recent sign-ins and failed attempts (`?limit=`, max 100) |
 | POST   | `/api/v1/auth/forgot-password` | — (rate-limited) | emails a reset link (via Resend)    |
 | POST   | `/api/v1/auth/reset-password`  | — (rate-limited) | sets a new password from a token    |
 | GET    | `/api/v1/users`              | Bearer          | list users                             |
@@ -116,6 +120,19 @@ Versioned business endpoints live under `/api/v1`. The infra health check stays 
 | GET    | `/api/v1/github/status`      | Bearer          | `{ connected, login, avatarUrl, orgMember, org }` |
 | POST   | `/api/v1/github/disconnect`  | Bearer          | remove the stored GitHub account       |
 | POST   | `/api/v1/github/webhook`     | HMAC signature  | GitHub events → auto-updates linked PR status |
+
+### Mobile clients
+
+Native apps cannot hold the httpOnly refresh cookie, so they send `X-Client: mobile` on
+`/auth/register/verify`, `/auth/login`, `/auth/refresh` and `/auth/logout`.
+
+- Sign in and verify return `{ user, accessToken, refreshToken }` and set no cookie.
+- Refresh takes `{ "refreshToken": "..." }` and returns `{ accessToken, refreshToken }` (rotated; store the new one).
+- Logout takes `{ "refreshToken": "..." }` and revokes it.
+
+Sending `refreshToken` in the body is treated the same as the header. Browsers keep the cookie flow unchanged.
+
+Optional headers `X-Device-Name` (for example `Pixel 8`) and `X-Platform` (`ios`, `android`, `web`) label the session in `/auth/sessions` and the login history.
 
 ### GitHub setup
 
