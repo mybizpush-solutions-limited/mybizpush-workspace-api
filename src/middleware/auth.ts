@@ -23,3 +23,20 @@ export function requireAccessLevel(...allowed: AccessLevel[]) {
     next();
   };
 }
+
+// Requires a permission from the permission engine (A103). `scope` reads the
+// target scope from the request (e.g. the product id in the URL); omit it for
+// organization-wide permissions.
+export function requirePermission(
+  permission: string,
+  scope?: (req: Request) => { type: "organization" | "department" | "team" | "product" | "project"; id?: string | null },
+) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    if (!req.auth) throw unauthorized();
+    // Lazy import keeps the auth middleware free of model imports at load time.
+    import("../modules/access/engine")
+      .then(({ can }) => can(req.auth!, permission, scope?.(req)))
+      .then((ok) => (ok ? next() : next(forbidden("You don't have permission to do this"))))
+      .catch(next);
+  };
+}

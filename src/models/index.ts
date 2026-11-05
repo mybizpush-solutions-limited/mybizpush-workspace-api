@@ -743,6 +743,91 @@ Team.init(
   { sequelize, tableName: "teams" },
 );
 
+// ---- Access control (A103) --------------------------------------------------
+export const ACCESS_SCOPES = ["organization", "department", "team", "product", "project"] as const;
+export type AccessScope = (typeof ACCESS_SCOPES)[number];
+
+export class AccessRole extends Model<InferAttributes<AccessRole>, InferCreationAttributes<AccessRole>> {
+  declare id: CreationOptional<string>;
+  declare key: string;
+  declare name: string;
+  declare description: CreationOptional<string>;
+  declare isSystem: CreationOptional<boolean>;
+  declare defaultScope: CreationOptional<AccessScope>;
+  declare permissions: CreationOptional<string[]>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+AccessRole.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    key: { type: DataTypes.STRING(60), allowNull: false, unique: true },
+    name: { type: DataTypes.STRING(80), allowNull: false },
+    description: { type: DataTypes.STRING(240), allowNull: false, defaultValue: "" },
+    isSystem: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    defaultScope: { type: DataTypes.ENUM(...ACCESS_SCOPES), allowNull: false, defaultValue: "organization" },
+    permissions: { type: DataTypes.ARRAY(DataTypes.STRING(60)), allowNull: false, defaultValue: [] },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "access_roles" },
+);
+
+export class AccessAssignment extends Model<InferAttributes<AccessAssignment>, InferCreationAttributes<AccessAssignment>> {
+  declare id: CreationOptional<string>;
+  declare roleId: string;
+  declare subjectType: "user" | "department" | "team";
+  declare subjectId: string;
+  declare scopeType: AccessScope;
+  declare scopeId: CreationOptional<string | null>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+}
+AccessAssignment.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    roleId: { type: DataTypes.UUID, allowNull: false },
+    subjectType: { type: DataTypes.ENUM("user", "department", "team"), allowNull: false },
+    subjectId: { type: DataTypes.UUID, allowNull: false },
+    scopeType: { type: DataTypes.ENUM(...ACCESS_SCOPES), allowNull: false },
+    scopeId: { type: DataTypes.UUID, allowNull: true },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "access_assignments", updatedAt: false },
+);
+
+export class AccessOverride extends Model<InferAttributes<AccessOverride>, InferCreationAttributes<AccessOverride>> {
+  declare id: CreationOptional<string>;
+  declare userId: string;
+  declare permission: string;
+  declare effect: "grant" | "deny";
+  declare scopeType: AccessScope;
+  declare scopeId: CreationOptional<string | null>;
+  declare reason: CreationOptional<string | null>;
+  declare expiresAt: CreationOptional<Date | null>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+}
+AccessOverride.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    userId: { type: DataTypes.UUID, allowNull: false },
+    permission: { type: DataTypes.STRING(60), allowNull: false },
+    effect: { type: DataTypes.ENUM("grant", "deny"), allowNull: false },
+    scopeType: { type: DataTypes.ENUM(...ACCESS_SCOPES), allowNull: false },
+    scopeId: { type: DataTypes.UUID, allowNull: true },
+    reason: { type: DataTypes.STRING(240), allowNull: true },
+    expiresAt: { type: DataTypes.DATE, allowNull: true },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "access_overrides", updatedAt: false },
+);
+AccessAssignment.belongsTo(AccessRole, { as: "role", foreignKey: "roleId" });
+
 // ---- CustomRole ------------------------------------------------------------
 // Team roles an executive admin has added beyond the built-in ROLES list. The
 // effective role catalog is ROLES + these, and everyone picks from it.
