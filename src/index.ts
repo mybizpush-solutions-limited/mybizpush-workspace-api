@@ -7,6 +7,7 @@ import { startAnalyticsScheduler } from "./modules/analytics/analytics.scheduler
 import { startBackupScheduler } from "./modules/databases/databases.scheduler";
 import { startCommitsScheduler } from "./modules/github/commits.scheduler";
 import { startMeetingReportsScheduler } from "./modules/reports/meetingReports.scheduler";
+import { closeQueues, startWorkers, stopWorkers } from "./jobs";
 // Importing the models registers them with Sequelize and wires associations.
 import "./models";
 
@@ -24,10 +25,13 @@ async function start() {
   startBackupScheduler();
   startCommitsScheduler();
   startMeetingReportsScheduler();
+  if (env.RUN_JOB_WORKERS) startWorkers();
 
   const shutdown = async (signal: string) => {
     console.info(`\n${signal} received — shutting down…`);
     server.close();
+    await stopWorkers();
+    await closeQueues();
     await Promise.allSettled([sequelize.close(), redis.quit()]);
     process.exit(0);
   };

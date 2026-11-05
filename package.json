@@ -13,14 +13,18 @@
     "lint:fix": "eslint . --fix",
     "check": "npm run lint && npm run build",
     "migrate": "node dist/db/migrate.js",
-    "seed": "tsx src/db/seed.ts"
+    "seed": "tsx src/db/seed.ts",
+    "worker": "node dist/worker.js",
+    "dev:worker": "tsx watch src/worker.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
+    "bullmq": "^5.81.5",
     "cloudinary": "^2.5.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "expo-server-sdk": "3.15.0",
     "express": "^4.21.2",
     "googleapis": "^144.0.0",
     "helmet": "^8.0.0",
