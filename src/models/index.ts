@@ -141,6 +141,8 @@ export class Project extends Model<InferAttributes<Project>, InferCreationAttrib
   // Sequelize, Postgres)". Surfaced to the AI so briefs target the real stack.
   declare techStack: CreationOptional<string>;
   declare managerId: CreationOptional<string | null>;
+  // The product this project belongs to (A101); null until linked.
+  declare productId: CreationOptional<string | null>;
   declare progress: CreationOptional<number>;
   declare avatarUrl: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
@@ -154,6 +156,7 @@ Project.init(
     description: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
     techStack: { type: DataTypes.STRING(400), allowNull: false, defaultValue: "" },
     managerId: { type: DataTypes.UUID, allowNull: true },
+    productId: { type: DataTypes.UUID, allowNull: true },
     progress: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0, max: 100 } },
     avatarUrl: { type: DataTypes.STRING, allowNull: true },
     createdAt: DataTypes.DATE,
@@ -667,6 +670,79 @@ AuditLog.init(
   { sequelize, tableName: "audit_logs", updatedAt: false },
 );
 
+// ---- Product -----------------------------------------------------------------
+// The business umbrella (A101): people, projects, marketing, content, social.
+export const PRODUCT_STAGES = ["in_development", "live", "paused"] as const;
+export type ProductStage = (typeof PRODUCT_STAGES)[number];
+
+export class Product extends Model<InferAttributes<Product>, InferCreationAttributes<Product>> {
+  declare id: CreationOptional<string>;
+  declare name: string;
+  declare slug: string;
+  declare description: CreationOptional<string>;
+  declare logoUrl: CreationOptional<string | null>;
+  declare tint: CreationOptional<string | null>;
+  declare stage: CreationOptional<ProductStage>;
+  declare ownerId: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+Product.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    name: { type: DataTypes.STRING(120), allowNull: false },
+    slug: { type: DataTypes.STRING(120), allowNull: false, unique: true },
+    description: { type: DataTypes.STRING(400), allowNull: false, defaultValue: "" },
+    logoUrl: { type: DataTypes.STRING, allowNull: true },
+    tint: { type: DataTypes.STRING(9), allowNull: true },
+    stage: { type: DataTypes.ENUM(...PRODUCT_STAGES), allowNull: false, defaultValue: "in_development" },
+    ownerId: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "products" },
+);
+
+export class ProductMember extends Model<InferAttributes<ProductMember>, InferCreationAttributes<ProductMember>> {
+  declare productId: string;
+  declare userId: string;
+  declare title: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+}
+ProductMember.init(
+  {
+    productId: { type: DataTypes.UUID, allowNull: false, primaryKey: true },
+    userId: { type: DataTypes.UUID, allowNull: false, primaryKey: true },
+    title: { type: DataTypes.STRING(80), allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "product_members", updatedAt: false },
+);
+
+// ---- Team --------------------------------------------------------------------
+// Cross-department working group (A102).
+export class Team extends Model<InferAttributes<Team>, InferCreationAttributes<Team>> {
+  declare id: CreationOptional<string>;
+  declare name: string;
+  declare slug: string;
+  declare description: CreationOptional<string>;
+  declare leadId: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+Team.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    name: { type: DataTypes.STRING(120), allowNull: false },
+    slug: { type: DataTypes.STRING(120), allowNull: false, unique: true },
+    description: { type: DataTypes.STRING(400), allowNull: false, defaultValue: "" },
+    leadId: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "teams" },
+);
+
 // ---- CustomRole ------------------------------------------------------------
 // Team roles an executive admin has added beyond the built-in ROLES list. The
 // effective role catalog is ROLES + these, and everyone picks from it.
@@ -1137,6 +1213,20 @@ User.hasOne(GithubAccount, { as: "githubAccount", foreignKey: "userId" });
 GithubAccount.belongsTo(User, { foreignKey: "userId" });
 
 Project.hasMany(ProjectRepo, { as: "repos", foreignKey: "projectId" });
+
+// Products and teams (A101, A102).
+const TeamMembers = through("team_members");
+const TeamProjects = through("team_projects");
+Product.belongsTo(User, { as: "owner", foreignKey: "ownerId" });
+Product.hasMany(Project, { as: "projects", foreignKey: "productId" });
+Project.belongsTo(Product, { as: "product", foreignKey: "productId" });
+Product.belongsToMany(User, { through: ProductMember, as: "members", foreignKey: "productId", otherKey: "userId" });
+User.belongsToMany(Product, { through: ProductMember, as: "products", foreignKey: "userId", otherKey: "productId" });
+Team.belongsTo(User, { as: "lead", foreignKey: "leadId" });
+Team.belongsToMany(User, { through: TeamMembers, as: "members", foreignKey: "teamId", otherKey: "userId" });
+User.belongsToMany(Team, { through: TeamMembers, as: "teams", foreignKey: "userId", otherKey: "teamId" });
+Team.belongsToMany(Project, { through: TeamProjects, as: "projects", foreignKey: "teamId", otherKey: "projectId" });
+Project.belongsToMany(Team, { through: TeamProjects, as: "teams", foreignKey: "projectId", otherKey: "teamId" });
 ProjectRepo.belongsTo(Project, { foreignKey: "projectId" });
 
 BlogChannel.belongsTo(Project, { as: "project", foreignKey: "projectId" });
