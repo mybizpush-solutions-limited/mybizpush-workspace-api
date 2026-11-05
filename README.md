@@ -196,3 +196,16 @@ Each module is a `*.service.ts` (model queries + serialization to the UI's publi
 
 - Cloudinary and Resend are optional in dev: without keys, uploads throw a clear 503 and emails log to the console.
 - The schema lives in **both** the models (ORM) and the initial migration (DB) — standard Sequelize practice. Evolve it by adding a new migration in `src/db/migrations` and updating the matching model.
+
+### Realtime (Socket.IO)
+
+Clients connect with their access token and receive pushes for their own user only:
+
+```js
+io(API_URL, { path: "/api/socket", auth: { token: accessToken } })
+```
+
+Events (server to client): `ready`, `notification:new` `{ notification }`, `badges` `{ notifications }` (unread count),
+`sync:changed` `{ collections }`. A `connect_error` of `unauthorized` means refresh the access token and reconnect.
+The Redis adapter shares sockets across API instances; `emitToUser()` (`src/realtime/events.ts`) works from any process.
+

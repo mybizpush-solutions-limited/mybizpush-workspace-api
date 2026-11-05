@@ -9,6 +9,8 @@ import { startCommitsScheduler } from "./modules/github/commits.scheduler";
 import { startMeetingReportsScheduler } from "./modules/reports/meetingReports.scheduler";
 // Importing the models registers them with Sequelize and wires associations.
 import "./models";
+import { attachRealtime, closeRealtime } from "./realtime/gateway";
+import { closeEmitter } from "./realtime/events";
 
 async function start() {
   await assertDbConnection();
@@ -18,6 +20,7 @@ async function start() {
   const server = app.listen(env.PORT, () => {
     console.info(`🚀 MyBizPush Dev Space API listening on http://localhost:${env.PORT}`);
   });
+  attachRealtime(server);
 
   startDigestScheduler();
   startAnalyticsScheduler();
@@ -28,6 +31,8 @@ async function start() {
   const shutdown = async (signal: string) => {
     console.info(`\n${signal} received — shutting down…`);
     server.close();
+    await closeRealtime();
+    await closeEmitter();
     await Promise.allSettled([sequelize.close(), redis.quit()]);
     process.exit(0);
   };
