@@ -16,6 +16,9 @@ import { serializeWorkItem, workItemInclude } from "../shared/serializers";
 import { logActivity, notify } from "../shared/events";
 
 export interface WorkItemCreateInput {
+  // Client-generated id (offline-created items keep the id they were given on
+  // the device). Omitted by the web app: the database generates one.
+  id?: string;
   projectId: string;
   departmentId?: string | null; // the department "lane" within the project
   title: string;
@@ -68,6 +71,7 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
 
     async create(input: WorkItemCreateInput, reporterId: string) {
       const item = await M.create({
+        ...(input.id ? { id: input.id } : {}),
         projectId: input.projectId,
         departmentId: input.departmentId ?? null,
         title: input.title.trim(),
@@ -109,6 +113,12 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
         }
       }
       if (patch.labelIds) await item.setLabels(patch.labelIds);
+      // Assignees and labels live in join tables, which don't touch the item's
+      // updated_at. Bump it so offline clients see the change on their next sync.
+      if (patch.assigneeIds || patch.labelIds) {
+        item.changed("updatedAt", true);
+        await item.save();
+      }
       return reload(id);
     },
 

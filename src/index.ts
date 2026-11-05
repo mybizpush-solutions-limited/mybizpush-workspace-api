@@ -9,8 +9,10 @@ import { startCommitsScheduler } from "./modules/github/commits.scheduler";
 import { startMeetingReportsScheduler } from "./modules/reports/meetingReports.scheduler";
 // Importing the models registers them with Sequelize and wires associations.
 import "./models";
+import { registerTombstoneHooks } from "./modules/sync/tombstones";
 
 async function start() {
+  registerTombstoneHooks();
   await assertDbConnection();
   console.info("✓ Database connected");
 

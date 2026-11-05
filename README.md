@@ -117,6 +117,27 @@ Versioned business endpoints live under `/api/v1`. The infra health check stays 
 | POST   | `/api/v1/github/disconnect`  | Bearer          | remove the stored GitHub account       |
 | POST   | `/api/v1/github/webhook`     | HMAC signature  | GitHub events → auto-updates linked PR status |
 
+### Offline sync
+
+The mobile app keeps a local database and syncs with two endpoints.
+
+**Pull** `GET /api/v1/sync/pull?cursor=<opaque>&collections=tasks,notifications`
+returns `{ changes, cursor, hasMore, serverTime }`. For each collection, `changes.<name>` is `{ upserted, deleted, full? }`.
+- `users`, `departments`, `projects`, `labels`: the full set each time (`full: true`, replace locally).
+- `tasks`, `issues`, `comments`, `notifications` (own only), `meetings`: rows changed since the cursor, plus deleted ids.
+Store the returned `cursor` and repeat while `hasMore` is true. Omit `cursor` for a first full sync.
+
+**Push** `POST /api/v1/sync/push { mutations: [...] }` (max 200, applied in order) returns `{ results }` in the same order.
+Each mutation is `{ mutationId, type, recordId?, payload, baseUpdatedAt? }` with type one of
+`task.create|update|status`, `issue.create|update|status`, `comment.create`, `notification.read`.
+- `mutationId` (uuid) makes retries safe: a repeated id returns the first result without applying again (kept 7 days).
+- Records created offline use a client-generated uuid as `recordId`.
+- `baseUpdatedAt` is the record's `updatedAt` the device last saw. If the server copy is newer the result is
+  `conflict` with the server `record`; the app asks the user, then resends with a fresh `baseUpdatedAt`.
+- Results are `applied`, `conflict` or `rejected` (with `error`). One rejection does not stop the batch.
+
+Deletes are recorded in `sync_tombstones` by model hooks (including bulk deletes), so clients remove them on the next pull.
+
 ### GitHub setup
 
 > 📖 Full step-by-step walkthrough (with screenshots-worthy detail) for both GitHub and Google credentials: [`docs/oauth-setup.md`](docs/oauth-setup.md).

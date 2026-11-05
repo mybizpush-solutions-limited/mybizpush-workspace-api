@@ -9,7 +9,8 @@ const STATUS = z.enum(["todo", "in_progress", "in_review", "blocked", "done"]);
 const PRIORITY = z.enum(["low", "medium", "high", "urgent"]);
 const SEVERITY = z.enum(["minor", "major", "critical"]);
 
-function buildSchemas(withSeverity: boolean) {
+// Exported for offline sync (sync.service), which replays the same writes.
+export function buildSchemas(withSeverity: boolean) {
   const create = z.object({
     projectId: z.string().uuid(),
     departmentId: z.string().uuid().nullable().optional(),
@@ -35,7 +36,7 @@ function buildSchemas(withSeverity: boolean) {
   return { create, update };
 }
 
-const statusSchema = z.object({ status: STATUS });
+export const statusSchema = z.object({ status: STATUS });
 const feedbackRequestSchema = z.object({ fromUserId: z.string().uuid() });
 const feedbackProvideSchema = z.object({ body: z.string().trim().min(1).max(8000) });
 const prSchema = z.object({
