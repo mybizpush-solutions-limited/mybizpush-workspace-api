@@ -106,6 +106,7 @@ Versioned business endpoints live under `/api/v1`. The infra health check stays 
 | POST   | `/api/v1/ai/summarize`       | Bearer          | summarize a task/issue (`{ itemId, itemType }`) |
 | GET    | `/api/v1/digests/preview`    | Bearer          | preview your digest HTML (no send)     |
 | POST   | `/api/v1/digests/send-me`    | Bearer          | send yourself a test digest now        |
+| GET    | `/api/v1/audit`              | admin, chief    | audit trail, filters `action`, `targetType`, `targetId`, `actorId`, `scopeType`, `scopeId`, paging `?before=` |
 | POST   | `/api/v1/digests/run`        | admin           | run the batch for a cadence (`{ frequency }`) |
 | GET    | `/api/v1/google/auth-url`    | Bearer          | start the Google Calendar connect flow |
 | GET    | `/api/v1/google/callback`    | — (OAuth state) | Google redirect target → stores tokens |

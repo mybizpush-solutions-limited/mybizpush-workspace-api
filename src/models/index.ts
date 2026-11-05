@@ -632,6 +632,41 @@ BlacklistedEmail.init(
   { sequelize, tableName: "blacklisted_emails" },
 );
 
+// ---- AuditLog --------------------------------------------------------------
+// Append-only record of administrative and permission changes. Written through
+// lib/audit.ts; never updated or deleted by the application.
+export class AuditLog extends Model<InferAttributes<AuditLog>, InferCreationAttributes<AuditLog>> {
+  declare id: CreationOptional<string>;
+  declare actorId: CreationOptional<string | null>;
+  declare action: string;
+  declare targetType: string;
+  declare targetId: CreationOptional<string | null>;
+  declare scopeType: CreationOptional<string | null>;
+  declare scopeId: CreationOptional<string | null>;
+  declare before: CreationOptional<Record<string, unknown> | null>;
+  declare after: CreationOptional<Record<string, unknown> | null>;
+  declare ip: CreationOptional<string | null>;
+  declare userAgent: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+}
+AuditLog.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    actorId: { type: DataTypes.UUID, allowNull: true },
+    action: { type: DataTypes.STRING(80), allowNull: false },
+    targetType: { type: DataTypes.STRING(40), allowNull: false },
+    targetId: { type: DataTypes.STRING(80), allowNull: true },
+    scopeType: { type: DataTypes.STRING(20), allowNull: true },
+    scopeId: { type: DataTypes.STRING(80), allowNull: true },
+    before: { type: DataTypes.JSONB, allowNull: true },
+    after: { type: DataTypes.JSONB, allowNull: true },
+    ip: { type: DataTypes.STRING, allowNull: true },
+    userAgent: { type: DataTypes.STRING(400), allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "audit_logs", updatedAt: false },
+);
+
 // ---- CustomRole ------------------------------------------------------------
 // Team roles an executive admin has added beyond the built-in ROLES list. The
 // effective role catalog is ROLES + these, and everyone picks from it.

@@ -5,6 +5,7 @@ import { requireAuth, requireAccessLevel } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { usersRepo } from "./users.repo";
 import { usersService } from "./users.service";
+import { audit } from "../../lib/audit";
 
 export const usersRouter = Router();
 
@@ -45,7 +46,16 @@ usersRouter.patch(
   requireAccessLevel("executive_admin"),
   validateBody(accessLevelSchema),
   asyncHandler(async (req, res) => {
+    const before = await usersRepo.publicById(req.params.id!);
     const user = await usersService.setAccessLevel(req.auth!.sub, req.params.id!, req.body.accessLevel);
+    await audit({
+      req,
+      action: "user.access_level.change",
+      target: { type: "user", id: req.params.id! },
+      scope: { type: "organization" },
+      before: { accessLevel: before?.accessLevel },
+      after: { accessLevel: user.accessLevel },
+    });
     res.json({ user });
   }),
 );
@@ -58,7 +68,16 @@ usersRouter.patch(
   requireAccessLevel("executive_admin"),
   validateBody(rolesSchema),
   asyncHandler(async (req, res) => {
-    res.json({ user: await usersService.setRoles(req.params.id!, req.body.roles) });
+    const before = await usersRepo.publicById(req.params.id!);
+    const user = await usersService.setRoles(req.params.id!, req.body.roles);
+    await audit({
+      req,
+      action: "user.job_titles.change",
+      target: { type: "user", id: req.params.id! },
+      before: { roles: before?.roles },
+      after: { roles: user.roles },
+    });
+    res.json({ user });
   }),
 );
 
@@ -68,7 +87,14 @@ usersRouter.patch(
   requireAccessLevel("executive_admin"),
   validateBody(chiefBadgeSchema),
   asyncHandler(async (req, res) => {
-    res.json({ user: await usersService.setChiefBadge(req.params.id!, req.body.value) });
+    const user = await usersService.setChiefBadge(req.params.id!, req.body.value);
+    await audit({
+      req,
+      action: "user.chief_badge.change",
+      target: { type: "user", id: req.params.id! },
+      after: { chiefBadge: req.body.value },
+    });
+    res.json({ user });
   }),
 );
 
@@ -79,7 +105,14 @@ usersRouter.delete(
   requireAccessLevel("executive_admin"),
   asyncHandler(async (req, res) => {
     const blacklist = req.query.blacklist === "true" || req.body?.blacklist === true;
+    const before = await usersRepo.publicById(req.params.id!);
     await usersService.remove(req.auth!.sub, req.params.id!, blacklist);
+    await audit({
+      req,
+      action: blacklist ? "user.delete_and_block" : "user.delete",
+      target: { type: "user", id: req.params.id! },
+      before: before ? { name: before.name, email: before.email, accessLevel: before.accessLevel } : null,
+    });
     res.status(204).end();
   }),
 );
