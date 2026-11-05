@@ -1,5 +1,6 @@
 import type { CookieOptions, Request, Response } from "express";
-import { unauthorized } from "../../lib/errors";
+import { badRequest, unauthorized } from "../../lib/errors";
+import type { ClientInfo } from "../../lib/jwt";
 import { authService } from "./auth.service";
 
 const REFRESH_COOKIE = "refresh_token";
@@ -55,6 +56,18 @@ function deliverRefreshToken(req: Request, res: Response, token: string): { refr
   return {};
 }
 
+// Where this request comes from, for session and login-history records. The
+// app sends X-Device-Name ("Pixel 8") and X-Platform (ios | android | web).
+function clientInfo(req: Request): ClientInfo {
+  const platform = req.get("x-platform")?.toLowerCase();
+  return {
+    ip: req.ip ?? null,
+    userAgent: req.get("user-agent") ?? null,
+    device: req.get("x-device-name")?.slice(0, 120) ?? null,
+    platform: platform && ["ios", "android", "web"].includes(platform) ? platform : null,
+  };
+}
+
 export const authController = {
   // Step 1 — email a verification code.
   async registerStart(req: Request, res: Response) {
@@ -72,19 +85,20 @@ export const authController = {
     const { user, accessToken, refreshToken } = await authService.verifyRegistration(
       req.body.email,
       req.body.otp,
+      clientInfo(req),
     );
     res.status(201).json({ user, accessToken, ...deliverRefreshToken(req, res, refreshToken) });
   },
 
   async login(req: Request, res: Response) {
-    const { user, accessToken, refreshToken } = await authService.login(req.body);
+    const { user, accessToken, refreshToken } = await authService.login(req.body, clientInfo(req));
     res.json({ user, accessToken, ...deliverRefreshToken(req, res, refreshToken) });
   },
 
   async refresh(req: Request, res: Response) {
     const token = presentedRefreshToken(req);
     if (!token) throw unauthorized("No refresh token");
-    const { accessToken, refreshToken } = await authService.refresh(token);
+    const { accessToken, refreshToken } = await authService.refresh(token, clientInfo(req));
     res.json({ accessToken, ...deliverRefreshToken(req, res, refreshToken) });
   },
 
@@ -94,6 +108,29 @@ export const authController = {
       res.clearCookie(REFRESH_COOKIE, { ...refreshCookieOptions(req), maxAge: undefined });
     }
     res.status(204).end();
+  },
+
+  async sessions(req: Request, res: Response) {
+    const sessions = await authService.sessions(req.auth!.sub, req.auth!.sid);
+    res.json({ sessions });
+  },
+
+  async revokeSession(req: Request, res: Response) {
+    const id = String(req.params.id ?? "");
+    if (!id) throw badRequest("Session id is required");
+    await authService.revokeSession(req.auth!.sub, id);
+    res.status(204).end();
+  },
+
+  async revokeOtherSessions(req: Request, res: Response) {
+    await authService.revokeOtherSessions(req.auth!.sub, req.auth!.sid);
+    res.status(204).end();
+  },
+
+  async loginHistory(req: Request, res: Response) {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+    const events = await authService.loginHistory(req.auth!.sub, limit);
+    res.json({ events });
   },
 
   async me(req: Request, res: Response) {

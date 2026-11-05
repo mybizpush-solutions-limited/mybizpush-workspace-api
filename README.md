@@ -72,6 +72,10 @@ Versioned business endpoints live under `/api/v1`. The infra health check stays 
 | POST   | `/api/v1/auth/refresh`       | refresh cookie or body | rotates refresh, returns new access (mobile: new `refreshToken` in body) |
 | POST   | `/api/v1/auth/logout`        | refresh cookie or body | revokes refresh token           |
 | GET    | `/api/v1/auth/me`            | Bearer          | current user                           |
+| GET    | `/api/v1/auth/sessions`      | Bearer          | my signed-in devices, `current` marks this one |
+| DELETE | `/api/v1/auth/sessions/:id`  | Bearer          | sign one device out                    |
+| POST   | `/api/v1/auth/sessions/revoke-others` | Bearer | sign out every other device            |
+| GET    | `/api/v1/auth/login-history` | Bearer          | my recent sign-ins and failed attempts (`?limit=`, max 100) |
 | POST   | `/api/v1/auth/forgot-password` | — (rate-limited) | emails a reset link (via Resend)    |
 | POST   | `/api/v1/auth/reset-password`  | — (rate-limited) | sets a new password from a token    |
 | GET    | `/api/v1/users`              | Bearer          | list users                             |
@@ -127,6 +131,8 @@ Native apps cannot hold the httpOnly refresh cookie, so they send `X-Client: mob
 - Logout takes `{ "refreshToken": "..." }` and revokes it.
 
 Sending `refreshToken` in the body is treated the same as the header. Browsers keep the cookie flow unchanged.
+
+Optional headers `X-Device-Name` (for example `Pixel 8`) and `X-Platform` (`ios`, `android`, `web`) label the session in `/auth/sessions` and the login history.
 
 ### GitHub setup
 

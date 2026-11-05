@@ -4,17 +4,20 @@ import { badRequest, conflict, forbidden, unauthorized } from "../../lib/errors"
 import { hashPassword, verifyPassword } from "../../lib/password";
 import {
   issueRefreshToken,
+  listSessions,
   rotateRefreshToken,
   revokeAllRefreshTokens,
   revokeRefreshToken,
+  revokeSession,
   signAccessToken,
   verifyRefreshToken,
+  type ClientInfo,
 } from "../../lib/jwt";
 import { emails } from "../../lib/email";
 import { redis } from "../../redis/client";
 import { usersRepo, toPublicUser, type PublicUser } from "../users/users.repo";
 import { usersService } from "../users/users.service";
-import { GoogleAccount, User } from "../../models";
+import { GoogleAccount, LoginEvent, User, type LoginEventKind } from "../../models";
 import type { LoginInput, RegisterInput } from "./auth.schemas";
 
 const RESET_PREFIX = "pwreset:";
@@ -49,10 +52,36 @@ function assertAllowedDomain(email: string): void {
   }
 }
 
-async function buildTokens(user: User): Promise<{ accessToken: string; refreshToken: string }> {
-  const accessToken = signAccessToken({ sub: user.id, email: user.email, accessLevel: user.accessLevel });
-  const refreshToken = await issueRefreshToken(user.id);
-  return { accessToken, refreshToken };
+// Starts a new session: a refresh token tied to a fresh session id, and an
+// access token that carries the same id so the API knows "this device".
+async function buildTokens(user: User, client?: ClientInfo): Promise<{ accessToken: string; refreshToken: string; sid: string }> {
+  const { token: refreshToken, sid } = await issueRefreshToken(user.id, client);
+  const accessToken = signAccessToken({ sub: user.id, email: user.email, accessLevel: user.accessLevel, sid });
+  return { accessToken, refreshToken, sid };
+}
+
+// Record a sign-in attempt. Never blocks or fails the sign-in itself.
+function recordLogin(kind: LoginEventKind, email: string, userId: string | null, client?: ClientInfo, sid?: string): void {
+  void LoginEvent.create({
+    kind,
+    email,
+    userId,
+    sessionId: sid ?? null,
+    ip: client?.ip ?? null,
+    userAgent: client?.userAgent?.slice(0, 400) ?? null,
+    device: client?.device?.slice(0, 120) ?? null,
+    platform: client?.platform?.slice(0, 20) ?? null,
+  }).catch((err) => console.error("login event not recorded", err));
+}
+
+export interface SessionView {
+  id: string;
+  device: string | null;
+  platform: string | null;
+  ip: string | null;
+  createdAt: string | null;
+  lastUsedAt: string | null;
+  current: boolean;
 }
 
 export const authService = {
@@ -87,6 +116,7 @@ export const authService = {
   async verifyRegistration(
     email: string,
     otp: string,
+    client?: ClientInfo,
   ): Promise<{ user: PublicUser; accessToken: string; refreshToken: string }> {
     const key = `${REG_PREFIX}${email}`;
     const raw = await redis.get(key);
@@ -114,34 +144,78 @@ export const authService = {
     await redis.del(key);
     void emails.welcome(user.email, user.name).catch(() => undefined);
 
-    const tokens = await buildTokens(user);
+    const { accessToken, refreshToken, sid } = await buildTokens(user, client);
+    recordLogin("register", user.email, user.id, client, sid);
     const publicUser = (await usersRepo.publicById(user.id))!;
-    return { user: publicUser, ...tokens };
+    return { user: publicUser, accessToken, refreshToken };
   },
 
-  async login(input: LoginInput): Promise<{ user: PublicUser; accessToken: string; refreshToken: string }> {
+  async login(
+    input: LoginInput,
+    client?: ClientInfo,
+  ): Promise<{ user: PublicUser; accessToken: string; refreshToken: string }> {
     assertAllowedDomain(input.email);
     // Either the primary or the secondary email may be used to sign in.
     const user = await usersRepo.rawByEmailOrSecondary(input.email);
-    if (!user) throw unauthorized("Invalid email or password");
+    if (!user) {
+      recordLogin("failed", input.email, null, client);
+      throw unauthorized("Invalid email or password");
+    }
 
     const ok = await verifyPassword(input.password, user.passwordHash);
-    if (!ok) throw unauthorized("Invalid email or password");
+    if (!ok) {
+      recordLogin("failed", input.email, user.id, client);
+      throw unauthorized("Invalid email or password");
+    }
 
-    const tokens = await buildTokens(user);
+    const { accessToken, refreshToken, sid } = await buildTokens(user, client);
+    recordLogin("login", input.email, user.id, client, sid);
     const publicUser = (await usersRepo.publicById(user.id))!;
-    return { user: publicUser, ...tokens };
+    return { user: publicUser, accessToken, refreshToken };
   },
 
   // Rotate the refresh token and mint a new access token.
-  async refresh(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+  async refresh(refreshToken: string, client?: ClientInfo): Promise<{ accessToken: string; refreshToken: string }> {
     const decoded = await verifyRefreshToken(refreshToken);
     const user = await User.findByPk(decoded.sub);
     if (!user) throw unauthorized("User no longer exists");
 
-    const newRefresh = await rotateRefreshToken(decoded.sub, decoded.jti);
-    const accessToken = signAccessToken({ sub: user.id, email: user.email, accessLevel: user.accessLevel });
+    const { token: newRefresh, sid } = await rotateRefreshToken(decoded.sub, decoded.jti, client);
+    const accessToken = signAccessToken({ sub: user.id, email: user.email, accessLevel: user.accessLevel, sid });
     return { accessToken, refreshToken: newRefresh };
+  },
+
+  // Signed-in devices for the "Sessions and devices" screen.
+  async sessions(userId: string, currentSid?: string): Promise<SessionView[]> {
+    const sessions = await listSessions(userId);
+    return sessions.map((s) => ({
+      id: s.sid,
+      device: s.device,
+      platform: s.platform,
+      ip: s.ip,
+      createdAt: s.createdAt || null,
+      lastUsedAt: s.lastUsedAt || null,
+      current: s.sid === currentSid,
+    }));
+  },
+
+  async revokeSession(userId: string, sid: string): Promise<void> {
+    const found = await revokeSession(userId, sid);
+    if (!found) throw badRequest("That session is no longer active");
+  },
+
+  // "Sign out everywhere else": keeps the caller's own session when known.
+  async revokeOtherSessions(userId: string, currentSid?: string): Promise<void> {
+    await revokeAllRefreshTokens(userId, currentSid);
+  },
+
+  async loginHistory(userId: string, limit: number): Promise<LoginEvent[]> {
+    return LoginEvent.findAll({
+      where: { userId },
+      order: [["createdAt", "DESC"]],
+      limit,
+      attributes: ["id", "kind", "ip", "device", "platform", "userAgent", "createdAt"],
+    });
   },
 
   async logout(refreshToken: string | undefined): Promise<void> {
