@@ -1,8 +1,9 @@
 import { Op, type ModelStatic, type Model } from "sequelize";
 import { z } from "zod";
 import { badRequest } from "../../lib/errors";
+import { sequelize } from "../../db/sequelize";
 import { redis } from "../../redis/client";
-import { Comment, Issue, Label, Meeting, Notification, Task, TaskReview, TaskStatusHistory, TaskSubmission, TaskTemplate, User, type ItemType } from "../../models";
+import { Announcement, AnnouncementReceipt, Conversation, ConversationMember, Message, MessageReaction, Comment, Issue, Label, Meeting, Notification, Task, TaskReview, TaskStatusHistory, TaskSubmission, TaskTemplate, User, type ItemType } from "../../models";
 import {
   serializeComment,
   serializeLabel,
@@ -16,6 +17,10 @@ import {
   taskInclude,
   workItemInclude,
 } from "../shared/serializers";
+import { announcementsService, serializeAnnouncement, serializeReceipt } from "../announcements/announcements.service";
+import { editSchema, emojiSchema, readSchema, sendSchema } from "../chat/chat.routes";
+import { serializeConversations, serializeMember, serializeMessage } from "../chat/chat.serialize";
+import { chatService, myConversationIds, type SendInput } from "../chat/chat.service";
 import { reviewSchema, submitSchema, taskStatusSchema } from "../tasks/tasks.schemas";
 import { tasksWorkflow } from "../tasks/tasks.service";
 import { usersRepo } from "../users/users.repo";
@@ -42,6 +47,7 @@ import { SyncTombstone } from "./tombstones";
 export const DELTA_COLLECTIONS = [
   "tasks", "issues", "comments", "notifications", "meetings",
   "taskSubmissions", "taskReviews", "taskStatusHistory", "taskTemplates",
+  "conversations", "conversationMembers", "messages", "announcements", "announcementReceipts",
 ] as const;
 export const REFERENCE_COLLECTIONS = ["users", "departments", "projects", "labels"] as const;
 type DeltaCollection = (typeof DELTA_COLLECTIONS)[number];
@@ -75,8 +81,12 @@ const encodeCursor = (c: Cursor) => Buffer.from(JSON.stringify(c), "utf8").toStr
 interface DeltaSource {
   model: ModelStatic<Model>;
   include?: unknown[];
-  serialize: (row: Model) => unknown;
+  serialize?: (row: Model) => unknown;
+  // For rows whose shape depends on who is reading.
+  serializeAll?: (rows: Model[], userId: string) => Promise<unknown[]>;
   ownerOnly?: boolean; // rows have userId and belong to one user
+  // Limits rows to what this person may see.
+  visibleTo?: (userId: string) => Record<string | symbol, unknown>;
 }
 
 const DELTA: Record<DeltaCollection, DeltaSource> = {
@@ -85,6 +95,33 @@ const DELTA: Record<DeltaCollection, DeltaSource> = {
   taskReviews: { model: TaskReview, serialize: (r) => serializeTaskReview(r as TaskReview) },
   taskStatusHistory: { model: TaskStatusHistory, serialize: (r) => serializeTaskStatusHistory(r as TaskStatusHistory) },
   taskTemplates: { model: TaskTemplate, serialize: (r) => serializeTaskTemplate(r as TaskTemplate) },
+  conversations: {
+    model: Conversation,
+    visibleTo: (userId) => ({ id: { [Op.in]: myConversationIds(userId) } }),
+    serializeAll: (rows, userId) => serializeConversations(rows as Conversation[], userId, { withCounts: false }),
+  },
+  conversationMembers: {
+    model: ConversationMember,
+    visibleTo: (userId) => ({ conversationId: { [Op.in]: myConversationIds(userId) }, leftAt: null }),
+    serialize: (r) => serializeMember(r as ConversationMember),
+  },
+  messages: {
+    model: Message,
+    include: [{ model: MessageReaction, as: "reactions" }],
+    visibleTo: (userId) => ({ conversationId: { [Op.in]: myConversationIds(userId) } }),
+    serialize: (r) => serializeMessage(r as Message),
+  },
+  announcements: {
+    model: Announcement,
+    visibleTo: (userId) => ({
+      [Op.or]: [
+        { createdBy: userId },
+        { id: { [Op.in]: sequelize.literal(`(SELECT announcement_id FROM announcement_receipts WHERE user_id = ${sequelize.escape(userId)})`) } },
+      ],
+    }),
+    serialize: (r) => serializeAnnouncement(r as Announcement),
+  },
+  announcementReceipts: { model: AnnouncementReceipt, ownerOnly: true, serialize: (r) => serializeReceipt(r as AnnouncementReceipt) },
   issues: { model: Issue, include: workItemInclude, serialize: (r) => serializeWorkItem(r as Issue, "issue") },
   comments: {
     model: Comment,
@@ -130,6 +167,7 @@ export async function pull(
     const since = cursor.t[name] ? new Date(cursor.t[name]!) : new Date(0);
     const where: Record<string | symbol, unknown> = { updatedAt: { [Op.gt]: since } };
     if (source.ownerOnly) where.userId = userId;
+    if (source.visibleTo) Object.assign(where, source.visibleTo(userId));
 
     const rows = await source.model.findAll({
       where,
@@ -144,14 +182,17 @@ export async function pull(
       where: {
         collection: name,
         deletedAt: { [Op.gt]: since },
-        ...(source.ownerOnly ? { userId } : {}),
+        // A tombstone with a user is for that person alone, such as someone
+        // removed from a conversation that carries on without them.
+        userId: source.ownerOnly ? userId : { [Op.or]: [null, userId] },
       },
       attributes: ["recordId"],
       order: [["deletedAt", "ASC"]],
       limit: 5_000,
     });
 
-    changes[name] = { upserted: page.map(source.serialize), deleted: tombstones.map((t) => t.recordId) };
+    const upserted = source.serializeAll ? await source.serializeAll(page, userId) : page.map((r) => source.serialize!(r));
+    changes[name] = { upserted, deleted: tombstones.map((t) => t.recordId) };
 
     if (more) {
       hasMore = true;
@@ -185,6 +226,15 @@ export const mutationSchema = z.object({
     "issue.status",
     "comment.create",
     "notification.read",
+    "conversation.direct",
+    "conversation.read",
+    "message.send",
+    "message.edit",
+    "message.delete",
+    "message.react",
+    "message.unreact",
+    "announcement.read",
+    "announcement.acknowledge",
   ]),
   recordId: z.string().uuid().optional(),
   payload: z.record(z.unknown()).default({}),
@@ -273,6 +323,36 @@ async function apply(userId: string, m: Mutation): Promise<MutationResult> {
   if (m.type === "notification.read") {
     if (!m.recordId) throw badRequest("recordId is required");
     return { mutationId: m.mutationId, status: "applied", record: await notificationsService.markRead(m.recordId, userId) };
+  }
+
+  const needRecord = (): string => {
+    if (!m.recordId) throw badRequest("recordId is required");
+    return m.recordId;
+  };
+  const applied = (record: unknown): MutationResult => ({ mutationId: m.mutationId, status: "applied", record });
+  switch (m.type) {
+    case "conversation.direct": {
+      const { userId: other } = z.object({ userId: z.string().uuid() }).parse(m.payload);
+      return applied((await chatService.openDirect(userId, other, m.recordId)).conversation);
+    }
+    case "conversation.read":
+      return applied(await chatService.read(needRecord(), readSchema.parse(m.payload).seq, userId));
+    case "message.send": {
+      const { conversationId, ...rest } = sendSchema.extend({ conversationId: z.string().uuid() }).parse({ ...m.payload, id: m.recordId ?? m.payload.id });
+      return applied((await chatService.send(conversationId, rest as SendInput, userId)).message);
+    }
+    case "message.edit":
+      return applied(await chatService.edit(needRecord(), editSchema.parse(m.payload), userId));
+    case "message.delete":
+      return applied(await chatService.remove(needRecord(), userId));
+    case "message.react":
+      return applied(await chatService.react(needRecord(), emojiSchema.parse(m.payload).emoji, true, userId));
+    case "message.unreact":
+      return applied(await chatService.react(needRecord(), emojiSchema.parse(m.payload).emoji, false, userId));
+    case "announcement.read":
+      return applied(await announcementsService.markRead(needRecord(), userId));
+    case "announcement.acknowledge":
+      return applied(await announcementsService.acknowledge(needRecord(), userId));
   }
 
   throw badRequest(`Unsupported mutation ${m.type}`);

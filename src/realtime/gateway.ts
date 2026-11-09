@@ -10,8 +10,8 @@ import { userRoom } from "./events";
 // access token they use for HTTP:
 //   io(API_URL, { path: "/api/socket", auth: { token: accessToken } })
 // Each connection joins `user:<id>`, the only room this gateway manages; the
-// server pushes to it (notifications, badge counts, sync hints). Clients never
-// broadcast to each other through it.
+// server pushes to it (notifications, badge counts, messages, sync hints). The one
+// event clients send is `typing`, which the server checks and relays itself.
 
 let io: Server | null = null;
 let pub: Redis | null = null;
@@ -48,6 +48,15 @@ export function attachRealtime(server: HttpServer): Server {
     const userId: string = socket.data.auth.sub;
     void socket.join(userRoom(userId));
     socket.emit("ready", { userId });
+    // Membership is checked by the service. Loaded lazily to keep the gateway
+    // free of the domain code at startup.
+    socket.on("typing", (payload: { conversationId?: unknown; isTyping?: unknown }) => {
+      if (typeof payload?.conversationId !== "string") return;
+      const { conversationId, isTyping } = payload;
+      void import("../modules/chat/chat.service")
+        .then(({ chatService }) => chatService.typing(conversationId, isTyping === true, userId))
+        .catch(() => undefined); // not a member, or the conversation is gone
+    });
   });
 
   console.info("✓ Realtime gateway on /api/socket");

@@ -9,6 +9,7 @@ import { sequelize } from "../db/sequelize";
 import { TASK_STATUSES, type TaskStatus } from "./task-status";
 
 export * from "./task-status";
+export * from "./chat";
 
 // Domain enums (kept in sync with ui/src/types/index.ts).
 export const ACCESS_LEVELS = ["member", "admin", "chief", "executive_admin"] as const;
@@ -30,6 +31,8 @@ export const RECORD_TYPES = [
   "query",
   "content",
   "campaign",
+  "conversation",
+  "message",
   "target",
   "project",
   "product",
@@ -43,6 +46,7 @@ export const ACTIVITY_KINDS = [
 export const NOTIFICATION_KINDS = [
   "assigned", "mentioned", "feedback_requested", "status_changed", "commented",
   "submitted", "approved", "rejected", "revision_requested", "reviewer_assigned", "blocked", "deadline",
+  "message", "announcement", "meeting", "query", "target", "appraisal", "campaign", "content", "integration_failure",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 export const PR_STATUSES = ["open", "merged", "closed", "draft"] as const;
@@ -477,6 +481,7 @@ export class Attachment extends Model<InferAttributes<Attachment>, InferCreation
   declare type: CreationOptional<string>;
   declare url: string;
   declare publicId: CreationOptional<string | null>;
+  declare uploadedBy: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
 }
 Attachment.init(
@@ -489,6 +494,7 @@ Attachment.init(
     type: { type: DataTypes.STRING, allowNull: false, defaultValue: "" },
     url: { type: DataTypes.STRING, allowNull: false },
     publicId: { type: DataTypes.STRING, allowNull: true },
+    uploadedBy: { type: DataTypes.UUID, allowNull: true },
     createdAt: DataTypes.DATE,
   },
   { sequelize, tableName: "attachments", updatedAt: false },
@@ -503,6 +509,7 @@ export class Notification extends Model<InferAttributes<Notification>, InferCrea
   declare itemType: RecordType;
   declare fromUserId: CreationOptional<string | null>;
   declare message: string;
+  declare data: CreationOptional<Record<string, unknown> | null>;
   declare read: CreationOptional<boolean>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
@@ -516,6 +523,7 @@ Notification.init(
     itemType: { type: DataTypes.ENUM(...RECORD_TYPES), allowNull: false },
     fromUserId: { type: DataTypes.UUID, allowNull: true },
     message: { type: DataTypes.TEXT, allowNull: false },
+    data: { type: DataTypes.JSONB, allowNull: true },
     read: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
@@ -673,6 +681,10 @@ export class NotificationPreference extends Model<
   declare mentions: CreationOptional<boolean>;
   declare events: CreationOptional<boolean>;
   declare digestFrequency: CreationOptional<(typeof DIGEST_FREQUENCIES)[number]>;
+  declare quietEnabled: CreationOptional<boolean>;
+  declare quietStart: CreationOptional<string>;
+  declare quietEnd: CreationOptional<string>;
+  declare quietTimezone: CreationOptional<string>;
 }
 NotificationPreference.init(
   {
@@ -683,6 +695,10 @@ NotificationPreference.init(
     mentions: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     events: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     digestFrequency: { type: DataTypes.ENUM(...DIGEST_FREQUENCIES), allowNull: false, defaultValue: "daily" },
+    quietEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    quietStart: { type: DataTypes.STRING(5), allowNull: false, defaultValue: "22:00" },
+    quietEnd: { type: DataTypes.STRING(5), allowNull: false, defaultValue: "07:00" },
+    quietTimezone: { type: DataTypes.STRING(60), allowNull: false, defaultValue: "Africa/Lagos" },
   },
   { sequelize, tableName: "notification_preferences", timestamps: false },
 );

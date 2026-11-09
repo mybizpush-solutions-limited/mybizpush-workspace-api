@@ -5,6 +5,8 @@ import { Activity, CLOSED_TASK_STATUSES, Meeting, Notification, Product, Project
 import { productsService } from "../products/products.service";
 import { grantsFor } from "../access/engine";
 import { projectsWith } from "../access/reach";
+import { announcementsService } from "../announcements/announcements.service";
+import { chatUnreadTotal } from "../chat/chat.service";
 
 // Home, workspace switcher and badges (API-CHANGES A108, HOME-01, SYS-02).
 // Everything is scoped to the caller and, when given, to one product.
@@ -79,15 +81,16 @@ export const homeService = {
   },
 
   async badges(userId: string) {
-    const [mine, approvable, notifications, meetings] = await Promise.all([
+    const [mine, approvable, notifications, meetings, chat] = await Promise.all([
       assignedTaskIds(userId),
       projectsWith(userId, "task.approve"),
       Notification.count({ where: { userId, read: false } }),
       this.meetingsToday(userId),
+      chatUnreadTotal(userId),
     ]);
     const myOpen = mine.length ? await Task.count({ where: { id: mine, status: myOpenStatus } }) : 0;
     const toApprove = await Task.count({ where: awaitingReview(userId, approvable) });
-    return { tasks: myOpen + toApprove, notifications, calendar: meetings.length, chat: 0 };
+    return { tasks: myOpen + toApprove, notifications, calendar: meetings.length, chat };
   },
 
   async meetingsToday(userId: string) {
@@ -107,6 +110,7 @@ export const homeService = {
     const approvable = intersect(await projectsWith(userId, "task.approve"), scopeProjects);
     const now = new Date();
 
+    const pendingAcks = await announcementsService.pendingAcknowledgements(userId);
     const [myOpen, toApprove, overdue, dueToday, meetings, unread, activity] = await Promise.all([
       mine.length ? Task.count({ where: { id: mine, status: myOpenStatus, ...inScope } }) : 0,
       Task.findAll({
@@ -131,6 +135,7 @@ export const homeService = {
     );
 
     const attention = [
+      ...pendingAcks.map((a) => ({ kind: "announcement" as const, itemType: "announcement", itemId: a.id, title: a.title, meta: "", dueAt: null })),
       ...toApprove.map((t) => ({ kind: "approval" as const, itemType: "task", itemId: t.id, title: t.title, meta: projectNames.get(t.projectId) ?? "", dueAt: t.dueDate?.toISOString() ?? null })),
       ...meetings
         .filter((m) => m.startsAt > now)

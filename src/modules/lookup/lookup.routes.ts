@@ -5,6 +5,8 @@ import { asyncHandler, badRequest } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { redis } from "../../redis/client";
+import { announcementsService } from "../announcements/announcements.service";
+import { chatService } from "../chat/chat.service";
 import { AccessRole, Department, Issue, Meeting, Product, ProductMember, Project, Task, Team, User } from "../../models";
 
 // Lookup for every picker sheet (API-CHANGES A109, SYS-05, SYS-07) and global
@@ -122,14 +124,17 @@ searchRouter.get(
   asyncHandler(async (req, res) => {
     const q = String(req.query.q ?? "").trim().slice(0, 80);
     if (q.length < 2) return res.json({ q, groups: [] });
-    const [people, products, projects, tasks, issues, meetings] = await Promise.all([
+    const [people, products, projects, tasks, issues, meetings, messages, announcements] = await Promise.all([
       find("staff", q, 5),
       find("product", q, 5),
       find("project", q, 5),
       Task.findAll({ where: { title: like(q) }, attributes: ["id", "title", "status", "projectId"], order: [["updatedAt", "DESC"]], limit: 5 }),
       Issue.findAll({ where: { title: like(q) }, attributes: ["id", "title", "status", "projectId"], order: [["updatedAt", "DESC"]], limit: 5 }),
       Meeting.findAll({ where: { title: like(q) }, attributes: ["id", "title", "startsAt"], order: [["startsAt", "DESC"]], limit: 5 }),
+      chatService.search(req.auth!.sub, { q, limit: 5 }),
+      announcementsService.list(req.auth!.sub, { state: "active" }),
     ]);
+    const matching = (s: string) => s.toLowerCase().includes(q.toLowerCase());
     const groups = [
       { type: "people", items: people },
       { type: "products", items: products },
@@ -137,6 +142,8 @@ searchRouter.get(
       { type: "tasks", items: tasks.map((t) => ({ id: t.id, label: t.title, sublabel: t.status })) },
       { type: "issues", items: issues.map((t) => ({ id: t.id, label: t.title, sublabel: t.status })) },
       { type: "meetings", items: meetings.map((m) => ({ id: m.id, label: m.title, sublabel: m.startsAt.toISOString() })) },
+      { type: "messages", items: messages.map((r) => ({ id: r.message.id, label: r.message.body.slice(0, 120), sublabel: r.conversationName, conversationId: r.message.conversationId })) },
+      { type: "announcements", items: announcements.filter((a) => matching(a.title) || matching(a.body)).slice(0, 5).map((a) => ({ id: a.id, label: a.title, sublabel: a.publishedAt ?? "" })) },
     ].filter((g) => g.items.length);
     res.json({ q, groups });
   }),

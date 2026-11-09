@@ -24,7 +24,9 @@ export type ResourceType = "image" | "video" | "raw" | "auto";
 export const ALLOWED_ATTACHMENT_EXTENSIONS = [
   ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".avif",
   ".mp4", ".mov", ".webm", ".m4v",
-  ".pdf", ".doc", ".docx", ".txt", ".csv", ".md", ".json", ".log", ".zip",
+  // Voice notes and audio (recorded on phones, so mostly m4a and caf).
+  ".m4a", ".mp3", ".aac", ".wav", ".ogg", ".opus", ".caf", ".3gp",
+  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".csv", ".md", ".json", ".log", ".zip",
 ];
 export const MAX_ATTACHMENT_MB = 25;
 

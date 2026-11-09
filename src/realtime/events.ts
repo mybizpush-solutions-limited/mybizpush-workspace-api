@@ -16,6 +16,14 @@ export interface ServerEvents {
   badges: { notifications: number; tasks?: number; calendar?: number; chat?: number };
   // Records in these collections changed: the app runs a sync pull (A006).
   "sync:changed": { collections: string[] };
+  // Chat (P3). `message` is the same shape the REST endpoints return.
+  "message:new": { message: Record<string, unknown> };
+  "message:updated": { message: Record<string, unknown> };
+  "message:deleted": { message: Record<string, unknown> };
+  typing: { conversationId: string; userId: string; isTyping: boolean };
+  read: { conversationId: string; userId: string; lastReadSeq: number };
+  "conversation:updated": { conversationId: string };
+  "announcement:new": { announcementId: string };
 }
 
 let emitter: Emitter | null = null;

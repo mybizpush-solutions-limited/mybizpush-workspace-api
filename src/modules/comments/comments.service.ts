@@ -1,4 +1,4 @@
-import { Comment, User, type ItemType } from "../../models";
+import { Comment, User, type RecordType } from "../../models";
 import { serializeComment } from "../shared/serializers";
 import { logActivity, notify } from "../shared/events";
 import { githubSyncService } from "../github/github.sync.service";
@@ -13,7 +13,7 @@ export const commentsService = {
     return rows.map(serializeComment);
   },
 
-  async add(input: { id?: string; itemId: string; itemType: ItemType; authorId: string; body: string; mentions?: string[] }) {
+  async add(input: { id?: string; itemId: string; itemType: RecordType; authorId: string; body: string; mentions?: string[] }) {
     const comment = await Comment.create({
       ...(input.id ? { id: input.id } : {}),
       itemId: input.itemId,

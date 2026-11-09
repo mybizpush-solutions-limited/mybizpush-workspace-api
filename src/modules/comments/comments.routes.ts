@@ -8,9 +8,12 @@ import { commentsService } from "./comments.service";
 export const commentsRouter = Router();
 commentsRouter.use(requireAuth);
 
+// Private records (chat, staff queries) have their own threads.
+const COMMENTABLE = ["task", "issue", "meeting", "announcement", "content", "campaign", "target", "project", "product"] as const;
+
 const addSchema = z.object({
   itemId: z.string().uuid(),
-  itemType: z.enum(["task", "issue"]),
+  itemType: z.enum(COMMENTABLE),
   body: z.string().trim().min(1).max(8000),
   mentions: z.array(z.string().uuid()).optional(),
 });

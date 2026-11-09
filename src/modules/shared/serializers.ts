@@ -252,6 +252,7 @@ export function serializeNotification(n: Notification) {
     itemType: n.itemType,
     fromUserId: n.fromUserId ?? null,
     message: n.message,
+    data: n.data ?? null,
     read: n.read,
     createdAt: n.createdAt.toISOString(),
   };

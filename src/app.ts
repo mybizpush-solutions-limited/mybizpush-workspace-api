@@ -41,6 +41,8 @@ import { devicesRouter } from "./modules/devices/devices.routes";
 import { syncRouter } from "./modules/sync/sync.routes";
 import { tasksExtRouter } from "./modules/tasks/tasks.routes";
 import { groupsRouter } from "./modules/groups/groups.routes";
+import { conversationsRouter, messagesRouter } from "./modules/chat/chat.routes";
+import { announcementsRouter } from "./modules/announcements/announcements.routes";
 
 // All versioned business endpoints live under this prefix.
 export const API_PREFIX = "/api/v1";
@@ -95,6 +97,9 @@ export function createApp() {
   v1.use("/tasks", tasksExtRouter);
   v1.use("/tasks", tasksRouter);
   v1.use("/groups", groupsRouter);
+  v1.use("/conversations", conversationsRouter);
+  v1.use("/messages", messagesRouter);
+  v1.use("/announcements", announcementsRouter);
   v1.use("/issues", issuesRouter);
   v1.use("/comments", commentsRouter);
   v1.use("/activity", activityRouter);

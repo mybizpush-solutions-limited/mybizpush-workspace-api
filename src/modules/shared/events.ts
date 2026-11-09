@@ -1,4 +1,6 @@
-import { Activity, Notification, NotificationPreference, User } from "../../models";
+import { Activity, Notification, User } from "../../models";
+import { categoryOf } from "../notifications/notification.kinds";
+import { channelsFor } from "../notifications/notification.preferences";
 import type { NotificationKind, RecordType } from "../../models";
 import { emails } from "../../lib/email";
 import { env } from "../../config/env";
@@ -29,36 +31,12 @@ export function logActivity(input: {
   });
 }
 
-// Which notification preference gates the email for each kind. Defaults apply
-// when the user has no preferences row yet (we email by default — comprehensive).
-const PREF_FOR_KIND: Partial<Record<NotificationKind, "pendingTasks" | "feedbackRequests" | "mentions" | "events">> = {
-  assigned: "pendingTasks",
-  status_changed: "events",
-  feedback_requested: "feedbackRequests",
-  mentioned: "mentions",
-  commented: "events",
-  submitted: "pendingTasks",
-  reviewer_assigned: "pendingTasks",
-  revision_requested: "pendingTasks",
-  deadline: "pendingTasks",
-};
-const PREF_DEFAULT: Record<string, boolean> = {
-  pendingTasks: true,
-  feedbackRequests: true,
-  mentions: true,
-  events: true,
-};
-
-// Best-effort real-time email alert for a notification (honours the recipient's
-// preferences; no-ops without Resend configured).
-async function emailAlert(userId: string, kind: NotificationKind, message: string): Promise<void> {
+// Best-effort real-time email alert for a notification (no-ops without Resend
+// configured). The caller has already checked the recipient's preferences.
+async function emailAlert(userId: string, message: string): Promise<void> {
   try {
     const user = await User.findByPk(userId, { attributes: ["email", "name"] });
     if (!user?.email) return;
-    const flag = PREF_FOR_KIND[kind] ?? "events";
-    const pref = await NotificationPreference.findByPk(userId);
-    const enabled = pref ? Boolean((pref as unknown as Record<string, boolean>)[flag]) : PREF_DEFAULT[flag];
-    if (!enabled) return;
     await emails.activityAlert(user.email, user.name, { message, url: `${env.APP_URL}/inbox` });
   } catch {
     /* email is best-effort */
@@ -97,8 +75,18 @@ export async function notify(input: {
   itemId: string;
   itemType: RecordType;
   message: string;
+  data?: Record<string, unknown> | null;
 }): Promise<void> {
   if (input.userId === input.fromUserId) return;
+  const channels = await channelsFor(input.userId, categoryOf(input.kind));
+  if (channels.email) void emailAlert(input.userId, input.message);
+  // Push only, with nothing in the notification list (chat messages by default).
+  if (!channels.inApp) {
+    if (channels.push) {
+      void enqueue("push", "direct", { ...input, data: input.data ?? null }).catch((err) => console.error("push not queued", err));
+    }
+    return;
+  }
   const notification = await Notification.create({
     userId: input.userId,
     fromUserId: input.fromUserId,
@@ -106,9 +94,13 @@ export async function notify(input: {
     itemId: input.itemId,
     itemType: input.itemType,
     message: input.message,
+    data: input.data ?? null,
     read: false,
   });
-  void emailAlert(input.userId, input.kind, input.message);
+  if (!channels.push) {
+    void announceNotification(notification);
+    return;
+  }
   // Push to the recipient's phones. The job id is the notification id, so a
   // retry of this request can never push the same notification twice.
   void enqueue("push", "notification", { notificationId: notification.id }, { jobId: `notification-${notification.id}` }).catch(
