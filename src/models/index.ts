@@ -15,6 +15,7 @@ export * from "./calendar";
 export * from "./performance";
 export * from "./marketing";
 export * from "./integrations";
+export * from "./account";
 
 // Domain enums (kept in sync with ui/src/types/index.ts).
 export const ACCESS_LEVELS = ["member", "admin", "chief", "executive_admin"] as const;
@@ -98,6 +99,11 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   declare suspendedAt: CreationOptional<Date | null>;
   declare suspendedReason: CreationOptional<string | null>;
   declare dateJoined: CreationOptional<string | null>;
+  // Two-step sign-in (A902). The secret is encrypted and never leaves the API.
+  declare totpSecretEncrypted: CreationOptional<string | null>;
+  declare totpEnabled: CreationOptional<boolean>;
+  declare totpConfirmedAt: CreationOptional<Date | null>;
+  declare totpLastStep: CreationOptional<number>;
   declare reportsToId: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
@@ -122,6 +128,10 @@ User.init(
     suspendedAt: { type: DataTypes.DATE, allowNull: true },
     suspendedReason: { type: DataTypes.STRING(240), allowNull: true },
     dateJoined: { type: DataTypes.DATEONLY, allowNull: true },
+    totpSecretEncrypted: { type: DataTypes.TEXT, allowNull: true },
+    totpEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    totpConfirmedAt: { type: DataTypes.DATE, allowNull: true },
+    totpLastStep: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 },
     reportsToId: { type: DataTypes.UUID, allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,

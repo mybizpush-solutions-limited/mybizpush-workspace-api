@@ -19,6 +19,7 @@ import { usersRepo, toPublicUser, type PublicUser } from "../users/users.repo";
 import { usersService } from "../users/users.service";
 import { GoogleAccount, LoginEvent, User, type LoginEventKind } from "../../models";
 import type { LoginInput, RegisterInput } from "./auth.schemas";
+import { twoStepService } from "./twoStep.service";
 
 // Suspended staff can't sign in or refresh (A106). A distinct code lets the
 // app show the "account paused" screen (AUTH-07).
@@ -159,7 +160,7 @@ export const authService = {
   async login(
     input: LoginInput,
     client?: ClientInfo,
-  ): Promise<{ user: PublicUser; accessToken: string; refreshToken: string }> {
+  ): Promise<{ user: PublicUser; accessToken: string; refreshToken: string } | { twoStepRequired: true; challengeToken: string }> {
     assertAllowedDomain(input.email);
     // Either the primary or the secondary email may be used to sign in.
     const user = await usersRepo.rawByEmailOrSecondary(input.email);
@@ -175,10 +176,37 @@ export const authService = {
     }
     assertActive(user);
 
+    // The password was right, but that isn't a session yet for these people.
+    if (user.totpEnabled) return { twoStepRequired: true, challengeToken: await twoStepService.createChallenge(user.id) };
+
     const { accessToken, refreshToken, sid } = await buildTokens(user, client);
     recordLogin("login", input.email, user.id, client, sid);
     const publicUser = (await usersRepo.publicById(user.id))!;
     return { user: publicUser, accessToken, refreshToken };
+  },
+
+  // Finishes a sign-in that needed a code.
+  async verifyTwoStep(challengeToken: string, code: string, client?: ClientInfo): Promise<{ user: PublicUser; accessToken: string; refreshToken: string }> {
+    let user: User;
+    try {
+      user = await twoStepService.verifyChallenge(challengeToken, code);
+    } catch (err) {
+      if (err instanceof AppError && err.code === "invalid_code") recordLogin("failed", "two-step", null, client);
+      throw err;
+    }
+    assertActive(user); // they may have been suspended since entering the password
+    const { accessToken, refreshToken, sid } = await buildTokens(user, client);
+    recordLogin("login", user.email, user.id, client, sid);
+    return { user: (await usersRepo.publicById(user.id))!, accessToken, refreshToken };
+  },
+
+  // A session for someone who just proved who they are another way (accepting an
+  // invitation). Not reachable without having done so.
+  async sessionFor(user: User, client?: ClientInfo): Promise<{ user: PublicUser; accessToken: string; refreshToken: string }> {
+    assertActive(user);
+    const { accessToken, refreshToken, sid } = await buildTokens(user, client);
+    recordLogin("register", user.email, user.id, client, sid);
+    return { user: (await usersRepo.publicById(user.id))!, accessToken, refreshToken };
   },
 
   // Rotate the refresh token and mint a new access token.
@@ -244,7 +272,7 @@ export const authService = {
 
   // Issue a reset token + email. Always resolves (never reveals whether the
   // email exists) to avoid account enumeration.
-  async requestPasswordReset(email: string, useGoogle = false): Promise<void> {
+  async requestPasswordReset(email: string, useGoogle = false, opts: { mobile?: boolean } = {}): Promise<void> {
     const user = await usersRepo.rawByEmailOrSecondary(email);
     if (!user) {
       // Anti-enumeration: the client still gets {ok:true}. Log server-side so we
@@ -263,7 +291,9 @@ export const authService = {
     await redis.set(`${RESET_PREFIX}${token}`, user.id, "EX", RESET_TTL_SECONDS);
     const link = `${env.APP_URL}/reset-password?token=${token}`;
     console.info(`[reset] sending reset link to ${to}`);
-    await emails.passwordReset(to, link).catch(() => undefined);
+    // Built here, never from the request, so a token can't be sent somewhere else.
+    const appLink = opts.mobile ? `${env.MOBILE_APP_SCHEME}://reset-password?token=${token}` : null;
+    await emails.passwordReset(to, link, appLink).catch(() => undefined);
   },
 
   // Logged-in user changes their own password: email a 6-digit code, then verify

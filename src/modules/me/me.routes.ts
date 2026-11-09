@@ -9,6 +9,8 @@ import { homeService } from "./home.service";
 import { profileService } from "./profile.service";
 import { departmentsService } from "../departments/departments.service";
 import { authService } from "../auth/auth.service";
+import { ACTIVITY_KINDS } from "../../models";
+import { activityFeed } from "./activity.feed";
 
 // "My work" aggregations backing the dashboard and the My Queue view, plus the
 // caller's own self-service profile / membership / onboarding actions.
@@ -70,6 +72,34 @@ meRouter.patch(
     res.json({ user: await profileService.updateProfile(req.auth!.sub, req.body) });
   }),
 );
+
+// The profile sheet (ME-02, AUTH-08). Only ever the caller's own.
+meRouter.patch(
+  "/profile",
+  validateBody(
+    z.object({
+      name: z.string().trim().min(1).max(120).optional(),
+      phone: z.string().trim().max(32).nullable().optional(),
+      secondaryEmail: z.string().trim().email().nullable().optional(),
+      jobTitles: z.array(z.string().trim().min(1).max(40)).max(50).optional(),
+    }),
+  ),
+  asyncHandler(async (req, res) => {
+    res.json(await profileService.updateFull(req.auth!.sub, req.body));
+  }),
+);
+
+meRouter.get("/activity", asyncHandler(async (req, res) => {
+  const q = z
+    .object({
+      productId: z.string().uuid().optional(),
+      kind: z.enum(ACTIVITY_KINDS).optional(),
+      before: z.string().max(200).optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    })
+    .parse(req.query);
+  res.json(await activityFeed(req.auth!.sub, q));
+}));
 
 meRouter.post(
   "/avatar",

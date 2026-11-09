@@ -191,6 +191,8 @@ export const staffService = {
     const inv = await Invitation.findOne({ where: { tokenHash: hash(token) } });
     if (!inv || inv.acceptedAt || inv.revokedAt || inv.expiresAt < new Date()) throw badRequest("This invitation is no longer valid");
     if (await usersRepo.emailTaken(inv.email)) throw conflict("An account with this email already exists");
+    // Blocked after the invitation went out.
+    if (await usersService.isBlacklisted(inv.email)) throw forbidden(`${inv.email} is blocked from joining`);
     const name = (input.name ?? inv.name ?? "").trim();
     if (!name) throw badRequest("Your name is required");
     const passwordHash = await hashPassword(input.password);

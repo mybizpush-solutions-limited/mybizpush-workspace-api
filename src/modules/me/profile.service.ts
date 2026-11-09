@@ -43,6 +43,26 @@ export const profileService = {
     return publicUser(userId);
   },
 
+  // A new secondary address starts proving itself, and takes effect only once the
+  // code comes back: it can sign in, so it can't just be claimed. Checked first, so
+  // a rejected address doesn't leave half of the form saved.
+  async updateFull(userId: string, patch: { name?: string; phone?: string | null; secondaryEmail?: string | null; jobTitles?: string[] }) {
+    const user = await User.findByPk(userId);
+    if (!user) throw notFound("User not found");
+    // Loaded here because the auth service reaches back into the users modules.
+    const { authService } = await import("../auth/auth.service");
+    let secondaryEmailPending: string | null = null;
+    if (patch.secondaryEmail === null) {
+      await authService.removeSecondaryEmail(userId);
+    } else if (patch.secondaryEmail !== undefined && patch.secondaryEmail.toLowerCase() !== user.secondaryEmail?.toLowerCase()) {
+      await authService.requestSecondaryEmailOtp(userId, patch.secondaryEmail);
+      secondaryEmailPending = patch.secondaryEmail.toLowerCase();
+    }
+    await this.updateProfile(userId, { name: patch.name, roles: patch.jobTitles });
+    if (patch.phone !== undefined) await User.update({ phone: patch.phone }, { where: { id: userId } });
+    return { user: await publicUser(userId), secondaryEmailPending };
+  },
+
   // Upload an avatar image to Cloudinary, replacing any previous one.
   async setAvatar(userId: string, file: AvatarFile): Promise<PublicUser> {
     const ext = file.originalname.slice(file.originalname.lastIndexOf(".")).toLowerCase();

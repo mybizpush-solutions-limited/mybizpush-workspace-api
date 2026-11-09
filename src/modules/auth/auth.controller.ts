@@ -58,7 +58,7 @@ function deliverRefreshToken(req: Request, res: Response, token: string): { refr
 
 // Where this request comes from, for session and login-history records. The
 // app sends X-Device-Name ("Pixel 8") and X-Platform (ios | android | web).
-function clientInfo(req: Request): ClientInfo {
+export function clientInfo(req: Request): ClientInfo {
   const platform = req.get("x-platform")?.toLowerCase();
   return {
     ip: req.ip ?? null,
@@ -91,7 +91,15 @@ export const authController = {
   },
 
   async login(req: Request, res: Response) {
-    const { user, accessToken, refreshToken } = await authService.login(req.body, clientInfo(req));
+    const result = await authService.login(req.body, clientInfo(req));
+    // Nothing to deliver yet: no tokens exist until the code is verified.
+    if ("twoStepRequired" in result) return res.json(result);
+    const { user, accessToken, refreshToken } = result;
+    res.json({ user, accessToken, ...deliverRefreshToken(req, res, refreshToken) });
+  },
+
+  async twoStepVerify(req: Request, res: Response) {
+    const { user, accessToken, refreshToken } = await authService.verifyTwoStep(req.body.challengeToken, req.body.code, clientInfo(req));
     res.json({ user, accessToken, ...deliverRefreshToken(req, res, refreshToken) });
   },
 
@@ -139,7 +147,7 @@ export const authController = {
   },
 
   async forgotPassword(req: Request, res: Response) {
-    await authService.requestPasswordReset(req.body.email, req.body.useGoogle === true);
+    await authService.requestPasswordReset(req.body.email, req.body.useGoogle === true, { mobile: req.get("x-client")?.toLowerCase() === "mobile" });
     // Always 200 — don't reveal whether the account exists.
     res.json({ ok: true });
   },

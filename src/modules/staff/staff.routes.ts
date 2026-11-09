@@ -7,6 +7,8 @@ import { requireAuth, requirePermission } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { rateLimit } from "../../middleware/rateLimit";
 import { EMPLOYMENT_STATUSES } from "../../models";
+import { clientInfo } from "../auth/auth.controller";
+import { authService } from "../auth/auth.service";
 import { serializeInvitation, staffService } from "./staff.service";
 import { fixRow, getImport, preview, saveImport, summarize } from "./staff.import";
 import { EXPORT_GROUPS, buildRows, toCsv, toXlsx, type ExportGroup } from "./staff.export";
@@ -250,6 +252,11 @@ invitationsPublicRouter.post(
   asyncHandler(async (req, res) => {
     const user = await staffService.accept(req.params.token!, req.body);
     await audit({ actorId: user.id, req, action: "staff.invite.accept", target: { type: "user", id: user.id } });
+    // Apps get a session straight away. Browsers sign in themselves, as they always have.
+    if (req.get("x-client")?.toLowerCase() === "mobile") {
+      const session = await authService.sessionFor(user, clientInfo(req));
+      return res.status(201).json({ ok: true, email: user.email, ...session });
+    }
     res.status(201).json({ ok: true, email: user.email });
   }),
 );

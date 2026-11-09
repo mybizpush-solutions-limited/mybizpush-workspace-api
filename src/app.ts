@@ -46,6 +46,7 @@ import { conversationsRouter, messagesRouter } from "./modules/chat/chat.routes"
 import { announcementsRouter } from "./modules/announcements/announcements.routes";
 import { emailWebhookRouter, marketingRouter, trackingRouter } from "./modules/marketing/marketing.routes";
 import { gmailRouter, integrationsRouter, productGithubRouter } from "./modules/integrations/integrations.routes";
+import { metaRouter, organizationRouter } from "./modules/organization/organization.routes";
 import { appraisalsRouter, queriesRouter, reportsV2Router, targetsRouter } from "./modules/performance/performance.routes";
 
 // All versioned business endpoints live under this prefix.
@@ -110,6 +111,8 @@ export function createApp() {
   v1.use("/reports", reportsV2Router);
   v1.use("/t", trackingRouter);
   v1.use("/webhooks", emailWebhookRouter);
+  v1.use("/organization", organizationRouter);
+  v1.use("/meta", metaRouter);
   v1.use("/integrations", integrationsRouter);
   v1.use("/gmail", gmailRouter);
   v1.use("/products", productGithubRouter);

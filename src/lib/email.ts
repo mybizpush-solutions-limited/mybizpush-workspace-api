@@ -57,11 +57,12 @@ export interface EmailLayout {
   heading: string;
   bodyHtml: string; // inner content (paragraphs etc.)
   cta?: { label: string; url: string };
+  footnote?: string; // small print under the button, may hold a link
 }
 
 // Email-safe HTML (tables + inline styles): logo header, white card with a
 // brand-gradient top bar, optional bulletproof button, muted footer.
-export function renderEmail({ preheader, heading, bodyHtml, cta }: EmailLayout): string {
+export function renderEmail({ preheader, heading, bodyHtml, cta, footnote }: EmailLayout): string {
   const gradient = `linear-gradient(90deg, ${BRAND.purple} 0%, ${BRAND.purpleDark} 100%)`;
   const button = cta
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:26px auto 4px;">
@@ -99,6 +100,7 @@ export function renderEmail({ preheader, heading, bodyHtml, cta }: EmailLayout):
               <h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;font-weight:700;color:${BRAND.text};">${heading}</h1>
               <div style="font-size:14px;line-height:1.65;color:${BRAND.subtle};">${bodyHtml}</div>
               ${button}
+              ${footnote ? `<div style="margin-top:14px;font-size:12px;color:${BRAND.muted};text-align:center;">${footnote}</div>` : ""}
             </td></tr>
           </table>
         </td></tr>
@@ -202,7 +204,9 @@ export const emails = {
       text: `Your MyBizPush email-verification code is ${code} (expires in 10 minutes).`,
     }),
 
-  passwordReset: (to: string, resetLink: string) =>
+  // With appLink, the button opens the app and the web link stays as a fallback,
+  // because some mail apps block custom links.
+  passwordReset: (to: string, resetLink: string, appLink: string | null = null) =>
     sendEmail({
       to,
       subject: "Reset your MyBizPush Dev Space password",
@@ -212,9 +216,10 @@ export const emails = {
         bodyHtml:
           p("We received a request to reset your password. Click the button below to choose a new one.") +
           p(`<span style="color:${BRAND.muted};">This link expires in 30 minutes. If you didn't request it, you can safely ignore this email.</span>`),
-        cta: { label: "Choose a new password", url: resetLink },
+        cta: { label: "Choose a new password", url: appLink ?? resetLink },
+        ...(appLink ? { footnote: `Button not working? <a href="${resetLink}">Reset it on the web</a>.` } : {}),
       }),
-      text: `Reset your MyBizPush Dev Space password: ${resetLink} (expires in 30 minutes)`,
+      text: `Reset your MyBizPush Dev Space password: ${appLink ? `${appLink}\nOn the web: ` : ""}${resetLink} (expires in 30 minutes)`,
     }),
 
   // Generic real-time activity alert (assigned, status change, mention, comment…).

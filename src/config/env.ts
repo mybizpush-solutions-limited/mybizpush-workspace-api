@@ -138,6 +138,14 @@ const schema = z.object({
   TRANSCRIBE_API_KEY: z.string().optional().default(""),
   TRANSCRIBE_MODEL: z.string().optional().default(""),
 
+  // ---- Mobile app (P9) ----
+  MOBILE_APP_SCHEME: z.string().default("mybizpush"),
+  // What GET /meta/client tells the app: below minVersion it must update.
+  CLIENT_MIN_VERSION: z.string().default("1.0.0"),
+  CLIENT_LATEST_VERSION: z.string().default("1.0.0"),
+  CLIENT_UPDATE_URL_IOS: z.string().optional().default(""),
+  CLIENT_UPDATE_URL_ANDROID: z.string().optional().default(""),
+
   // ---- Website analytics ----
   // Rollup keeps the dashboards fast; prune keeps the raw event log bounded.
   ENABLE_ANALYTICS_SCHEDULER: z
