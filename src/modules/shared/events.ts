@@ -2,6 +2,7 @@ import { Activity, Notification, NotificationPreference, User } from "../../mode
 import type { ItemType } from "../../models";
 import { emails } from "../../lib/email";
 import { env } from "../../config/env";
+import { enqueue } from "../../jobs/queues";
 
 type ActivityKind =
   | "created" | "status_changed" | "assigned" | "commented"
@@ -80,7 +81,7 @@ export async function notify(input: {
   message: string;
 }): Promise<void> {
   if (input.userId === input.fromUserId) return;
-  await Notification.create({
+  const notification = await Notification.create({
     userId: input.userId,
     fromUserId: input.fromUserId,
     kind: input.kind,
@@ -90,4 +91,9 @@ export async function notify(input: {
     read: false,
   });
   void emailAlert(input.userId, input.kind, input.message);
+  // Push to the recipient's phones. The job id is the notification id, so a
+  // retry of this request can never push the same notification twice.
+  void enqueue("push", "notification", { notificationId: notification.id }, { jobId: `notification:${notification.id}` }).catch(
+    (err) => console.error("push not queued", err),
+  );
 }

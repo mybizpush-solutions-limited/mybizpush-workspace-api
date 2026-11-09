@@ -36,6 +36,8 @@ import { teamsRouter } from "./modules/teams/teams.routes";
 import { accessRouter } from "./modules/access/access.routes";
 import { invitationsPublicRouter, staffRouter } from "./modules/staff/staff.routes";
 import { lookupRouter, searchRouter } from "./modules/lookup/lookup.routes";
+import { jobsRouter } from "./modules/jobs/jobs.routes";
+import { devicesRouter } from "./modules/devices/devices.routes";
 
 // All versioned business endpoints live under this prefix.
 export const API_PREFIX = "/api/v1";
@@ -111,6 +113,8 @@ export function createApp() {
   v1.use("/invitations", invitationsPublicRouter);
   v1.use("/lookup", lookupRouter);
   v1.use("/search", searchRouter);
+  v1.use("/jobs", jobsRouter);
+  v1.use("/devices", devicesRouter);
   app.use(API_PREFIX, v1);
 
   // Fallbacks

@@ -36,6 +36,7 @@ npm run dev                   # start with hot reload on http://localhost:4000
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run migrate` — run pending migrations (`npm run migrate -- down` to roll back one)
 - `npm run seed` — load idempotent demo data
+- `npm run dev:worker` / `npm run worker` — run background job workers on their own (with `RUN_JOB_WORKERS=false` on the API)
 
 ## Project structure
 
