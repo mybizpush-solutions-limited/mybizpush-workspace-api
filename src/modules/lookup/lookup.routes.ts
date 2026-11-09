@@ -18,7 +18,7 @@ lookupRouter.use(requireAuth);
 searchRouter.use(requireAuth);
 
 const TYPES = ["staff", "product", "project", "department", "team", "role"] as const;
-type LookupType = (typeof TYPES)[number];
+export type LookupType = (typeof TYPES)[number];
 interface Item {
   id: string;
   label: string;
@@ -74,6 +74,9 @@ async function find(type: LookupType, q: string, limit: number, ids?: string[]):
     }
   }
 }
+
+// The same search the pickers use, for voice and text commands (A801).
+export const findForLookup = (type: LookupType, q: string, limit: number) => find(type, q, limit);
 
 // GET /lookup?type=staff&q=dan&productId=...&limit=20
 lookupRouter.get(

@@ -132,6 +132,12 @@ const schema = z.object({
     .default("mybizpush://")
     .transform((s) => s.split(",").map((p) => p.trim()).filter(Boolean)),
 
+  // ---- Voice input (P8) ----
+  // none, openai or deepgram. With none, /ai/transcribe answers 503.
+  TRANSCRIBE_PROVIDER: z.enum(["none", "openai", "deepgram"]).default("none"),
+  TRANSCRIBE_API_KEY: z.string().optional().default(""),
+  TRANSCRIBE_MODEL: z.string().optional().default(""),
+
   // ---- Website analytics ----
   // Rollup keeps the dashboards fast; prune keeps the raw event log bounded.
   ENABLE_ANALYTICS_SCHEDULER: z

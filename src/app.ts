@@ -20,6 +20,7 @@ import { rolesRouter } from "./modules/roles/roles.routes";
 import { meRouter } from "./modules/me/me.routes";
 import { attachmentsRouter } from "./modules/attachments/attachments.routes";
 import { aiRouter } from "./modules/ai/ai.routes";
+import { aiCommandsRouter } from "./modules/ai/commands/commands.routes";
 import { digestsRouter } from "./modules/digests/digests.routes";
 import { googleRouter } from "./modules/google/google.routes";
 import { githubRouter } from "./modules/github/github.routes";
@@ -123,6 +124,7 @@ export function createApp() {
   v1.use("/labels", labelsRouter);
   v1.use("/roles", rolesRouter);
   v1.use("/attachments", attachmentsRouter);
+  v1.use("/ai", aiCommandsRouter);
   v1.use("/ai", aiRouter);
   v1.use("/digests", digestsRouter);
   v1.use("/google", googleRouter);
