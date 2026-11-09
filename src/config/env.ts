@@ -113,6 +113,18 @@ const schema = z.object({
     .default("true")
     .transform((s) => s !== "false"),
 
+  // ---- Marketing email (P6) ----
+  // Public address of this API, for tracking and unsubscribe links in emails.
+  PUBLIC_API_URL: z.string().url().default("http://localhost:4000"),
+  MARKETING_EMAIL_FROM: z.string().default("MyBizPush <news@mybizpush.com>"),
+  // Domains campaigns may send from. They must be verified with the email provider.
+  MARKETING_ALLOWED_FROM_DOMAINS: z
+    .string()
+    .default("mybizpush.com")
+    .transform((s) => s.split(",").map((d) => d.trim().toLowerCase()).filter(Boolean)),
+  // Signing secret for delivery webhooks. Webhooks are refused while it's empty.
+  RESEND_WEBHOOK_SECRET: z.string().optional().default(""),
+
   // ---- Website analytics ----
   // Rollup keeps the dashboards fast; prune keeps the raw event log bounded.
   ENABLE_ANALYTICS_SCHEDULER: z

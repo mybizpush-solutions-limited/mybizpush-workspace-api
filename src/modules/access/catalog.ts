@@ -83,7 +83,7 @@ export const SEED_ROLES: SeedRole[] = [
     description: "Runs a product: people, projects, approvals, marketing",
     system: false,
     defaultScope: "product",
-    permissions: [...work, "product.edit", "product.manage_members", "product.manage_projects", "project.create", "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "meeting.edit", "announcement.draft", "announcement.publish", "target.create", "target.assign", "target.evaluate", "report.generate", "report.export", "event.create", "event.edit", "event.delete", "campaign.approve", "content.approve", "channel.create", "channel.edit", "channel.manage_members", "channel.archive", "message.moderate", "task.manage_templates", "report.view"],
+    permissions: [...work, "product.edit", "product.manage_members", "product.manage_projects", "project.create", "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "meeting.edit", "announcement.draft", "announcement.publish", "target.create", "target.assign", "target.evaluate", "report.generate", "report.export", "event.create", "event.edit", "event.delete", "campaign.create", "campaign.import", "campaign.approve", "campaign.send", "campaign.view", "content.create", "content.approve", "content.publish", "channel.create", "channel.edit", "channel.manage_members", "channel.archive", "message.moderate", "task.manage_templates", "report.view"],
   },
   {
     key: "project_manager",

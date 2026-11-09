@@ -13,6 +13,7 @@ export * from "./task-status";
 export * from "./chat";
 export * from "./calendar";
 export * from "./performance";
+export * from "./marketing";
 
 // Domain enums (kept in sync with ui/src/types/index.ts).
 export const ACCESS_LEVELS = ["member", "admin", "chief", "executive_admin"] as const;

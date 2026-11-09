@@ -43,6 +43,7 @@ import { tasksExtRouter } from "./modules/tasks/tasks.routes";
 import { groupsRouter } from "./modules/groups/groups.routes";
 import { conversationsRouter, messagesRouter } from "./modules/chat/chat.routes";
 import { announcementsRouter } from "./modules/announcements/announcements.routes";
+import { emailWebhookRouter, marketingRouter, trackingRouter } from "./modules/marketing/marketing.routes";
 import { appraisalsRouter, queriesRouter, reportsV2Router, targetsRouter } from "./modules/performance/performance.routes";
 
 // All versioned business endpoints live under this prefix.
@@ -105,6 +106,9 @@ export function createApp() {
   v1.use("/targets", targetsRouter);
   v1.use("/appraisals", appraisalsRouter);
   v1.use("/reports", reportsV2Router);
+  v1.use("/t", trackingRouter);
+  v1.use("/webhooks", emailWebhookRouter);
+  v1.use(marketingRouter);
   v1.use("/issues", issuesRouter);
   v1.use("/comments", commentsRouter);
   v1.use("/activity", activityRouter);

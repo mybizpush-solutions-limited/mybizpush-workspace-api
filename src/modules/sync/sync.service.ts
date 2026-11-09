@@ -3,7 +3,7 @@ import { z } from "zod";
 import { badRequest } from "../../lib/errors";
 import { sequelize } from "../../db/sequelize";
 import { redis } from "../../redis/client";
-import { Appraisal, AppraisalCycle, StaffQuery, Target, TargetAssignment, TargetProgress, CalendarEvent, MeetingActionItem, MeetingAttendee, MeetingNote, Announcement, AnnouncementReceipt, Conversation, ConversationMember, Message, MessageReaction, Comment, Issue, Label, Meeting, Notification, Task, TaskReview, TaskStatusHistory, TaskSubmission, TaskTemplate, User, type ItemType } from "../../models";
+import { ContentEvent, ContentItem, SocialAccount, Appraisal, AppraisalCycle, StaffQuery, Target, TargetAssignment, TargetProgress, CalendarEvent, MeetingActionItem, MeetingAttendee, MeetingNote, Announcement, AnnouncementReceipt, Conversation, ConversationMember, Message, MessageReaction, Comment, Issue, Label, Meeting, Notification, Task, TaskReview, TaskStatusHistory, TaskSubmission, TaskTemplate, User, type ItemType } from "../../models";
 import {
   serializeComment,
   serializeLabel,
@@ -22,6 +22,8 @@ import { announcementsService, serializeAnnouncement, serializeReceipt } from ".
 import { editSchema, emojiSchema, readSchema, sendSchema } from "../chat/chat.routes";
 import { serializeConversations, serializeMember, serializeMessage } from "../chat/chat.serialize";
 import { chatService, myConversationIds, type SendInput } from "../chat/chat.service";
+import { contentService, contentVisibleWhere, serializeContent, serializeContentEvent, serializeSocial } from "../content/content.service";
+import { contentCreateSchema, contentReviewSchema, contentStatusSchema, contentUpdateSchema } from "../marketing/marketing.routes";
 import { calendarService, serializeActionItem, serializeEvent, serializeNote } from "../meetings/calendar.service";
 import { inMyScopesSql, visibleMeetingIds, visibleMeetingsSql } from "../meetings/meeting.visibility";
 import { actionItemSchema, actionItemUpdateSchema, noteSchema, rsvpSchema } from "../meetings/meetings.routes";
@@ -59,6 +61,7 @@ export const DELTA_COLLECTIONS = [
   "conversations", "conversationMembers", "messages", "announcements", "announcementReceipts",
   "meetingAttendees", "meetingNotes", "meetingActionItems", "calendarEvents",
   "staffQueries", "targets", "targetProgress", "appraisals", "appraisalCycles",
+  "contentItems", "contentEvents", "socialAccounts",
 ] as const;
 export const REFERENCE_COLLECTIONS = ["users", "departments", "projects", "labels"] as const;
 type DeltaCollection = (typeof DELTA_COLLECTIONS)[number];
@@ -194,6 +197,21 @@ const DELTA: Record<DeltaCollection, DeltaSource> = {
     visibleTo: () => ({ status: { [Op.ne]: "draft" } }),
     serialize: (r) => serializeCycle(r as AppraisalCycle),
   },
+  contentItems: {
+    model: ContentItem,
+    visibleTo: async (userId) => (await contentVisibleWhere(userId)) as Record<string | symbol, unknown>,
+    serialize: (r) => serializeContent(r as ContentItem),
+  },
+  contentEvents: {
+    model: ContentEvent,
+    visibleTo: async (userId) => {
+      const visible = await contentVisibleWhere(userId);
+      const ids = (await ContentItem.findAll({ where: visible, attributes: ["id"] })).map((c) => c.id);
+      return { contentId: ids };
+    },
+    serialize: (r) => serializeContentEvent(r as ContentEvent),
+  },
+  socialAccounts: { model: SocialAccount, serialize: (r) => serializeSocial(r as SocialAccount) },
   calendarEvents: {
     model: CalendarEvent,
     visibleTo: (userId) => ({ [Op.and]: [sequelize.literal(inMyScopesSql(userId, '"CalendarEvent"'))] }),
@@ -308,6 +326,10 @@ export const mutationSchema = z.object({
     "target.progress",
     "appraisal.self",
     "appraisal.manager",
+    "content.create",
+    "content.update",
+    "content.status",
+    "content.review",
   ]),
   recordId: z.string().uuid().optional(),
   payload: z.record(z.unknown()).default({}),
@@ -426,6 +448,16 @@ async function apply(userId: string, m: Mutation): Promise<MutationResult> {
       return applied(await announcementsService.markRead(needRecord(), userId));
     case "announcement.acknowledge":
       return applied(await announcementsService.acknowledge(needRecord(), userId));
+    case "content.create":
+      return applied(await contentService.create(contentCreateSchema.parse({ ...m.payload, id: m.recordId ?? m.payload.id }), userId));
+    case "content.update":
+      return applied(await contentService.update(needRecord(), contentUpdateSchema.parse(m.payload), userId));
+    case "content.status": {
+      const { status, note } = contentStatusSchema.parse(m.payload);
+      return applied(await contentService.setStatus(needRecord(), status, note, userId));
+    }
+    case "content.review":
+      return applied((await contentService.review(needRecord(), contentReviewSchema.parse(m.payload), userId)).item);
     case "query.respond":
       return applied(await queriesService.respond(needRecord(), respondSchema.parse(m.payload), userId));
     case "target.progress":

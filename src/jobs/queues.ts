@@ -7,7 +7,7 @@ import { env } from "../config/env";
 // same Redis the API already uses, so failures retry with backoff and stay
 // visible instead of disappearing inside a request or a cron tick.
 
-export const QUEUE_NAMES = ["push", "email", "imports", "exports", "reminders", "maintenance"] as const;
+export const QUEUE_NAMES = ["push", "email", "imports", "exports", "reminders", "maintenance", "campaigns"] as const;
 export type QueueName = (typeof QUEUE_NAMES)[number];
 
 // BullMQ needs its own connections (blocking commands) with retries disabled

@@ -23,6 +23,7 @@ const CONCURRENCY: Record<QueueName, number> = {
   exports: 2,
   reminders: 5,
   maintenance: 1,
+  campaigns: 2,
 };
 
 let running: Worker[] = [];

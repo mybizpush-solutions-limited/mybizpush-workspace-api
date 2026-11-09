@@ -48,7 +48,7 @@ export interface ImportState {
   result?: { invited: number; failed: { email: string; error: string }[] };
 }
 
-function parseCsv(text: string): string[][] {
+export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = "";
@@ -80,7 +80,7 @@ function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((x) => x.trim()));
 }
 
-async function parseXlsx(buffer: Buffer): Promise<string[][]> {
+export async function parseXlsx(buffer: Buffer): Promise<string[][]> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as unknown as ArrayBuffer);
   const sheet = wb.worksheets[0];
