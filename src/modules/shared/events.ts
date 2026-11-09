@@ -1,5 +1,5 @@
 import { Activity, Notification, NotificationPreference, User } from "../../models";
-import type { ItemType } from "../../models";
+import type { RecordType } from "../../models";
 import { emails } from "../../lib/email";
 import { env } from "../../config/env";
 import { enqueue } from "../../jobs/queues";
@@ -15,7 +15,7 @@ type NotificationKind = "assigned" | "mentioned" | "feedback_requested" | "statu
 // Append to the immutable activity log.
 export function logActivity(input: {
   itemId: string;
-  itemType: ItemType;
+  itemType: RecordType;
   actorId: string;
   kind: ActivityKind;
   data?: Record<string, unknown>;
@@ -91,7 +91,7 @@ export async function notify(input: {
   fromUserId: string;
   kind: NotificationKind;
   itemId: string;
-  itemType: ItemType;
+  itemType: RecordType;
   message: string;
 }): Promise<void> {
   if (input.userId === input.fromUserId) return;

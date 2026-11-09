@@ -17,6 +17,20 @@ export function isOrgManager(level: string): boolean {
 export const WORK_STATUSES = ["todo", "in_progress", "in_review", "blocked", "done"] as const;
 export const PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_TYPES = ["task", "issue"] as const;
+// Anything comments, attachments, activity and notifications can hang off.
+// ITEM_TYPES (work items) stay the narrower set used by PRs, docs and GitHub
+// links. New record types arrive with their modules (API-CHANGES A008).
+export const RECORD_TYPES = [
+  ...ITEM_TYPES,
+  "meeting",
+  "announcement",
+  "query",
+  "content",
+  "campaign",
+  "target",
+  "project",
+  "product",
+] as const;
 export const ISSUE_SEVERITIES = ["minor", "major", "critical"] as const;
 export const ACTIVITY_KINDS = [
   "created", "status_changed", "assigned", "commented",
@@ -41,6 +55,7 @@ export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 export type WorkStatus = (typeof WORK_STATUSES)[number];
 export type Priority = (typeof PRIORITIES)[number];
 export type ItemType = (typeof ITEM_TYPES)[number];
+export type RecordType = (typeof RECORD_TYPES)[number];
 
 // ---- User -----------------------------------------------------------------
 export class User extends Model<InferAttributes<User>, InferCreationAttributes<User>> {
@@ -281,7 +296,7 @@ Issue.init(
 export class Comment extends Model<InferAttributes<Comment>, InferCreationAttributes<Comment>> {
   declare id: CreationOptional<string>;
   declare itemId: string;
-  declare itemType: ItemType;
+  declare itemType: RecordType;
   declare authorId: CreationOptional<string | null>;
   declare body: string;
   // Set when this comment is mirrored to/from a GitHub issue comment — used to
@@ -294,7 +309,7 @@ Comment.init(
   {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     itemId: { type: DataTypes.UUID, allowNull: false },
-    itemType: { type: DataTypes.ENUM(...ITEM_TYPES), allowNull: false },
+    itemType: { type: DataTypes.ENUM(...RECORD_TYPES), allowNull: false },
     authorId: { type: DataTypes.UUID, allowNull: true },
     body: { type: DataTypes.TEXT, allowNull: false },
     githubCommentId: { type: DataTypes.STRING, allowNull: true },
@@ -308,7 +323,7 @@ Comment.init(
 export class Activity extends Model<InferAttributes<Activity>, InferCreationAttributes<Activity>> {
   declare id: CreationOptional<string>;
   declare itemId: string;
-  declare itemType: ItemType;
+  declare itemType: RecordType;
   declare actorId: CreationOptional<string | null>;
   declare kind: (typeof ACTIVITY_KINDS)[number];
   declare data: CreationOptional<Record<string, unknown> | null>;
@@ -318,7 +333,7 @@ Activity.init(
   {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     itemId: { type: DataTypes.UUID, allowNull: false },
-    itemType: { type: DataTypes.ENUM(...ITEM_TYPES), allowNull: false },
+    itemType: { type: DataTypes.ENUM(...RECORD_TYPES), allowNull: false },
     actorId: { type: DataTypes.UUID, allowNull: true },
     kind: { type: DataTypes.ENUM(...ACTIVITY_KINDS), allowNull: false },
     data: { type: DataTypes.JSONB, allowNull: true },
@@ -423,7 +438,7 @@ GithubIssueLink.init(
 export class Attachment extends Model<InferAttributes<Attachment>, InferCreationAttributes<Attachment>> {
   declare id: CreationOptional<string>;
   declare itemId: string;
-  declare itemType: ItemType;
+  declare itemType: RecordType;
   declare name: string;
   declare size: CreationOptional<number>;
   declare type: CreationOptional<string>;
@@ -435,7 +450,7 @@ Attachment.init(
   {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     itemId: { type: DataTypes.UUID, allowNull: false },
-    itemType: { type: DataTypes.ENUM(...ITEM_TYPES), allowNull: false },
+    itemType: { type: DataTypes.ENUM(...RECORD_TYPES), allowNull: false },
     name: { type: DataTypes.STRING, allowNull: false },
     size: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 },
     type: { type: DataTypes.STRING, allowNull: false, defaultValue: "" },
@@ -452,7 +467,7 @@ export class Notification extends Model<InferAttributes<Notification>, InferCrea
   declare userId: string;
   declare kind: (typeof NOTIFICATION_KINDS)[number];
   declare itemId: string;
-  declare itemType: ItemType;
+  declare itemType: RecordType;
   declare fromUserId: CreationOptional<string | null>;
   declare message: string;
   declare read: CreationOptional<boolean>;
@@ -465,7 +480,7 @@ Notification.init(
     userId: { type: DataTypes.UUID, allowNull: false },
     kind: { type: DataTypes.ENUM(...NOTIFICATION_KINDS), allowNull: false },
     itemId: { type: DataTypes.UUID, allowNull: false },
-    itemType: { type: DataTypes.ENUM(...ITEM_TYPES), allowNull: false },
+    itemType: { type: DataTypes.ENUM(...RECORD_TYPES), allowNull: false },
     fromUserId: { type: DataTypes.UUID, allowNull: true },
     message: { type: DataTypes.TEXT, allowNull: false },
     read: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
