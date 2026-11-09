@@ -23,7 +23,8 @@ async function main() {
   console.info(JSON.stringify(result, null, 2));
   if (!apply) console.info("Nothing was changed. Add --apply to move these files.");
   await sequelize.close();
-  if (result.failed.length) process.exitCode = 1;
+  // The services this reaches open Redis, which would otherwise keep the process alive.
+  process.exit(result.failed.length ? 1 : 0);
 }
 
 main().catch((err) => {

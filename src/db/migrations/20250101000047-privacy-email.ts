@@ -1,6 +1,6 @@
 import { DataTypes } from "sequelize";
 import type { Migration } from "../umzug";
-import { ignoreDuplicate, removeRolePermissions } from "../migration-helpers";
+import { addRolePermissions, ignoreDuplicate, removeRolePermissions } from "../migration-helpers";
 
 // Records visible only to who they concern, private files, and a sending identity
 // per product (API-CHANGES A1001 to A1006).
@@ -44,4 +44,5 @@ export const down: Migration = async ({ context: qi }) => {
   for (const c of ["sender_email", "sender_name"]) await qi.removeColumn("products", c).catch(() => undefined);
   for (const c of ["format", "resource_type", "delivery"]) await qi.removeColumn("attachments", c).catch(() => undefined);
   await qi.dropTable("sync_record_access");
+  await addRolePermissions(qi, { member: ["task.view"], admin: ["task.view"], hr_officer: ["task.view"] });
 };

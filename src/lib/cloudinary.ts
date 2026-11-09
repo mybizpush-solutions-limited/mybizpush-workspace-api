@@ -85,6 +85,7 @@ export function fileLink(a: FileLinkSource, now = Date.now()): { url: string; ur
   if (a.delivery !== "authenticated" || !a.publicId) return { url: a.url, urlExpiresAt: null };
   const expiresAt = Math.floor(now / 1000) + env.ATTACHMENT_URL_TTL_SECONDS;
   try {
+    ensureConfigured();
     const url = cloudinary.utils.private_download_url(a.publicId, a.format ?? "", {
       type: "authenticated",
       resource_type: a.resourceType ?? "image",
