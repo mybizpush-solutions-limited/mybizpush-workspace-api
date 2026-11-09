@@ -308,7 +308,7 @@ export const leadsService = {
   async startImport(productId: string, file: { buffer: Buffer; originalname: string }, userId: string) {
     await requireOnProduct(userId, "campaign.import", productId);
     const lower = file.originalname.toLowerCase();
-    const table = lower.endsWith(".xlsx") ? await parseXlsx(file.buffer) : lower.endsWith(".csv") ? parseCsv(file.buffer.toString("utf8").replace(/^﻿/, "")) : null;
+    const table = lower.endsWith(".xlsx") ? await parseXlsx(file.buffer) : lower.endsWith(".csv") ? parseCsv(file.buffer.toString("utf8").replace(/^\uFEFF/, "")) : null;
     if (!table) throw badRequest("Upload a .csv or .xlsx file");
     if (table.length < 2) throw badRequest("The file has no rows under the header");
     if (table.length - 1 > MAX_ROWS) throw badRequest(`Import up to ${MAX_ROWS} leads at a time`);
