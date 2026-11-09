@@ -125,6 +125,13 @@ const schema = z.object({
   // Signing secret for delivery webhooks. Webhooks are refused while it's empty.
   RESEND_WEBHOOK_SECRET: z.string().optional().default(""),
 
+  // ---- Integrations (P7) ----
+  // Where OAuth may send people back to, as comma-separated prefixes.
+  OAUTH_RETURN_ALLOWLIST: z
+    .string()
+    .default("mybizpush://")
+    .transform((s) => s.split(",").map((p) => p.trim()).filter(Boolean)),
+
   // ---- Website analytics ----
   // Rollup keeps the dashboards fast; prune keeps the raw event log bounded.
   ENABLE_ANALYTICS_SCHEDULER: z

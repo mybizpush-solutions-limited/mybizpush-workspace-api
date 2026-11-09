@@ -14,6 +14,7 @@ export * from "./chat";
 export * from "./calendar";
 export * from "./performance";
 export * from "./marketing";
+export * from "./integrations";
 
 // Domain enums (kept in sync with ui/src/types/index.ts).
 export const ACCESS_LEVELS = ["member", "admin", "chief", "executive_admin"] as const;
@@ -571,6 +572,8 @@ export class Meeting extends Model<InferAttributes<Meeting>, InferCreationAttrib
   declare cancelReason: CreationOptional<string | null>;
   declare cancelledAt: CreationOptional<Date | null>;
   declare syncState: CreationOptional<"not_linked" | "synced" | "conflict">;
+  declare googleSnapshot: CreationOptional<{ title: string; startsAt: string; endsAt: string } | null>;
+  declare syncConflict: CreationOptional<{ reason: "changed_in_google" | "write_failed"; detectedAt: string; google: { title: string; startsAt: string; endsAt: string } | null } | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -599,6 +602,8 @@ Meeting.init(
     cancelReason: { type: DataTypes.STRING(500), allowNull: true },
     cancelledAt: { type: DataTypes.DATE, allowNull: true },
     syncState: { type: DataTypes.STRING(10), allowNull: false, defaultValue: "not_linked" },
+    googleSnapshot: { type: DataTypes.JSONB, allowNull: true },
+    syncConflict: { type: DataTypes.JSONB, allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },
@@ -648,6 +653,9 @@ export class GoogleAccount extends Model<
   declare scope: CreationOptional<string | null>;
   declare tokenType: CreationOptional<string | null>;
   declare expiryDate: CreationOptional<Date | null>;
+  declare gmailRefreshToken: CreationOptional<string | null>; // encrypted
+  declare gmailEmail: CreationOptional<string | null>;
+  declare gmailScopes: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -660,6 +668,9 @@ GoogleAccount.init(
     scope: { type: DataTypes.TEXT, allowNull: true },
     tokenType: { type: DataTypes.STRING, allowNull: true },
     expiryDate: { type: DataTypes.DATE, allowNull: true },
+    gmailRefreshToken: { type: DataTypes.TEXT, allowNull: true },
+    gmailEmail: { type: DataTypes.STRING, allowNull: true },
+    gmailScopes: { type: DataTypes.STRING(500), allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },

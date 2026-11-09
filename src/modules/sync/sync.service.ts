@@ -3,7 +3,7 @@ import { z } from "zod";
 import { badRequest } from "../../lib/errors";
 import { sequelize } from "../../db/sequelize";
 import { redis } from "../../redis/client";
-import { ContentEvent, ContentItem, SocialAccount, Appraisal, AppraisalCycle, StaffQuery, Target, TargetAssignment, TargetProgress, CalendarEvent, MeetingActionItem, MeetingAttendee, MeetingNote, Announcement, AnnouncementReceipt, Conversation, ConversationMember, Message, MessageReaction, Comment, Issue, Label, Meeting, Notification, Task, TaskReview, TaskStatusHistory, TaskSubmission, TaskTemplate, User, type ItemType } from "../../models";
+import { EmailThreadLink, ProductRepo, ContentEvent, ContentItem, SocialAccount, Appraisal, AppraisalCycle, StaffQuery, Target, TargetAssignment, TargetProgress, CalendarEvent, MeetingActionItem, MeetingAttendee, MeetingNote, Announcement, AnnouncementReceipt, Conversation, ConversationMember, Message, MessageReaction, Comment, Issue, Label, Meeting, Notification, Task, TaskReview, TaskStatusHistory, TaskSubmission, TaskTemplate, User, type ItemType } from "../../models";
 import {
   serializeComment,
   serializeLabel,
@@ -24,6 +24,8 @@ import { serializeConversations, serializeMember, serializeMessage } from "../ch
 import { chatService, myConversationIds, type SendInput } from "../chat/chat.service";
 import { contentService, contentVisibleWhere, serializeContent, serializeContentEvent, serializeSocial } from "../content/content.service";
 import { contentCreateSchema, contentReviewSchema, contentStatusSchema, contentUpdateSchema } from "../marketing/marketing.routes";
+import { serializeLink } from "../integrations/gmail.service";
+import { serializeProductRepo } from "../integrations/integrations.routes";
 import { calendarService, serializeActionItem, serializeEvent, serializeNote } from "../meetings/calendar.service";
 import { inMyScopesSql, visibleMeetingIds, visibleMeetingsSql } from "../meetings/meeting.visibility";
 import { actionItemSchema, actionItemUpdateSchema, noteSchema, rsvpSchema } from "../meetings/meetings.routes";
@@ -62,6 +64,7 @@ export const DELTA_COLLECTIONS = [
   "meetingAttendees", "meetingNotes", "meetingActionItems", "calendarEvents",
   "staffQueries", "targets", "targetProgress", "appraisals", "appraisalCycles",
   "contentItems", "contentEvents", "socialAccounts",
+  "emailThreadLinks", "productRepos",
 ] as const;
 export const REFERENCE_COLLECTIONS = ["users", "departments", "projects", "labels"] as const;
 type DeltaCollection = (typeof DELTA_COLLECTIONS)[number];
@@ -212,6 +215,8 @@ const DELTA: Record<DeltaCollection, DeltaSource> = {
     serialize: (r) => serializeContentEvent(r as ContentEvent),
   },
   socialAccounts: { model: SocialAccount, serialize: (r) => serializeSocial(r as SocialAccount) },
+  emailThreadLinks: { model: EmailThreadLink, serialize: (r) => serializeLink(r as EmailThreadLink) },
+  productRepos: { model: ProductRepo, serialize: (r) => serializeProductRepo(r as ProductRepo) },
   calendarEvents: {
     model: CalendarEvent,
     visibleTo: (userId) => ({ [Op.and]: [sequelize.literal(inMyScopesSql(userId, '"CalendarEvent"'))] }),

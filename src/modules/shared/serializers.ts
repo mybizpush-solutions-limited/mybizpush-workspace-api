@@ -286,6 +286,7 @@ export function serializeMeeting(m: Meeting) {
     cancelReason: m.cancelReason ?? null,
     cancelledAt: m.cancelledAt?.toISOString() ?? null,
     syncState: m.syncState,
+    conflict: m.syncConflict ?? null,
     updatedAt: m.updatedAt.toISOString(),
   };
 }

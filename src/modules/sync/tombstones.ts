@@ -9,7 +9,7 @@ import {
   type Transaction,
 } from "sequelize";
 import { sequelize } from "../../db/sequelize";
-import { ContentItem, SocialAccount, CalendarEvent, Comment, Issue, Meeting, MeetingActionItem, MeetingNote, Notification, Task, TaskTemplate } from "../../models";
+import { EmailThreadLink, ProductRepo, ContentItem, SocialAccount, CalendarEvent, Comment, Issue, Meeting, MeetingActionItem, MeetingNote, Notification, Task, TaskTemplate } from "../../models";
 
 // Deletion records for offline sync (API-CHANGES A006). Clients hold copies of
 // records; when one is deleted they need to hear about it on their next pull.
@@ -83,4 +83,6 @@ export function registerTombstoneHooks(): void {
   track(CalendarEvent, "calendarEvents");
   track(ContentItem, "contentItems");
   track(SocialAccount, "socialAccounts");
+  track(EmailThreadLink, "emailThreadLinks");
+  track(ProductRepo, "productRepos");
 }

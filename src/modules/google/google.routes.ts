@@ -2,6 +2,7 @@ import { Router } from "express";
 import { asyncHandler } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { env } from "../../config/env";
+import { withResult } from "../integrations/integrations.pure";
 import { googleService } from "./google.service";
 
 export const googleRouter = Router();
@@ -11,7 +12,8 @@ googleRouter.get(
   "/auth-url",
   requireAuth,
   asyncHandler(async (req, res) => {
-    res.json({ url: await googleService.createAuthUrl(req.auth!.sub) });
+    const returnTo = typeof req.query.returnTo === "string" ? req.query.returnTo : undefined;
+    res.json({ url: await googleService.createAuthUrl(req.auth!.sub, { returnTo, gmail: req.query.scope === "gmail" }) });
   }),
 );
 
@@ -38,11 +40,15 @@ googleRouter.get(
   asyncHandler(async (req, res) => {
     const code = typeof req.query.code === "string" ? req.query.code : "";
     const state = typeof req.query.state === "string" ? req.query.state : "";
+    // Read first: a finished callback uses the state up, and a failed one still has
+    // to find its way back to the app.
+    const pending = await googleService.peekState(state).catch(() => null);
+    const provider = pending?.gmail ? "gmail" : "google";
     try {
       await googleService.handleCallback(code, state);
-      res.redirect(`${env.APP_URL}/profile?google=connected`);
+      res.redirect(pending?.returnTo ? withResult(pending.returnTo, provider, "connected") : `${env.APP_URL}/profile?google=connected`);
     } catch {
-      res.redirect(`${env.APP_URL}/profile?google=error`);
+      res.redirect(pending?.returnTo ? withResult(pending.returnTo, provider, "error") : `${env.APP_URL}/profile?google=error`);
     }
   }),
 );

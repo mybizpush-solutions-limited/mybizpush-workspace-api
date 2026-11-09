@@ -7,6 +7,7 @@ import "./handlers/chat";
 import "./handlers/meetings";
 import "./handlers/performance";
 import "./handlers/marketing";
+import "./handlers/integrations";
 
 export { enqueue, getQueue, closeQueues, QUEUE_NAMES, type QueueName } from "./queues";
 export { registerJob, startWorkers, stopWorkers } from "./workers";

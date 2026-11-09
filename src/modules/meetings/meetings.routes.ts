@@ -92,6 +92,12 @@ meetingsRouter.get("/can-schedule", asyncHandler(async (req, res) => {
   res.json({ canSchedule: await meetingsService.canSchedule(req.auth!.sub) });
 }));
 
+// Named paths before /:id.
+meetingsRouter.get("/conflicts", asyncHandler(async (req, res) => {
+  const { calendarSync } = await import("../integrations/calendar.sync");
+  res.json({ meetings: await calendarSync.conflicts(req.auth!.sub) });
+}));
+
 meetingsRouter.post("/", validateBody(createSchema), asyncHandler(async (req, res) => {
   res.status(201).json({ meeting: await meetingsService.create({ ...req.body, organizerId: req.auth!.sub }) });
 }));
@@ -111,6 +117,11 @@ meetingsRouter.delete("/:id", asyncHandler(async (req, res) => {
 
 meetingsRouter.post("/:id/cancel", validateBody(z.object({ reason: z.string().trim().max(500).optional() })), asyncHandler(async (req, res) => {
   res.json({ meeting: await meetingsService.softCancel(req.auth!.sub, req.params.id!, req.body.reason, req) });
+}));
+
+meetingsRouter.post("/:id/sync/resolve", validateBody(z.object({ keep: z.enum(["local", "google"]) })), asyncHandler(async (req, res) => {
+  const { calendarSync } = await import("../integrations/calendar.sync");
+  res.json({ meeting: await calendarSync.resolve(req.params.id!, req.body.keep, req.auth!.sub, req) });
 }));
 
 meetingsRouter.post("/:id/complete", asyncHandler(async (req, res) => {

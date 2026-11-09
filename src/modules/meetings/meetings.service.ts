@@ -16,11 +16,9 @@ import { env } from "../../config/env";
 import { audit } from "../../lib/audit";
 import { AppError, badRequest, forbidden, notFound } from "../../lib/errors";
 import { serializeMeeting, serializeMeetingAttendee } from "../shared/serializers";
-import {
-  createMeetEventAsOrganizer,
-  updateMeetEventAsOrganizer,
-  deleteMeetEventAsOrganizer,
-} from "../../lib/google";
+import { calendarOps } from "../../lib/google";
+import { randomUUID } from "node:crypto";
+import { googleEventIdFor } from "../integrations/integrations.pure";
 import { can } from "../access/engine";
 import type { Scope } from "../access/catalog";
 import { groupsService } from "../groups/groups.service";
@@ -174,6 +172,7 @@ async function resolvePeople(input: { attendeeIds?: string[]; groups?: GroupRef[
 
 export const meetingsService = {
   canSchedule,
+  assertCanManage,
 
   // Cancelled meetings used to be deleted, so older callers don't expect them here.
   async list(opts: { includeCancelled?: boolean } = {}) {
@@ -220,7 +219,13 @@ export const meetingsService = {
     // The event is owned by the central organizer account; everyone (including
     // the scheduler) is invited by email. Falls back to a placeholder Meet link
     // only when no organizer account is configured (dev).
-    const google = await createMeetEventAsOrganizer({
+    // Chosen here so that a retry can't make a second event in Google.
+    const plannedEventId = googleEventIdFor(input.id ?? randomUUID());
+    const facts = { title: input.title.trim(), startsAt: new Date(input.startsAt).toISOString(), endsAt: new Date(input.endsAt).toISOString() };
+    const configured = calendarOps.isConfigured();
+    let writeFailed = false;
+    const google = await calendarOps.create({
+      eventId: plannedEventId,
       summary: input.title.trim(),
       description: input.description?.trim(),
       attendees: emails,
@@ -229,7 +234,11 @@ export const meetingsService = {
       recurrence: buildRRule(recurrence),
       conference: meetLink,
       location: input.location ?? undefined,
-    }).catch(() => null);
+    }).catch((err) => {
+      writeFailed = configured;
+      console.error("[calendar] event not created:", (err as Error).message);
+      return null;
+    });
 
     const meeting = await Meeting.create({
       ...(input.id ? { id: input.id } : {}),
@@ -238,10 +247,14 @@ export const meetingsService = {
       organizerId: input.organizerId,
       startsAt: new Date(input.startsAt),
       endsAt: new Date(input.endsAt),
-      meetUrl: meetLink ? (google?.meetUrl ?? mockMeetUrl()) : "",
+      // A made-up Meet link is only for development with no organizer account. If
+      // Google failed, say so instead of handing out a link that goes nowhere.
+      meetUrl: !meetLink ? "" : (google?.meetUrl ?? (configured ? "" : mockMeetUrl())),
       hasMeetLink: meetLink,
-      googleEventId: google?.eventId ?? null,
-      syncState: google?.eventId ? "synced" : "not_linked",
+      googleEventId: google?.eventId ?? (writeFailed ? plannedEventId : null),
+      syncState: writeFailed ? "conflict" : google?.eventId ? "synced" : "not_linked",
+      googleSnapshot: google?.eventId ? facts : null,
+      syncConflict: writeFailed ? { reason: "write_failed", detectedAt: new Date().toISOString(), google: null } : null,
       recurrence,
       externalEmails,
       ...fieldColumns(input),
@@ -311,7 +324,7 @@ export const meetingsService = {
 
     if (meeting.googleEventId) {
       const emails = [...(await resolveAttendeeEmails(attendeeIds)), ...(meeting.externalEmails ?? [])];
-      await updateMeetEventAsOrganizer(meeting.googleEventId, {
+      await calendarOps.update(meeting.googleEventId, {
         summary: meeting.title,
         description: meeting.description ?? undefined,
         attendees: emails,
@@ -319,7 +332,18 @@ export const meetingsService = {
         endIso: meeting.endsAt.toISOString(),
         recurrence: buildRRule(meeting.recurrence),
         location: meeting.location ?? undefined,
-      }).catch(() => undefined);
+      })
+        .then(() =>
+          meeting.update({
+            syncState: "synced",
+            syncConflict: null,
+            googleSnapshot: { title: meeting.title, startsAt: meeting.startsAt.toISOString(), endsAt: meeting.endsAt.toISOString() },
+          }),
+        )
+        .catch(async (err) => {
+          console.error("[calendar] event not updated:", (err as Error).message);
+          await meeting.update({ syncState: "conflict", syncConflict: { reason: "write_failed", detectedAt: new Date().toISOString(), google: null } });
+        });
     }
 
     const added = attendeeIds.filter((id) => !before.includes(id));
@@ -345,8 +369,19 @@ export const meetingsService = {
     if (!meeting) throw notFound("Meeting not found");
     await assertCanManage(actingUserId, meeting, "meeting.cancel");
     if (meeting.status === "cancelled") return reloadFull(meetingId);
-    if (meeting.googleEventId) await deleteMeetEventAsOrganizer(meeting.googleEventId).catch(() => undefined);
-    await meeting.update({ status: "cancelled", cancelReason: reason ?? null, cancelledAt: new Date() });
+    let removedFromGoogle = true;
+    if (meeting.googleEventId) {
+      await calendarOps.remove(meeting.googleEventId).catch((err) => {
+        removedFromGoogle = false;
+        console.error("[calendar] event not cancelled:", (err as Error).message);
+      });
+    }
+    await meeting.update({
+      status: "cancelled",
+      cancelReason: reason ?? null,
+      cancelledAt: new Date(),
+      ...(removedFromGoogle ? {} : { syncState: "conflict" as const, syncConflict: { reason: "write_failed" as const, detectedAt: new Date().toISOString(), google: null } }),
+    });
     await audit({ req, actorId: actingUserId, action: "meeting.cancel", target: { type: "meeting", id: meetingId }, scope: meeting.scopeType ? { type: meeting.scopeType, id: meeting.scopeId } : null, after: { reason: reason ?? null } });
     await tellAttendees(meeting, actingUserId, `Cancelled: ${meeting.title}${reason ? ` (${reason})` : ""}`);
     await announce(meetingId, meeting.organizerId);
@@ -370,7 +405,7 @@ export const meetingsService = {
     await assertCanManage(actingUserId, meeting, "meeting.cancel");
 
     if (meeting.googleEventId) {
-      await deleteMeetEventAsOrganizer(meeting.googleEventId).catch(() => undefined);
+      await calendarOps.remove(meeting.googleEventId).catch(() => undefined);
     }
     await (meeting as any).setAttendees([]);
     await meeting.destroy();
