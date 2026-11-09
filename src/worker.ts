@@ -3,11 +3,14 @@ import { redis } from "./redis/client";
 import { closeQueues, startWorkers, stopWorkers } from "./jobs";
 // Importing the models registers them with Sequelize and wires associations.
 import "./models";
+import { registerTombstoneHooks } from "./modules/sync/tombstones";
 
 // Standalone worker process: runs background jobs without serving HTTP. Use it
 // when the API runs with RUN_JOB_WORKERS=false so web traffic and heavy jobs
 // (imports, exports, campaign sends) scale separately.
 async function start() {
+  // Deletes made by jobs must reach offline clients too.
+  registerTombstoneHooks();
   await assertDbConnection();
   console.info("✓ Database connected (worker)");
   startWorkers();

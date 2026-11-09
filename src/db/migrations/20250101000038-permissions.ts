@@ -18,7 +18,7 @@ export const up: Migration = async ({ context: qi }) => {
       name: { type: DataTypes.STRING(80), allowNull: false },
       description: { type: DataTypes.STRING(240), allowNull: false, defaultValue: "" },
       is_system: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
-      default_scope: { ...scope, allowNull: false, defaultValue: "organization" },
+      default_scope: { type: scope, allowNull: false, defaultValue: "organization" },
       permissions: { type: DataTypes.ARRAY(DataTypes.STRING(60)), allowNull: false, defaultValue: [] },
       created_by: { type: DataTypes.UUID, allowNull: true },
       created_at: { type: DataTypes.DATE, allowNull: false },

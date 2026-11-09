@@ -10,7 +10,7 @@ import {
   AccessAssignment,
   AccessRole,
   Department,
-  DeviceTokenLike,
+  DeviceToken,
   Invitation,
   Product,
   ProductMember,
@@ -109,7 +109,7 @@ export const staffService = {
     if (user.accessLevel === "executive_admin") throw forbidden("Executive admins can't be suspended");
     await user.update({ status: "suspended", suspendedAt: new Date(), suspendedReason: reason ?? null });
     await revokeAllRefreshTokens(id);
-    await DeviceTokenLike.update({ disabledAt: new Date() }, { where: { userId: id } }).catch(() => undefined);
+    await DeviceToken.update({ disabledAt: new Date() }, { where: { userId: id } }).catch(() => undefined);
     return (await usersRepo.publicById(id))!;
   },
 
