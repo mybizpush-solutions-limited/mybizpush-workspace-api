@@ -8,8 +8,10 @@ import { uploadBuffer } from "../../lib/cloudinary";
 import { AppError, asyncHandler, badRequest, forbidden, notFound } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
-import { BlacklistedEmail, OrganizationSetting, User, isOrgManager } from "../../models";
+import { BlacklistedEmail, User, isOrgManager, type OrganizationSetting } from "../../models";
 import { can } from "../access/engine";
+import { SENDER_DOMAIN_ERROR, senderDomainAllowed } from "../marketing/campaign.render";
+import { loadSettings } from "./organization.service";
 
 // Organization settings and blocked emails (API-CHANGES A903, A904).
 export const organizationRouter = Router();
@@ -23,12 +25,9 @@ async function assertAdmin(req: Request): Promise<void> {
   if (!me || !isOrgManager(me.accessLevel)) throw forbidden("You don't have permission to change organization settings");
 }
 
-async function loadSettings(): Promise<OrganizationSetting> {
-  const [row] = await OrganizationSetting.findOrCreate({ where: { id: 1 }, defaults: { id: 1 } });
-  return row;
-}
-
 const serialize = (s: OrganizationSetting) => ({
+  senderName: s.senderName?.trim() || env.ORG_SENDER_NAME,
+  senderEmail: s.senderEmail?.trim() || env.ORG_SENDER_EMAIL,
   name: s.name,
   logoUrl: s.logoUrl ?? null,
   timezone: s.timezone,
@@ -59,11 +58,16 @@ organizationRouter.patch(
         logoUrl: z.string().url().max(2000).nullable().optional(),
         timezone: z.string().trim().max(60).refine(isTimezone, "Not a known time zone").optional(),
         workingDays: z.array(z.number().int().min(0).max(6)).max(7).transform((d) => [...new Set(d)].sort()).optional(),
+        senderName: z.string().trim().min(1).max(120).optional(),
+        senderEmail: z.string().trim().toLowerCase().email().max(254).optional(),
       })
       .strict(), // emailDomain comes from config, so sending it is a mistake to report
   ),
   asyncHandler(async (req, res) => {
     await assertAdmin(req);
+    if (req.body.senderEmail && !senderDomainAllowed(req.body.senderEmail, env.MARKETING_ALLOWED_FROM_DOMAINS)) {
+      throw new AppError(400, `Campaigns can't send from ${req.body.senderEmail}. Use an allowed domain.`, SENDER_DOMAIN_ERROR);
+    }
     const row = await loadSettings();
     const before = serialize(row);
     await row.update({ ...req.body, updatedBy: req.auth!.sub });

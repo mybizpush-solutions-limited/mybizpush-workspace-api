@@ -2,6 +2,10 @@ import { Op } from "sequelize";
 import { sequelize } from "../../db/sequelize";
 import { forbidden, notFound, badRequest } from "../../lib/errors";
 import { uniqueSlug } from "../../lib/slug";
+import { env } from "../../config/env";
+import { AppError } from "../../lib/errors";
+import { SENDER_DOMAIN_ERROR, senderDomainAllowed } from "../marketing/campaign.render";
+import { productOwnDomains } from "../organization/organization.service";
 import { CLOSED_TASK_STATUSES, isOrgManager, Issue, Product, ProductMember, Project, Task, User, type ProductStage } from "../../models";
 
 // Products: the business umbrella over projects, people, marketing and social
@@ -19,6 +23,8 @@ export interface PublicProduct {
   tint: string | null;
   stage: ProductStage;
   ownerId: string | null;
+  senderName: string | null;
+  senderEmail: string | null;
   projectIds: string[];
   members: { userId: string; title: string | null }[];
   counts: { people: number; projects: number; openTasks: number };
@@ -57,6 +63,8 @@ function serialize(p: Product, openTasks = 0): PublicProduct {
     tint: p.tint ?? null,
     stage: p.stage,
     ownerId: p.ownerId ?? null,
+    senderName: p.senderName ?? null,
+    senderEmail: p.senderEmail ?? null,
     projectIds: projects.map((x) => x.id),
     members: members.map((m) => ({ userId: m.id, title: m.ProductMember?.title ?? null })),
     counts: { people: members.length, projects: projects.length, openTasks },
@@ -90,6 +98,13 @@ async function touch(id: string): Promise<void> {
   await p.save();
 }
 
+async function assertProductSender(productId: string | null, email: string): Promise<void> {
+  const own = productId ? await productOwnDomains(productId) : [];
+  if (!senderDomainAllowed(email, env.MARKETING_ALLOWED_FROM_DOMAINS, own)) {
+    throw new AppError(400, `Campaigns can't send from ${email}. Use an allowed domain or the product's own domain.`, SENDER_DOMAIN_ERROR);
+  }
+}
+
 export const productsService = {
   async list(): Promise<PublicProduct[]> {
     const rows = await Product.findAll({ ...withRelations, order: [["name", "ASC"]] });
@@ -115,10 +130,12 @@ export const productsService = {
   },
 
   async create(
-    input: { name: string; description?: string; stage?: ProductStage; ownerId?: string; tint?: string; projectIds?: string[] },
+    input: { name: string; description?: string; stage?: ProductStage; ownerId?: string; tint?: string; projectIds?: string[]; senderName?: string | null; senderEmail?: string | null },
     auth: Auth,
   ): Promise<PublicProduct> {
     if (!isOrgManager(auth.accessLevel)) throw forbidden("Only executives can create products");
+    // A new product has no sites yet, so only the allowed domains apply.
+    if (input.senderEmail) await assertProductSender(null, input.senderEmail);
     const ownerId = input.ownerId ?? auth.sub;
     const product = await sequelize.transaction(async (transaction) => {
       const p = await Product.create(
@@ -129,6 +146,8 @@ export const productsService = {
           stage: input.stage ?? "in_development",
           ownerId,
           tint: input.tint ?? null,
+          senderName: input.senderName ?? null,
+          senderEmail: input.senderEmail ?? null,
         },
         { transaction },
       );
@@ -143,7 +162,7 @@ export const productsService = {
 
   async update(
     id: string,
-    patch: { name?: string; description?: string; stage?: ProductStage; ownerId?: string; tint?: string | null; logoUrl?: string | null },
+    patch: { name?: string; description?: string; stage?: ProductStage; ownerId?: string; tint?: string | null; logoUrl?: string | null; senderName?: string | null; senderEmail?: string | null },
     auth: Auth,
   ): Promise<{ before: PublicProduct; after: PublicProduct }> {
     await assertCanManage(id, auth);
@@ -158,6 +177,9 @@ export const productsService = {
     if (patch.stage !== undefined) p.stage = patch.stage;
     if (patch.tint !== undefined) p.tint = patch.tint;
     if (patch.logoUrl !== undefined) p.logoUrl = patch.logoUrl;
+    if (patch.senderEmail) await assertProductSender(id, patch.senderEmail);
+    if (patch.senderName !== undefined) p.senderName = patch.senderName;
+    if (patch.senderEmail !== undefined) p.senderEmail = patch.senderEmail;
     if (patch.ownerId !== undefined) {
       p.ownerId = patch.ownerId;
       await ProductMember.findOrCreate({ where: { productId: id, userId: patch.ownerId }, defaults: { productId: id, userId: patch.ownerId, title: "Owner" } });

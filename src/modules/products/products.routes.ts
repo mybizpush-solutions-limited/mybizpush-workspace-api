@@ -12,7 +12,14 @@ productsRouter.use(requireAuth);
 
 const tint = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Use a hex color like #F5ECE4");
 
+const blankIsNull = (v: unknown) => (typeof v === "string" && !v.trim() ? null : v);
+const senderFields = {
+  senderName: z.preprocess(blankIsNull, z.string().trim().max(120).nullable().optional()),
+  senderEmail: z.preprocess(blankIsNull, z.string().trim().toLowerCase().email().max(254).nullable().optional()),
+};
+
 const createSchema = z.object({
+  ...senderFields,
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(400).optional(),
   stage: z.enum(PRODUCT_STAGES).optional(),
@@ -28,6 +35,7 @@ const updateSchema = z.object({
   ownerId: z.string().uuid().optional(),
   tint: tint.nullable().optional(),
   logoUrl: z.string().url().nullable().optional(),
+  ...senderFields,
 });
 
 const projectsSchema = z.object({ projectIds: z.array(z.string().uuid()).min(1).max(100) });
@@ -56,7 +64,7 @@ productsRouter.post(
   validateBody(createSchema),
   asyncHandler(async (req, res) => {
     const product = await productsService.create(req.body, req.auth!);
-    await audit({ req, action: "product.create", target: { type: "product", id: product.id }, after: { name: product.name, ownerId: product.ownerId, projectIds: product.projectIds } });
+    await audit({ req, action: "product.create", target: { type: "product", id: product.id }, after: { name: product.name, ownerId: product.ownerId, projectIds: product.projectIds, senderName: product.senderName, senderEmail: product.senderEmail } });
     res.status(201).json({ product });
   }),
 );
@@ -70,8 +78,8 @@ productsRouter.patch(
       req,
       action: "product.update",
       target: { type: "product", id: after.id },
-      before: { name: before.name, stage: before.stage, ownerId: before.ownerId },
-      after: { name: after.name, stage: after.stage, ownerId: after.ownerId },
+      before: { name: before.name, stage: before.stage, ownerId: before.ownerId, senderName: before.senderName, senderEmail: before.senderEmail },
+      after: { name: after.name, stage: after.stage, ownerId: after.ownerId, senderName: after.senderName, senderEmail: after.senderEmail },
     });
     res.json({ product: after });
   }),

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { badRequest } from "../../lib/errors";
 import { sequelize } from "../../db/sequelize";
 import { redis } from "../../redis/client";
-import { EmailThreadLink, ProductRepo, ContentEvent, ContentItem, SocialAccount, Appraisal, AppraisalCycle, StaffQuery, Target, TargetAssignment, TargetProgress, CalendarEvent, MeetingActionItem, MeetingAttendee, MeetingNote, Announcement, AnnouncementReceipt, Conversation, ConversationMember, Message, MessageReaction, Comment, Issue, Label, Meeting, Notification, Task, TaskReview, TaskStatusHistory, TaskSubmission, TaskTemplate, User, type ItemType } from "../../models";
+import { Attachment, EmailThreadLink, ProductRepo, ContentEvent, ContentItem, SocialAccount, Appraisal, AppraisalCycle, StaffQuery, Target, TargetAssignment, TargetProgress, CalendarEvent, MeetingActionItem, MeetingAttendee, MeetingNote, Announcement, AnnouncementReceipt, Conversation, ConversationMember, Message, MessageReaction, Comment, Issue, Label, Meeting, Notification, Task, TaskReview, TaskStatusHistory, TaskSubmission, TaskTemplate, User, type ItemType, type RecordType } from "../../models";
 import {
   serializeComment,
   serializeLabel,
@@ -27,7 +27,12 @@ import { contentCreateSchema, contentReviewSchema, contentStatusSchema, contentU
 import { serializeLink } from "../integrations/gmail.service";
 import { serializeProductRepo } from "../integrations/integrations.routes";
 import { calendarService, serializeActionItem, serializeEvent, serializeNote } from "../meetings/calendar.service";
-import { inMyScopesSql, visibleMeetingIds, visibleMeetingsSql } from "../meetings/meeting.visibility";
+import { inMyScopesSql } from "../meetings/meeting.visibility";
+import { assertCanSeeRecord, maskStaff, seesPrivateStaffFields, viewerFor, visibleIds, visibleItemsWhere, type Viewer } from "../access/visibility";
+import { needsUrlRefresh, visibleEmailLinksSql } from "../access/visibility.rules";
+import { childIds, changesSince, reconcile, TRACKED, type SyncRecordAccess } from "./access";
+import { env } from "../../config/env";
+import { fileLink } from "../../lib/cloudinary";
 import { actionItemSchema, actionItemUpdateSchema, noteSchema, rsvpSchema } from "../meetings/meetings.routes";
 import { meetingsService } from "../meetings/meetings.service";
 import { appraisalsService, serializeAppraisal, serializeCycle } from "../performance/appraisals.service";
@@ -71,6 +76,9 @@ type DeltaCollection = (typeof DELTA_COLLECTIONS)[number];
 type ReferenceCollection = (typeof REFERENCE_COLLECTIONS)[number];
 type Collection = DeltaCollection | ReferenceCollection;
 
+// Collections whose rows carry their files, so a fresh link needs the row sent again.
+const FILE_HOLDERS: Partial<Record<DeltaCollection, RecordType>> = { tasks: "task", issues: "issue", messages: "message" };
+
 const PAGE_SIZE = 500;
 // Rows committed slightly after we read can carry an updated_at just before our
 // read time. Overlapping the cursor by this window means they are picked up on
@@ -80,6 +88,7 @@ const SAFETY_WINDOW_MS = 5_000;
 interface Cursor {
   v: 1;
   t: Partial<Record<DeltaCollection, string>>;
+  u?: string; // when this device last got fresh file links
 }
 
 function decodeCursor(token: string | undefined): Cursor {
@@ -103,14 +112,14 @@ interface DeltaSource {
   serializeAll?: (rows: Model[], userId: string) => Promise<unknown[]>;
   ownerOnly?: boolean; // rows have userId and belong to one user
   // Limits rows to what this person may see.
-  visibleTo?: (userId: string) => Record<string | symbol, unknown> | Promise<Record<string | symbol, unknown>>;
+  visibleTo?: (userId: string, viewer: Viewer) => Record<string | symbol, unknown> | Promise<Record<string | symbol, unknown>>;
 }
 
 const DELTA: Record<DeltaCollection, DeltaSource> = {
-  tasks: { model: Task, include: taskInclude, serialize: (r) => serializeWorkItem(r as Task, "task") },
-  taskSubmissions: { model: TaskSubmission, serialize: (r) => serializeTaskSubmission(r as TaskSubmission) },
-  taskReviews: { model: TaskReview, serialize: (r) => serializeTaskReview(r as TaskReview) },
-  taskStatusHistory: { model: TaskStatusHistory, serialize: (r) => serializeTaskStatusHistory(r as TaskStatusHistory) },
+  tasks: { model: Task, include: taskInclude, visibleTo: (_u, v) => ({ id: visibleIds(v, "task") }), serialize: (r) => serializeWorkItem(r as Task, "task") },
+  taskSubmissions: { model: TaskSubmission, visibleTo: (_u, v) => ({ taskId: visibleIds(v, "task") }), serialize: (r) => serializeTaskSubmission(r as TaskSubmission) },
+  taskReviews: { model: TaskReview, visibleTo: (_u, v) => ({ taskId: visibleIds(v, "task") }), serialize: (r) => serializeTaskReview(r as TaskReview) },
+  taskStatusHistory: { model: TaskStatusHistory, visibleTo: (_u, v) => ({ taskId: visibleIds(v, "task") }), serialize: (r) => serializeTaskStatusHistory(r as TaskStatusHistory) },
   taskTemplates: { model: TaskTemplate, serialize: (r) => serializeTaskTemplate(r as TaskTemplate) },
   conversations: {
     model: Conversation,
@@ -139,32 +148,33 @@ const DELTA: Record<DeltaCollection, DeltaSource> = {
     serialize: (r) => serializeAnnouncement(r as Announcement),
   },
   announcementReceipts: { model: AnnouncementReceipt, ownerOnly: true, serialize: (r) => serializeReceipt(r as AnnouncementReceipt) },
-  issues: { model: Issue, include: workItemInclude, serialize: (r) => serializeWorkItem(r as Issue, "issue") },
+  issues: { model: Issue, include: workItemInclude, visibleTo: (_u, v) => ({ id: visibleIds(v, "issue") }), serialize: (r) => serializeWorkItem(r as Issue, "issue") },
   comments: {
     model: Comment,
     include: [{ model: User, as: "mentions", attributes: ["id"], through: { attributes: [] } }],
+    visibleTo: (_u, v) => ({ [Op.and]: [visibleItemsWhere(v, '"Comment"')] }),
     serialize: (r) => serializeComment(r as Comment),
   },
   notifications: { model: Notification, serialize: (r) => serializeNotification(r as Notification), ownerOnly: true },
   meetings: {
     model: Meeting,
     include: [{ model: User, as: "attendees", attributes: ["id"], through: { attributes: [] } }],
-    visibleTo: (userId) => ({ [Op.and]: [sequelize.literal(visibleMeetingsSql(userId))] }),
+    visibleTo: (_u, v) => ({ id: visibleIds(v, "meeting") }),
     serialize: (r) => serializeMeeting(r as Meeting),
   },
   meetingAttendees: {
     model: MeetingAttendee,
-    visibleTo: (userId) => ({ meetingId: { [Op.in]: sequelize.literal(visibleMeetingIds(userId)) } }),
+    visibleTo: (_u, v) => ({ meetingId: visibleIds(v, "meeting") }),
     serialize: (r) => serializeMeetingAttendee(r as MeetingAttendee),
   },
   meetingNotes: {
     model: MeetingNote,
-    visibleTo: (userId) => ({ meetingId: { [Op.in]: sequelize.literal(visibleMeetingIds(userId)) } }),
+    visibleTo: (_u, v) => ({ meetingId: visibleIds(v, "meeting") }),
     serialize: (r) => serializeNote(r as MeetingNote),
   },
   meetingActionItems: {
     model: MeetingActionItem,
-    visibleTo: (userId) => ({ meetingId: { [Op.in]: sequelize.literal(visibleMeetingIds(userId)) } }),
+    visibleTo: (_u, v) => ({ meetingId: visibleIds(v, "meeting") }),
     serialize: (r) => serializeActionItem(r as MeetingActionItem),
   },
   staffQueries: {
@@ -215,7 +225,12 @@ const DELTA: Record<DeltaCollection, DeltaSource> = {
     serialize: (r) => serializeContentEvent(r as ContentEvent),
   },
   socialAccounts: { model: SocialAccount, serialize: (r) => serializeSocial(r as SocialAccount) },
-  emailThreadLinks: { model: EmailThreadLink, serialize: (r) => serializeLink(r as EmailThreadLink) },
+  emailThreadLinks: {
+    model: EmailThreadLink,
+    // The person who linked it, and those who can see the record it's linked to.
+    visibleTo: (_u, v) => ({ id: { [Op.in]: sequelize.literal(`(${visibleEmailLinksSql(v)})`) } }),
+    serialize: (r) => serializeLink(r as EmailThreadLink),
+  },
   productRepos: { model: ProductRepo, serialize: (r) => serializeProductRepo(r as ProductRepo) },
   calendarEvents: {
     model: CalendarEvent,
@@ -224,8 +239,11 @@ const DELTA: Record<DeltaCollection, DeltaSource> = {
   },
 };
 
-const REFERENCE: Record<ReferenceCollection, () => Promise<unknown[]>> = {
-  users: () => usersRepo.list(),
+const REFERENCE: Record<ReferenceCollection, (userId: string) => Promise<unknown[]>> = {
+  users: async (userId) => {
+    const privileged = await seesPrivateStaffFields(userId);
+    return (await usersRepo.list()).map((u) => maskStaff(u, userId, privileged));
+  },
   departments: () => departmentsService.list(),
   projects: () => projectsService.list(),
   labels: async () => (await Label.findAll({ order: [["name", "ASC"]] })).map(serializeLabel),
@@ -248,6 +266,21 @@ export async function pull(
   const changes: Partial<Record<Collection, CollectionChanges>> = {};
   const next: Cursor = { v: 1, t: { ...cursor.t } };
   let hasMore = false;
+  const viewer = await viewerFor(userId);
+
+  // Who could see what changes without the records changing, so it's worked out here.
+  const accessRows = new Map<string, SyncRecordAccess[]>();
+  for (const t of TRACKED) {
+    const relevant = [t.collection, ...t.children.map((c) => c.collection)].some((c) => wanted.has(c));
+    if (relevant) accessRows.set(t.collection, await reconcile(t, viewer));
+  }
+
+  // Unchanged records aren't sent again, so links to private files would run out on a
+  // device that keeps syncing. Well before that, the records holding files are sent
+  // again with fresh links, and every link is listed in attachmentUrls. A device with
+  // nothing yet doesn't need this: its first pull brings fresh links anyway.
+  const refreshLinks = Object.keys(cursor.t).length > 0 && (!requested?.length || wanted.has("attachmentUrls")) && needsUrlRefresh(cursor.u, startedAt, env.ATTACHMENT_URL_TTL_SECONDS);
+  const privateFiles = refreshLinks ? await Attachment.findAll({ where: { [Op.and]: [{ delivery: "authenticated" }, visibleItemsWhere(viewer, '"Attachment"')] } }) : [];
 
   for (const name of DELTA_COLLECTIONS) {
     if (!wanted.has(name)) continue;
@@ -255,7 +288,7 @@ export async function pull(
     const since = cursor.t[name] ? new Date(cursor.t[name]!) : new Date(0);
     const where: Record<string | symbol, unknown> = { updatedAt: { [Op.gt]: since } };
     if (source.ownerOnly) where.userId = userId;
-    if (source.visibleTo) Object.assign(where, await source.visibleTo(userId));
+    if (source.visibleTo) Object.assign(where, await source.visibleTo(userId, viewer));
 
     const rows = await source.model.findAll({
       where,
@@ -279,8 +312,40 @@ export async function pull(
       limit: 5_000,
     });
 
-    const upserted = source.serializeAll ? await source.serializeAll(page, userId) : page.map((r) => source.serialize!(r));
-    changes[name] = { upserted, deleted: tombstones.map((t) => t.recordId) };
+    const deletedIds = new Set(tombstones.map((t) => t.recordId));
+    const extra: Model[] = [];
+
+    // A device on its first sync has nothing to remove, and gets all it can see anyway.
+    if (cursor.t[name]) {
+      const inPage = new Set(page.map((r) => String(r.get("id"))));
+      const toSend: string[] = [];
+      for (const t of TRACKED) {
+        const rows = accessRows.get(t.collection);
+        if (!rows) continue;
+        const { granted, revoked } = changesSince(rows, since);
+        let grantIds: string[] = [];
+        if (name === t.collection) {
+          revoked.forEach((id) => deletedIds.add(id));
+          grantIds = granted;
+        } else {
+          const child = t.children.find((c) => c.collection === name);
+          if (child) {
+            (await childIds(child.table, child.fk, revoked)).forEach((id) => deletedIds.add(id));
+            grantIds = await childIds(child.table, child.fk, granted);
+          }
+        }
+        toSend.push(...grantIds);
+      }
+      const holder = FILE_HOLDERS[name];
+      if (holder) toSend.push(...privateFiles.filter((a) => a.itemType === holder).map((a) => a.itemId));
+      const fresh = [...new Set(toSend)].filter((id) => !inPage.has(id));
+      if (fresh.length) extra.push(...(await source.model.findAll({ where: { id: fresh }, include: source.include as never })));
+    }
+    const outgoing = [...page, ...extra];
+    const upserted = source.serializeAll ? await source.serializeAll(outgoing, userId) : outgoing.map((r) => source.serialize!(r));
+    // Something lost and later regained is simply here.
+    for (const r of outgoing) deletedIds.delete(String(r.get("id")));
+    changes[name] = { upserted, deleted: [...deletedIds] };
 
     if (more) {
       hasMore = true;
@@ -293,8 +358,18 @@ export async function pull(
 
   for (const name of REFERENCE_COLLECTIONS) {
     if (!wanted.has(name)) continue;
-    changes[name] = { upserted: await REFERENCE[name](), deleted: [], full: true };
+    changes[name] = { upserted: await REFERENCE[name](userId), deleted: [], full: true };
   }
+
+  next.u = cursor.u;
+  if (refreshLinks) {
+    (changes as Record<string, CollectionChanges>).attachmentUrls = {
+      upserted: privateFiles.map((a) => ({ id: a.id, itemId: a.itemId, itemType: a.itemType, ...fileLink(a) })),
+      deleted: [],
+      full: true,
+    };
+  }
+  if (refreshLinks || !Object.keys(cursor.t).length) next.u = new Date(startedAt).toISOString();
 
   return { changes, cursor: encodeCursor(next), hasMore, serverTime: new Date(startedAt).toISOString() };
 }
@@ -398,6 +473,7 @@ async function apply(userId: string, m: Mutation): Promise<MutationResult> {
       return { mutationId: m.mutationId, status: "applied", record: await service.create(input, userId, { strict: true }) };
     }
     if (!m.recordId) throw badRequest("recordId is required");
+    await assertCanSeeRecord(userId, resource, m.recordId);
     const stale = await conflictIfStale(model, m.recordId, m.baseUpdatedAt, () => service.byId(m.recordId!));
     if (stale) return { ...stale, mutationId: m.mutationId };
     if (action === "update") {

@@ -1,5 +1,7 @@
 import { Comment, User, type RecordType } from "../../models";
 import { serializeComment } from "../shared/serializers";
+import { notFound } from "../../lib/errors";
+import { assertCanSeeRecord, canSeeAll, canSeeAnyRecord } from "../access/visibility";
 import { logActivity, notify } from "../shared/events";
 import { githubSyncService } from "../github/github.sync.service";
 
@@ -11,12 +13,14 @@ const withMentions = {
 export const COMMENTABLE = ["task", "issue", "meeting", "announcement", "content", "campaign", "target", "project", "product"] as const;
 
 export const commentsService = {
-  async forItem(itemId: string) {
+  async forItem(itemId: string, viewerId: string) {
+    if (!(await canSeeAnyRecord(viewerId, itemId))) throw notFound("Not found");
     const rows = await Comment.findAll({ where: { itemId }, ...withMentions, order: [["createdAt", "ASC"]] });
     return rows.map(serializeComment);
   },
 
   async add(input: { id?: string; itemId: string; itemType: RecordType; authorId: string; body: string; mentions?: string[] }) {
+    await assertCanSeeRecord(input.authorId, input.itemType, input.itemId);
     const comment = await Comment.create({
       ...(input.id ? { id: input.id } : {}),
       itemId: input.itemId,
@@ -40,7 +44,9 @@ export const commentsService = {
     }
 
     await logActivity({ itemId: input.itemId, itemType: input.itemType, actorId: input.authorId, kind: "commented" });
-    for (const uid of input.mentions ?? []) {
+    // Being mentioned doesn't open the record, so only those who can see it are told.
+    const mayBeTold = await canSeeAll(input.mentions ?? [], input.itemType, input.itemId);
+    for (const uid of mayBeTold) {
       await notify({ userId: uid, fromUserId: input.authorId, kind: "mentioned", itemId: input.itemId, itemType: input.itemType, message: "You were mentioned" });
     }
 

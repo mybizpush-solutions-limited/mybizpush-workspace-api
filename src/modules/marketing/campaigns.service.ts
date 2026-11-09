@@ -6,10 +6,11 @@ import { audit } from "../../lib/audit";
 import { campaignTransport } from "../../lib/campaignMail";
 import { AppError, badRequest, forbidden, notFound } from "../../lib/errors";
 import { enqueue } from "../../jobs/queues";
-import { Campaign, CampaignLink, CampaignRecipient, Lead, LeadSegment, type CampaignAudience, type CampaignStatus } from "../../models";
+import { Campaign, CampaignLink, CampaignRecipient, Lead, LeadSegment, Product, type CampaignAudience, type CampaignStatus } from "../../models";
 import { can } from "../access/engine";
 import { notify } from "../shared/events";
-import { canMoveCampaign, domainOf, extractLinks, isEmail, isFreshTimestamp, normalizeEmail, renderForRecipient, resolveSender, svixSignedContent } from "./campaign.render";
+import { canMoveCampaign, domainOf, extractLinks, formatFrom, isEmail, isFreshTimestamp, normalizeEmail, renderForRecipient, resolveSender, SENDER_DOMAIN_ERROR, senderDomainAllowed, svixSignedContent } from "./campaign.render";
+import { organizationSender, productOwnDomains } from "../organization/organization.service";
 import { addSuppression, requireOnProduct, segmentWhere, serializeLead, suppressedSet } from "./leads.service";
 
 // Campaigns: approval, throttled sending, tracking and reports (API-CHANGES A602).
@@ -72,10 +73,37 @@ const trackingUrls = (token: string) => ({
   click: (linkId: string) => `${publicBase()}/api/v1/t/c/${token}/${linkId}`,
 });
 
-function senderOf(c: Campaign): string {
-  const out = resolveSender({ fromName: c.fromName, fromEmail: c.fromEmail, defaultFrom: env.MARKETING_EMAIL_FROM, allowedDomains: env.MARKETING_ALLOWED_FROM_DOMAINS });
-  if (typeof out !== "string") throw badRequest(out.error);
-  return out;
+const senderDomainError = (email: string) => new AppError(400, `Campaigns can't send from ${email}. Use an allowed domain or the product's own domain.`, SENDER_DOMAIN_ERROR);
+
+// Who this campaign would send as, and whether that's allowed.
+async function senderFor(c: Pick<Campaign, "productId" | "fromName" | "fromEmail">) {
+  const [product, organization, productDomains] = await Promise.all([Product.findByPk(c.productId, { attributes: ["senderName", "senderEmail"] }), organizationSender(), productOwnDomains(c.productId)]);
+  return resolveSender({
+    campaign: { name: c.fromName, email: c.fromEmail },
+    product: { name: product?.senderName, email: product?.senderEmail },
+    organization,
+    fallbackFrom: env.MARKETING_EMAIL_FROM,
+    allowedDomains: env.MARKETING_ALLOWED_FROM_DOMAINS,
+    productDomains,
+  });
+}
+
+async function senderOf(c: Campaign): Promise<string> {
+  const s = await senderFor(c);
+  if (s.problem) throw senderDomainError(s.email);
+  return formatFrom(s);
+}
+
+async function withSender(c: Campaign, withBody = true) {
+  const s = await senderFor(c);
+  return { ...serializeCampaign(c, withBody), resolvedFrom: { name: s.name, email: s.email }, senderProblem: s.problem };
+}
+
+// A sender typed on the campaign is checked as soon as it's saved.
+async function assertCampaignSender(productId: string, fromEmail: string | undefined): Promise<void> {
+  if (!fromEmail?.trim()) return;
+  const email = normalizeEmail(fromEmail);
+  if (!senderDomainAllowed(email, env.MARKETING_ALLOWED_FROM_DOMAINS, await productOwnDomains(productId))) throw senderDomainError(email);
 }
 
 // ---- Audience --------------------------------------------------------------
@@ -144,29 +172,31 @@ export const campaignsService = {
   async list(productId: string, userId: string, status?: string) {
     await requireOnProduct(userId, "campaign.view", productId);
     const rows = await Campaign.findAll({ where: { productId, ...(status ? { status } : {}) }, order: [["updatedAt", "DESC"]], limit: 200 });
-    return rows.map((c) => serializeCampaign(c, false));
+    return Promise.all(rows.map((c) => withSender(c, false)));
   },
 
   async create(productId: string, input: CampaignInput, userId: string) {
     await requireOnProduct(userId, "campaign.create", productId);
+    await assertCampaignSender(productId, input.fromEmail);
     const c = await Campaign.create({ ...input, productId, createdBy: userId, replyTo: input.replyTo ?? null, audience: input.audience ?? {}, throttlePerMinute: input.throttlePerMinute ?? 60 });
-    return serializeCampaign(c);
+    return withSender(c);
   },
 
   async get(id: string, userId: string) {
     const c = await load(id);
     await requireOnProduct(userId, "campaign.view", c.productId);
-    return serializeCampaign(c);
+    return withSender(c);
   },
 
   async update(id: string, patch: Partial<CampaignInput>, userId: string) {
     const c = await load(id);
     await requireOnProduct(userId, "campaign.create", c.productId);
     if (!["draft", "rejected", "approved"].includes(c.status)) throw new AppError(409, "This campaign can't be changed now", "not_editable");
+    await assertCampaignSender(c.productId, patch.fromEmail);
     // What was approved is what gets sent: any change needs approving again.
     const wasApproved = c.status === "approved";
     await c.update({ ...patch, ...(wasApproved ? { status: "draft" as const, reviewedBy: null, reviewedAt: null, reviewNote: null } : {}) });
-    return serializeCampaign(c);
+    return withSender(c);
   },
 
   async audiencePreview(id: string, userId: string) {
@@ -182,7 +212,8 @@ export const campaignsService = {
       else if (r === "no_consent") excluded.noConsent++;
       else excluded[r]++;
     }
-    return { eligible: eligible.length, excluded, sample: eligible.slice(0, 10).map((l) => serializeLead(l)) };
+    const sender = await senderFor(c);
+    return { eligible: eligible.length, excluded, sample: eligible.slice(0, 10).map((l) => serializeLead(l)), resolvedFrom: { name: sender.name, email: sender.email }, senderProblem: sender.problem };
   },
 
   // Test sends only go to staff, so a draft can't reach a customer.
@@ -203,7 +234,7 @@ export const campaignsService = {
         linkIds: new Map(),
         clickUrl: () => "",
       });
-      await campaignTransport().send({ from: senderOf(c), to: email, replyTo: c.replyTo, subject: out.subject, html: out.html, text: out.text, headers: {} });
+      await campaignTransport().send({ from: await senderOf(c), to: email, replyTo: c.replyTo, subject: out.subject, html: out.html, text: out.text, headers: {} });
     }
     return list.length;
   },
@@ -213,12 +244,12 @@ export const campaignsService = {
     await requireOnProduct(userId, "campaign.create", c.productId);
     assertMove(c, "pending_approval");
     if (!c.subject.trim() || !c.bodyHtml.trim() || !c.name.trim()) throw badRequest("A campaign needs a subject and content first");
-    senderOf(c);
+    await senderOf(c);
     if (!(await audienceLeads(c)).length) throw badRequest("Pick who this campaign goes to");
     await c.update({ status: "pending_approval", submittedBy: userId, submittedAt: new Date(), reviewNote: null });
     await auditCampaign(req, userId, c, "submit");
     await notifyApprovers(c, userId);
-    return serializeCampaign(c);
+    return withSender(c);
   },
 
   async approve(id: string, note: string | undefined, userId: string, req?: Req) {
@@ -229,7 +260,7 @@ export const campaignsService = {
     await c.update({ status: "approved", reviewedBy: userId, reviewedAt: new Date(), reviewNote: note ?? null });
     await auditCampaign(req, userId, c, "approve");
     await tell(c.createdBy, userId, c, `Approved: ${c.name}`);
-    return serializeCampaign(c);
+    return withSender(c);
   },
 
   async reject(id: string, note: string, userId: string, req?: Req) {
@@ -239,20 +270,20 @@ export const campaignsService = {
     await c.update({ status: "rejected", reviewedBy: userId, reviewedAt: new Date(), reviewNote: note });
     await auditCampaign(req, userId, c, "reject");
     await tell(c.createdBy, userId, c, `Returned: ${c.name}. ${note}`);
-    return serializeCampaign(c);
+    return withSender(c);
   },
 
   async schedule(id: string, scheduledAt: string | undefined, userId: string, req?: Req) {
     const c = await load(id);
     await requireOnProduct(userId, "campaign.send", c.productId);
     if (c.status !== "approved") throw new AppError(409, "This campaign needs approval first", "not_approved");
-    senderOf(c);
+    await senderOf(c);
     const when = scheduledAt ? new Date(scheduledAt) : null;
     if (when && when <= new Date()) throw badRequest("Pick a time in the future");
     await c.update({ status: "scheduled", scheduledAt: when ?? new Date() });
     await auditCampaign(req, userId, c, "schedule", { scheduledAt: c.scheduledAt?.toISOString() });
     if (!when) await enqueue("campaigns", "start", { campaignId: id }, { jobId: `campaign-start-${id}-${Date.now()}` });
-    return serializeCampaign(c);
+    return withSender(c);
   },
 
   async pause(id: string, userId: string, req?: Req) {
@@ -261,7 +292,7 @@ export const campaignsService = {
     assertMove(c, "paused");
     await c.update({ status: "paused" });
     await auditCampaign(req, userId, c, "pause");
-    return serializeCampaign(c);
+    return withSender(c);
   },
 
   async resume(id: string, userId: string, req?: Req) {
@@ -277,7 +308,7 @@ export const campaignsService = {
       await enqueue("campaigns", "batch", { campaignId: id }, { jobId: `campaign-batch-${id}-${Date.now()}` });
     }
     await auditCampaign(req, userId, c, "resume");
-    return serializeCampaign(c);
+    return withSender(c);
   },
 
   async cancel(id: string, userId: string, req?: Req) {
@@ -288,7 +319,7 @@ export const campaignsService = {
     await CampaignRecipient.update({ status: "skipped", skipReason: "cancelled" }, { where: { campaignId: id, status: "queued" } });
     await recomputeStats(id);
     await auditCampaign(req, userId, c, "cancel");
-    return serializeCampaign(await load(id));
+    return withSender(await load(id));
   },
 
   async report(id: string, userId: string) {
@@ -307,7 +338,7 @@ export const campaignsService = {
       CampaignLink.findAll({ where: { campaignId: id }, order: [["clicks", "DESC"]] }),
     ]);
     return {
-      campaign: serializeCampaign(c),
+      campaign: await withSender(c),
       timeline: timeline.map((t) => ({ hour: t.hour, opened: Number(t.opened), clicked: Number(t.clicked) })),
       links: links.map((l) => ({ id: l.id, url: l.url, clicks: l.clicks, uniqueClicks: l.uniqueClicks })),
     };
@@ -388,7 +419,16 @@ export const campaignsService = {
     const rows = await CampaignRecipient.findAll({ where: { campaignId, status: "queued" }, limit: c.throttlePerMinute, order: [["createdAt", "ASC"]] });
     if (!rows.length) return this.finish(c);
 
-    const sender = senderOf(c);
+    // The sender may have stopped being allowed since this was approved. Stop rather
+    // than send from somewhere else.
+    let sender: string;
+    try {
+      sender = await senderOf(c);
+    } catch (err) {
+      await c.update({ status: "paused" });
+      await tell(c.createdBy, null, c, `Paused ${c.name}: ${(err as Error).message}`);
+      return;
+    }
     const links = await CampaignLink.findAll({ where: { campaignId } });
     const linkIds = new Map(links.map((l) => [l.url, l.id]));
     const suppressed = await suppressedSet(c.productId, rows.map((r) => r.email));

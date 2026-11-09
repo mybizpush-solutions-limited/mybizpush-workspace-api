@@ -36,6 +36,7 @@ npm run dev                   # start with hot reload on http://localhost:4000
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run migrate` — run pending migrations (`npm run migrate -- down` to roll back one)
 - `npm run seed` — load idempotent demo data
+- `npm run attachments:privatize`: list files uploaded before private delivery; add `-- --apply` to move them (see Private files)
 - `npm run dev:worker` / `npm run worker` — run background job workers on their own (with `RUN_JOB_WORKERS=false` on the API)
 
 ## Project structure
@@ -156,6 +157,19 @@ Each mutation is `{ mutationId, type, recordId?, payload, baseUpdatedAt? }` with
 - Results are `applied`, `conflict` or `rejected` (with `error`). One rejection does not stop the batch.
 
 Deletes are recorded in `sync_tombstones` by model hooks (including bulk deletes), so clients remove them on the next pull.
+
+Losing sight of a record isn't a delete, and nothing about the record changes. Each pull compares what the person can see now with `sync_record_access`, records any difference with the time, and sends a device everything that changed since its cursor. Lost records and their children come in `deleted`, gained ones in `upserted`, on every device. The first pull after this shipped marks everything the person can't see as lost, which clears copies held from before these rules.
+
+### Private files
+
+Files on everything except campaigns are stored with Cloudinary `authenticated` delivery. `attachment.url` is a signed link made when the record is sent to someone allowed to see it, and it works for `ATTACHMENT_URL_TTL_SECONDS` (7 days). Campaign files stay public because their images are mailed out. About every 3.5 days, a pull sends tasks, issues and messages holding private files again with fresh links, plus an `attachmentUrls` list of every link. `GET /attachments/:id/url` gives a fresh link at any time.
+
+Files uploaded earlier stay public until someone moves them:
+
+1. Back up first. Moving a file ends its public link, including any place it was pasted.
+2. `npm run attachments:privatize` lists what would move and changes nothing.
+3. `npm run attachments:privatize -- --apply --limit=1`, then open that file through the app to check it.
+4. `npm run attachments:privatize -- --apply`. It can be run again: a file that failed stays public and is tried next time. It exits with an error if any failed.
 
 ### GitHub setup
 

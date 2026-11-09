@@ -57,6 +57,9 @@ export interface SeedRole {
 // report.view is deliberately not here: "work" roles are often held organization
 // wide, and everyone already sees their own work without it.
 const work = ["task.view", "task.create", "task.submit", "meeting.view", "message.send"];
+// Roles held organization wide leave task.view out: it would open every task to
+// everyone holding the role. What they see comes from their connection to the work.
+const orgWork = work.filter((p) => p !== "task.view");
 
 export const SEED_ROLES: SeedRole[] = [
   { key: "executive_admin", name: "Executive admin", description: "Everything, organization wide", system: true, defaultScope: "organization", permissions: ["*"] },
@@ -74,9 +77,9 @@ export const SEED_ROLES: SeedRole[] = [
     description: "Operations, databases and integrations",
     system: true,
     defaultScope: "organization",
-    permissions: [...work, "database.manage", "integration.manage", "staff.view", "audit.view", "report.generate"],
+    permissions: [...orgWork, "database.manage", "integration.manage", "staff.view", "audit.view", "report.generate"],
   },
-  { key: "member", name: "Member", description: "Default for every staff member", system: true, defaultScope: "organization", permissions: [...work, "staff.view", "department.view", "team.view", "product.view", "project.view"] },
+  { key: "member", name: "Member", description: "Default for every staff member", system: true, defaultScope: "organization", permissions: [...orgWork, "staff.view", "department.view", "team.view", "product.view", "project.view"] },
   {
     key: "product_manager",
     name: "Product manager",
@@ -110,7 +113,7 @@ export const SEED_ROLES: SeedRole[] = [
     description: "Staff records, queries and appraisals",
     system: false,
     defaultScope: "organization",
-    permissions: [...work, "staff.create", "staff.edit", "staff.suspend", "staff.export", "staff.import", "hr.view", "hr.edit", "query.issue", "query.review", "query.resolve", "query.view", "announcement.draft", "announcement.publish", "event.create", "event.edit", "event.delete"],
+    permissions: [...orgWork, "staff.create", "staff.edit", "staff.suspend", "staff.export", "staff.import", "hr.view", "hr.edit", "query.issue", "query.review", "query.resolve", "query.view", "announcement.draft", "announcement.publish", "event.create", "event.edit", "event.delete"],
   },
   { key: "email_marketer", name: "Email marketer", description: "Leads and campaigns for a product", system: false, defaultScope: "product", permissions: [...work, "campaign.create", "campaign.import", "campaign.send", "campaign.view", "content.create"] },
 ];

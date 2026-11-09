@@ -9,6 +9,9 @@ export interface MetaAttachment {
   size: number;
   type: string;
   url: string;
+  urlExpiresAt?: string | null;
+  // Where the file lives. Stays on the server: serializeMessage turns it into a link.
+  asset?: { publicId: string | null; delivery: string | null; resourceType: string | null; format: string | null };
 }
 
 const dimensions = { width: z.number().int().min(1).max(20000).optional(), height: z.number().int().min(1).max(20000).optional() };

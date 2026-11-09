@@ -9,7 +9,7 @@ import { DELTA_COLLECTIONS, REFERENCE_COLLECTIONS, mutationSchema, pull, push } 
 export const syncRouter = Router();
 syncRouter.use(requireAuth);
 
-const KNOWN = new Set<string>([...DELTA_COLLECTIONS, ...REFERENCE_COLLECTIONS]);
+const KNOWN = new Set<string>([...DELTA_COLLECTIONS, ...REFERENCE_COLLECTIONS, "attachmentUrls"]);
 
 // GET /sync/pull?cursor=<opaque>&collections=tasks,notifications
 // Repeat with the returned cursor while hasMore is true.

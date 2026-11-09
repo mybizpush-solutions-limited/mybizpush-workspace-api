@@ -16,6 +16,7 @@ import { githubService } from "../github/github.service";
 import { serializeWorkItem, taskInclude, workItemInclude } from "../shared/serializers";
 import { taskHooks, type TaskCreateExtras } from "../tasks/tasks.service";
 import { logActivity, notify } from "../shared/events";
+import { assertCanSeeRecord, viewerFor, visibleIds } from "../access/visibility";
 
 export interface WorkItemCreateInput extends TaskCreateExtras {
   // Client-generated id (offline-created items keep the id they were given on
@@ -58,8 +59,9 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
   }
 
   return {
-    async list(filter: { projectId?: string; departmentId?: string; assigneeId?: string } = {}) {
-      const where: Record<string, unknown> = {};
+    // Every caller says who is asking. Only what concerns them comes back.
+    async list(viewerId: string, filter: { projectId?: string; departmentId?: string; assigneeId?: string } = {}) {
+      const where: Record<string, unknown> = { id: visibleIds(await viewerFor(viewerId), type) };
       if (filter.projectId) where.projectId = filter.projectId;
       if (filter.departmentId) where.departmentId = filter.departmentId;
       const rows = await M.findAll({
@@ -70,7 +72,13 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
       return (rows as (Task | Issue)[]).map((r) => serializeWorkItem(r, type));
     },
 
+    // For internal use, such as the GitHub sync. People go through view().
     byId: (id: string) => reload(id),
+
+    async view(id: string, viewerId: string) {
+      await assertCanSeeRecord(viewerId, type, id);
+      return reload(id);
+    },
 
     // strict: enforce task.assign when assigning other people (mobile and sync).
     async create(input: WorkItemCreateInput, reporterId: string, opts: { strict?: boolean } = {}) {
@@ -102,6 +110,7 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
     },
 
     async update(id: string, patch: WorkItemUpdateInput, actorId: string, opts: { strict?: boolean } = {}) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       const prepared = type === "task" ? await taskHooks.prepareUpdate(item, patch, actorId, !!opts.strict) : null;
@@ -136,6 +145,7 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
     },
 
     async setStatus(id: string, status: WorkItemCreateInput["status"], actorId: string, opts: { note?: string; blockedReason?: string } = {}) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       if (type === "task") {
@@ -166,6 +176,7 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
     },
 
     async requestFeedback(id: string, fromUserId: string, actorId: string) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       await item.update({ feedbackAwaitingFrom: fromUserId, feedbackRequestedBy: actorId, feedbackRequestedAt: new Date() });
@@ -175,6 +186,7 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
     },
 
     async provideFeedback(id: string, actorId: string, body: string) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       await item.update({ feedbackAwaitingFrom: null, feedbackRequestedBy: null, feedbackRequestedAt: null });
@@ -184,6 +196,7 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
     },
 
     async linkPullRequest(id: string, pr: { number: number; title: string; url: string; status?: "open" | "merged" | "closed" | "draft" }, actorId: string) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       // Enrich from GitHub when the URL is a real PR (falls back to provided data).
@@ -205,6 +218,7 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
 
     // Link a documentation/reference URL to the item (Google Doc, Notion, spec…).
     async linkDoc(id: string, doc: { title: string; url: string }, actorId: string) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       await DocumentationLink.create({
@@ -218,7 +232,8 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
     },
 
     // Remove a linked documentation URL.
-    async unlinkDoc(id: string, docId: string) {
+    async unlinkDoc(id: string, docId: string, actorId: string) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       await DocumentationLink.destroy({ where: { id: docId, itemId: id, itemType: type } });
@@ -227,7 +242,8 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
 
     // Re-fetch live CI/review state for every linked PR. Lets the UI self-heal
     // when GitHub webhooks aren't delivered, so check state can't get stuck.
-    async refreshPullRequests(id: string) {
+    async refreshPullRequests(id: string, actorId: string) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       const prs = await PullRequest.findAll({ where: { itemId: id, itemType: type } });

@@ -498,6 +498,10 @@ export class Attachment extends Model<InferAttributes<Attachment>, InferCreation
   declare url: string;
   declare publicId: CreationOptional<string | null>;
   declare uploadedBy: CreationOptional<string | null>;
+  // "authenticated" files are only reachable through a signed link (A1003).
+  declare delivery: CreationOptional<"upload" | "authenticated">;
+  declare resourceType: CreationOptional<string | null>;
+  declare format: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
 }
 Attachment.init(
@@ -511,6 +515,9 @@ Attachment.init(
     url: { type: DataTypes.STRING, allowNull: false },
     publicId: { type: DataTypes.STRING, allowNull: true },
     uploadedBy: { type: DataTypes.UUID, allowNull: true },
+    delivery: { type: DataTypes.STRING(14), allowNull: false, defaultValue: "upload" },
+    resourceType: { type: DataTypes.STRING(8), allowNull: true },
+    format: { type: DataTypes.STRING(20), allowNull: true },
     createdAt: DataTypes.DATE,
   },
   { sequelize, tableName: "attachments", updatedAt: false },
@@ -827,6 +834,8 @@ export class Product extends Model<InferAttributes<Product>, InferCreationAttrib
   declare tint: CreationOptional<string | null>;
   declare stage: CreationOptional<ProductStage>;
   declare ownerId: CreationOptional<string | null>;
+  declare senderName: CreationOptional<string | null>;
+  declare senderEmail: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -840,6 +849,8 @@ Product.init(
     tint: { type: DataTypes.STRING(9), allowNull: true },
     stage: { type: DataTypes.ENUM(...PRODUCT_STAGES), allowNull: false, defaultValue: "in_development" },
     ownerId: { type: DataTypes.UUID, allowNull: true },
+    senderName: { type: DataTypes.STRING(120), allowNull: true },
+    senderEmail: { type: DataTypes.STRING(254), allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },

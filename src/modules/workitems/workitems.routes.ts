@@ -63,12 +63,12 @@ function makeWorkItemRouter(service: ReturnType<typeof makeWorkItemService>, wit
     asyncHandler(async (req, res) => {
       const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
       const departmentId = typeof req.query.departmentId === "string" ? req.query.departmentId : undefined;
-      res.json({ items: await service.list({ projectId, departmentId }) });
+      res.json({ items: await service.list(req.auth!.sub, { projectId, departmentId }) });
     }),
   );
 
   router.get("/:id", asyncHandler(async (req, res) => {
-    res.json({ item: await service.byId(req.params.id!) });
+    res.json({ item: await service.view(req.params.id!, req.auth!.sub) });
   }));
 
   router.post("/", validateBody(create), asyncHandler(async (req, res) => {
@@ -98,7 +98,7 @@ function makeWorkItemRouter(service: ReturnType<typeof makeWorkItemService>, wit
 
   // Re-fetch live CI/review state for the item's linked PRs (manual/auto refresh).
   router.post("/:id/pull-requests/refresh", asyncHandler(async (req, res) => {
-    res.json({ item: await service.refreshPullRequests(req.params.id!) });
+    res.json({ item: await service.refreshPullRequests(req.params.id!, req.auth!.sub) });
   }));
 
   router.post("/:id/docs", validateBody(docSchema), asyncHandler(async (req, res) => {
@@ -106,7 +106,7 @@ function makeWorkItemRouter(service: ReturnType<typeof makeWorkItemService>, wit
   }));
 
   router.delete("/:id/docs/:docId", asyncHandler(async (req, res) => {
-    res.json({ item: await service.unlinkDoc(req.params.id!, req.params.docId!) });
+    res.json({ item: await service.unlinkDoc(req.params.id!, req.params.docId!, req.auth!.sub) });
   }));
 
   return router;

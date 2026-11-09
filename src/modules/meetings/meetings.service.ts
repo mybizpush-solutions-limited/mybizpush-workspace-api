@@ -25,7 +25,7 @@ import { groupsService } from "../groups/groups.service";
 import type { GroupRef } from "../groups/groups.merge";
 import { notify } from "../shared/events";
 import { refreshBadges, syncHint } from "../shared/live";
-import { isInMeetingScope } from "./meeting.visibility";
+import { assertCanSeeRecord, viewerFor, visibleIds } from "../access/visibility";
 
 const MEETING_COLLECTIONS = ["meetings", "meetingAttendees"];
 
@@ -175,10 +175,11 @@ export const meetingsService = {
   assertCanManage,
 
   // Cancelled meetings used to be deleted, so older callers don't expect them here.
-  async list(opts: { includeCancelled?: boolean } = {}) {
+  async list(userId: string, opts: { includeCancelled?: boolean } = {}) {
+    const viewer = await viewerFor(userId);
     const rows = await Meeting.findAll({
       ...withAttendees,
-      where: opts.includeCancelled ? {} : { status: { [Op.ne]: "cancelled" } },
+      where: { id: visibleIds(viewer, "meeting"), ...(opts.includeCancelled ? {} : { status: { [Op.ne]: "cancelled" } }) },
       order: [["startsAt", "ASC"]],
     });
     return rows.map((m) => serializeMeeting(m));
@@ -446,15 +447,5 @@ export const meetingsService = {
 };
 
 export async function assertCanSee(meeting: Meeting, userId: string): Promise<void> {
-  if (meeting.organizerId === userId) return;
-  if (await MeetingAttendee.count({ where: { meetingId: meeting.id, userId } })) return;
-  if (await isInMeetingScope(meeting, userId)) return;
-  if (await can({ sub: userId }, "meeting.view", { type: "organization", id: null })) {
-    // Everyone holds meeting.view by default, so at organization level this only
-    // opens meetings that aren't private to their invitees.
-    if (meeting.scopeType === "organization") return;
-    const user = await User.findByPk(userId, { attributes: ["accessLevel"] });
-    if (user && isOrgManager(user.accessLevel)) return;
-  }
-  throw forbidden("You can't see this meeting");
+  await assertCanSeeRecord(userId, "meeting", meeting.id);
 }

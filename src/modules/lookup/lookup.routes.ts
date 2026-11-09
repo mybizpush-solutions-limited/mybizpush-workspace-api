@@ -5,6 +5,7 @@ import { asyncHandler, badRequest } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { redis } from "../../redis/client";
+import { viewerFor, visibleIds } from "../access/visibility";
 import { announcementsService } from "../announcements/announcements.service";
 import { chatService } from "../chat/chat.service";
 import { AccessRole, Department, Issue, Meeting, Product, ProductMember, Project, Task, Team, User } from "../../models";
@@ -127,13 +128,14 @@ searchRouter.get(
   asyncHandler(async (req, res) => {
     const q = String(req.query.q ?? "").trim().slice(0, 80);
     if (q.length < 2) return res.json({ q, groups: [] });
+    const viewer = await viewerFor(req.auth!.sub);
     const [people, products, projects, tasks, issues, meetings, messages, announcements] = await Promise.all([
       find("staff", q, 5),
       find("product", q, 5),
       find("project", q, 5),
-      Task.findAll({ where: { title: like(q) }, attributes: ["id", "title", "status", "projectId"], order: [["updatedAt", "DESC"]], limit: 5 }),
-      Issue.findAll({ where: { title: like(q) }, attributes: ["id", "title", "status", "projectId"], order: [["updatedAt", "DESC"]], limit: 5 }),
-      Meeting.findAll({ where: { title: like(q) }, attributes: ["id", "title", "startsAt"], order: [["startsAt", "DESC"]], limit: 5 }),
+      Task.findAll({ where: { title: like(q), id: visibleIds(viewer, "task") }, attributes: ["id", "title", "status", "projectId"], order: [["updatedAt", "DESC"]], limit: 5 }),
+      Issue.findAll({ where: { title: like(q), id: visibleIds(viewer, "issue") }, attributes: ["id", "title", "status", "projectId"], order: [["updatedAt", "DESC"]], limit: 5 }),
+      Meeting.findAll({ where: { title: like(q), id: visibleIds(viewer, "meeting") }, attributes: ["id", "title", "startsAt"], order: [["startsAt", "DESC"]], limit: 5 }),
       chatService.search(req.auth!.sub, { q, limit: 5 }),
       announcementsService.list(req.auth!.sub, { state: "active" }),
     ]);

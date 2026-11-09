@@ -22,7 +22,7 @@ commentsRouter.get(
   asyncHandler(async (req, res) => {
     const itemId = typeof req.query.itemId === "string" ? req.query.itemId : undefined;
     if (!itemId) throw badRequest("itemId query param is required");
-    res.json({ comments: await commentsService.forItem(itemId) });
+    res.json({ comments: await commentsService.forItem(itemId, req.auth!.sub) });
   }),
 );
 

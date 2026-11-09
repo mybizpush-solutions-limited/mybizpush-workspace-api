@@ -8,6 +8,7 @@ import { chatCompletion } from "../../../lib/openrouter";
 import { Conversation, ConversationMember, Task } from "../../../models";
 import { redis } from "../../../redis/client";
 import { reachFor, reachIsEmpty } from "../../access/reach";
+import { viewerFor, visibleIds } from "../../access/visibility";
 import { announcementsService, type Audience } from "../../announcements/announcements.service";
 import { chatService } from "../../chat/chat.service";
 import { findForLookup, type LookupType } from "../../lookup/lookup.routes";
@@ -76,7 +77,7 @@ function buildPrompt(text: string, ctx: { now: Date; timezone: string }, only?: 
 const lookupFor = (userId: string): Lookup => async (type, query): Promise<Candidate[]> => {
   if (type === "task") {
     const safe = query.replace(/[%_]/g, (c) => `\\${c}`);
-    const rows = await Task.findAll({ where: { title: { [Op.iLike]: `%${safe}%` } }, attributes: ["id", "title", "status"], order: [["updatedAt", "DESC"]], limit: 8 });
+    const rows = await Task.findAll({ where: { title: { [Op.iLike]: `%${safe}%` }, id: visibleIds(await viewerFor(userId), "task") }, attributes: ["id", "title", "status"], order: [["updatedAt", "DESC"]], limit: 8 });
     return rows.map((t) => ({ id: t.id, label: t.title, sublabel: t.status }));
   }
   if (type === "conversation") {

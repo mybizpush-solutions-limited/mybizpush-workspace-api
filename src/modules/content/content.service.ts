@@ -1,9 +1,9 @@
 import { Op, type WhereOptions } from "sequelize";
 import { audit } from "../../lib/audit";
 import { AppError, badRequest, forbidden, notFound } from "../../lib/errors";
-import { Attachment, ContentEvent, ContentItem, ProductMember, SocialAccount } from "../../models";
+import { Attachment, ContentEvent, ContentItem, SocialAccount } from "../../models";
 import { can } from "../access/engine";
-import { reachFor } from "../access/reach";
+import { assertCanSeeRecord, viewerFor, visibleIds } from "../access/visibility";
 import { notify } from "../shared/events";
 import { syncHint } from "../shared/live";
 import { serializeAttachment } from "../shared/serializers";
@@ -74,27 +74,9 @@ async function load(id: string): Promise<ContentItem> {
   return c;
 }
 
-// Sync and lists: products I belong to or can create content in, or where I'm named.
+// Sync and lists: through the shared rule.
 export async function contentVisibleWhere(userId: string): Promise<WhereOptions> {
-  const reach = await reachFor(userId, "content.create");
-  if (reach.organization) return {};
-  const mine = (await ProductMember.findAll({ where: { userId }, attributes: ["productId"] })).map((m) => m.productId);
-  const productIds = [...new Set([...mine, ...reach.products])];
-  return {
-    [Op.or]: [
-      ...(productIds.length ? [{ productId: productIds }] : []),
-      { writerId: userId },
-      { designerId: userId },
-      { reviewerId: userId },
-      { createdBy: userId },
-    ],
-  } as WhereOptions;
-}
-
-async function assertCanSee(c: ContentItem, userId: string): Promise<void> {
-  const where = await contentVisibleWhere(userId);
-  const n = await ContentItem.count({ where: { [Op.and]: [{ id: c.id }, where] } });
-  if (!n) throw notFound("Content item not found");
+  return { id: visibleIds(await viewerFor(userId), "content") } as WhereOptions;
 }
 
 async function rolesOf(c: ContentItem, userId: string): Promise<Set<ContentActor>> {
@@ -150,8 +132,8 @@ export const contentService = {
   },
 
   async get(id: string, userId: string) {
+    await assertCanSeeRecord(userId, "content", id);
     const c = await load(id);
-    await assertCanSee(c, userId);
     const [events, files] = await Promise.all([
       ContentEvent.findAll({ where: { contentId: id }, order: [["createdAt", "ASC"]] }),
       Attachment.findAll({ where: { itemType: "content", itemId: id } }),

@@ -2,7 +2,21 @@ import { QueryTypes } from "sequelize";
 import { sequelize } from "../../db/sequelize";
 import { Conversation, ConversationMember, Message, MessageReaction, User } from "../../models";
 
+import { fileLink } from "../../lib/cloudinary";
+import type { MetaAttachment } from "./chat.meta";
+
 const iso = (d: Date | null | undefined) => d?.toISOString() ?? null;
+
+// Files in a message get a fresh link each time it's sent to someone in it, and
+// where the file is stored doesn't leave the server.
+export function linkedMeta(meta: Record<string, unknown>): Record<string, unknown> {
+  const files = meta.attachments;
+  if (!Array.isArray(files)) return meta;
+  return {
+    ...meta,
+    attachments: (files as MetaAttachment[]).map(({ asset, ...rest }) => ({ ...rest, ...fileLink({ url: rest.url, ...(asset ?? {}) }) })),
+  };
+}
 
 export function serializeMessage(m: Message) {
   const reactions = (m.get("reactions") as MessageReaction[] | undefined) ?? [];
@@ -15,7 +29,7 @@ export function serializeMessage(m: Message) {
     senderId: m.senderId ?? null,
     type: m.type,
     body: m.body,
-    meta: m.meta,
+    meta: linkedMeta(m.meta),
     parentId: m.parentId ?? null,
     replyToId: m.replyToId ?? null,
     threadReplyCount: m.threadReplyCount,

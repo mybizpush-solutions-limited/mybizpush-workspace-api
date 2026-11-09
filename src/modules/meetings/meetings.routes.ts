@@ -84,7 +84,7 @@ export const actionItemUpdateSchema = z.object({
 const isMobile = (req: Request) => req.get("x-client")?.toLowerCase() === "mobile";
 
 meetingsRouter.get("/", asyncHandler(async (req, res) => {
-  res.json({ meetings: await meetingsService.list({ includeCancelled: req.query.includeCancelled === "true" }) });
+  res.json({ meetings: await meetingsService.list(req.auth!.sub, { includeCancelled: req.query.includeCancelled === "true" }) });
 }));
 
 // Whether the caller is allowed to schedule (exec, project manager, or HR).
@@ -203,7 +203,7 @@ calendarRouter.post("/events", validateBody(z.object({ id: uuid.optional(), ...e
   res.status(201).json({ event: await calendarService.createEvent(req.body, req.auth!.sub) });
 }));
 calendarRouter.get("/events/:id", asyncHandler(async (req, res) => {
-  res.json({ event: await calendarService.getEvent(req.params.id!) });
+  res.json({ event: await calendarService.getEvent(req.params.id!, req.auth!.sub) });
 }));
 calendarRouter.patch("/events/:id", validateBody(z.object(eventFields).partial()), asyncHandler(async (req, res) => {
   res.json({ event: await calendarService.updateEvent(req.params.id!, req.body, req.auth!.sub) });

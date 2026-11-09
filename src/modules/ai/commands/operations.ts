@@ -78,7 +78,7 @@ export const OPERATIONS: OperationDef[] = [
     label: "Update task",
     description: "Change the status of an existing task",
     consequential: false,
-    permission: "task.view",
+    permission: "task.submit",
     fields: [
       { name: "taskId", label: "Task", type: "task", required: true },
       { name: "status", label: "Status", type: "choice", required: true, options: ["todo", "assigned", "accepted", "in_progress", "blocked", "in_review", "done", "cancelled"] },

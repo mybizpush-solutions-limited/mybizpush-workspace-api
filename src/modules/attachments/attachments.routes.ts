@@ -51,6 +51,13 @@ attachmentsRouter.post(
   }),
 );
 
+attachmentsRouter.get(
+  "/:id/url",
+  asyncHandler(async (req, res) => {
+    res.json(await attachmentsService.link(req.params.id!, req.auth!.sub));
+  }),
+);
+
 attachmentsRouter.delete(
   "/:id",
   asyncHandler(async (req, res) => {

@@ -1,10 +1,11 @@
 import { Op, QueryTypes } from "sequelize";
 import { sequelize } from "../../db/sequelize";
 import { redis } from "../../redis/client";
-import { Activity, CLOSED_TASK_STATUSES, Meeting, Notification, Product, Project, REVIEW_TASK_STATUSES, Task, User } from "../../models";
+import { CLOSED_TASK_STATUSES, Meeting, Notification, Product, Project, REVIEW_TASK_STATUSES, Task, User } from "../../models";
 import { productsService } from "../products/products.service";
 import { grantsFor } from "../access/engine";
 import { projectsWith } from "../access/reach";
+import { activityFeed } from "./activity.feed";
 import { announcementsService } from "../announcements/announcements.service";
 import { chatUnreadTotal } from "../chat/chat.service";
 
@@ -134,7 +135,7 @@ export const homeService = {
         : [],
       this.meetingsToday(userId),
       Notification.count({ where: { userId, read: false } }),
-      Activity.findAll({ order: [["createdAt", "DESC"]], limit: 15 }),
+      activityFeed(userId, { productId, limit: 8 }),
     ]);
 
     const projectNames = new Map(
@@ -152,12 +153,8 @@ export const homeService = {
       ...dueToday.map((t) => ({ kind: "due_today" as const, itemType: "task", itemId: t.id, title: t.title, meta: projectNames.get(t.projectId) ?? "", dueAt: t.dueDate?.toISOString() ?? null })),
     ];
 
-    // Activity on items in scope only.
-    const scopedTaskIds = scopeProjects ? new Set((await Task.findAll({ where: { projectId: scopeProjects }, attributes: ["id"] })).map((t) => t.id)) : null;
-    const recent = activity
-      .filter((a) => !scopedTaskIds || scopedTaskIds.has(a.itemId))
-      .slice(0, 8)
-      .map((a) => ({ id: a.id, kind: a.kind, itemId: a.itemId, itemType: a.itemType, actorId: a.actorId, createdAt: a.createdAt.toISOString() }));
+    // Only what concerns them, through the same rule as the Activity screen.
+    const recent = activity.activity.map((a) => ({ id: a.id, kind: a.kind, itemId: a.itemId, itemType: a.itemType, actorId: a.actor?.id ?? null, createdAt: a.createdAt }));
 
     const product = productId ? await Product.findByPk(productId, { attributes: ["id", "name"] }) : null;
     return {

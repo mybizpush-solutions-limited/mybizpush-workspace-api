@@ -84,7 +84,7 @@ gmailRouter.post("/links", validateBody(z.object({ threadId, ...recordRef })), a
   res.status(out!.created ? 201 : 200).json({ link: out!.link });
 }));
 gmailRouter.get("/links", asyncHandler(async (req, res) => {
-  res.json({ links: await gmailService.links(z.object(recordRef).parse(req.query)) });
+  res.json({ links: await gmailService.links(z.object(recordRef).parse(req.query), req.auth!.sub) });
 }));
 gmailRouter.post("/links/:id/seen", asyncHandler(async (req, res) => {
   res.json({ link: await gmailService.seen(req.params.id!, req.auth!.sub) });

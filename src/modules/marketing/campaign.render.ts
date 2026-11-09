@@ -74,17 +74,50 @@ export const isEmail = (v: string) => v.length <= 254 && EMAIL_RE.test(v);
 export const normalizeEmail = (v: string) => v.trim().toLowerCase();
 export const domainOf = (email: string) => email.split("@")[1]?.toLowerCase() ?? "";
 
-// Campaigns mention this sender; only allowed domains can be used.
-export function resolveSender(input: { fromName?: string | null; fromEmail?: string | null; defaultFrom: string; allowedDomains: string[] }): string | { error: string } {
-  if (!input.fromEmail) {
-    if (!input.fromName) return input.defaultFrom;
-    const address = /<([^>]+)>/.exec(input.defaultFrom)?.[1] ?? input.defaultFrom;
-    return `${input.fromName.replace(/["<>]/g, "")} <${address}>`;
-  }
-  const email = normalizeEmail(input.fromEmail);
-  if (!isEmail(email) || !input.allowedDomains.map((d) => d.toLowerCase()).includes(domainOf(email))) return { error: `Campaigns can't send from ${input.fromEmail}` };
-  return input.fromName ? `${input.fromName.replace(/["<>]/g, "")} <${email}>` : email;
+export interface SenderLevel {
+  name?: string | null;
+  email?: string | null;
 }
+
+// Parses "Name <a@b.c>" or "a@b.c".
+export function parseFrom(from: string): { name: string; email: string } {
+  const m = /^(.*)<([^>]+)>\s*$/.exec(from);
+  if (m) return { name: m[1]!.trim().replace(/^"|"$/g, ""), email: normalizeEmail(m[2]!) };
+  return { name: "", email: normalizeEmail(from) };
+}
+
+export const SENDER_DOMAIN_ERROR = "sender_domain_not_allowed";
+
+// Who a campaign sends as: the campaign, then its product, then the organization, then
+// the configured last resort. A blank name takes the name from the level that gave the
+// address. Mail from an unverified domain isn't delivered, so a bad domain is reported,
+// never quietly replaced by a good one.
+export function resolveSender(input: {
+  campaign: SenderLevel;
+  product: SenderLevel;
+  organization: SenderLevel;
+  fallbackFrom: string;
+  allowedDomains: string[];
+  productDomains: string[];
+}): { name: string; email: string; problem: typeof SENDER_DOMAIN_ERROR | null } {
+  const fallback = parseFrom(input.fallbackFrom);
+  const levels: SenderLevel[] = [input.campaign, input.product, input.organization, fallback];
+  const chosen = levels.find((l) => l.email?.trim()) ?? fallback;
+  const email = normalizeEmail(chosen.email ?? "");
+  const name = (input.campaign.name?.trim() || chosen.name?.trim() || "").replace(/["<>\r\n]/g, "");
+  return { name, email, problem: senderDomainAllowed(email, input.allowedDomains, input.productDomains) ? null : SENDER_DOMAIN_ERROR };
+}
+
+export function senderDomainAllowed(email: string, allowedDomains: string[], productDomains: string[] = []): boolean {
+  if (!isEmail(email)) return false;
+  const domain = domainOf(email);
+  return [...allowedDomains, ...productDomains].map((d) => d.toLowerCase()).includes(domain);
+}
+
+export const formatFrom = (s: { name: string; email: string }) => (s.name ? `${s.name} <${s.email}>` : s.email);
+
+// "https://www.shop.example/" as a site records it, down to "shop.example".
+export const bareDomain = (raw: string) => raw.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, "").replace(/^www\./, "");
 
 export interface ImportRowInput {
   email: string;

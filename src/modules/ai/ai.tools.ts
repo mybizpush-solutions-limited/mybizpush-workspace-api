@@ -14,6 +14,7 @@ import {
 } from "../../models";
 import { CLOSED_TASK_STATUSES } from "../../models/task-status";
 import { serializeWorkItem, workItemInclude } from "../shared/serializers";
+import { assertCanSeeRecord, viewerFor, visibleIds } from "../access/visibility";
 import { commentsService } from "../comments/comments.service";
 import { issuesService, tasksService } from "../workitems/workitems.service";
 import { meService } from "../me/me.service";
@@ -60,7 +61,8 @@ function briefItem(item: Task | Issue, type: ItemType) {
   };
 }
 
-async function findItem(itemId: string, itemType: ItemType) {
+async function findItem(itemId: string, itemType: ItemType, viewerId: string) {
+  await assertCanSeeRecord(viewerId, itemType, itemId);
   const item = await modelFor(itemType).findByPk(itemId, { include: workItemInclude });
   if (!item) throw notFound(`${itemType} not found`);
   return item;
@@ -171,7 +173,8 @@ const readTools: Tool[] = [
       required: [],
     },
     mutates: false,
-    async run(args) {
+    async run(args, actor) {
+      const viewer = await viewerFor(actor.id);
       const where: Record<string | symbol, unknown> = {};
       if (args.query) {
         where[Op.or] = [
@@ -210,9 +213,9 @@ const readTools: Tool[] = [
         types.map((type) =>
           modelFor(type)
             .findAll({
-              where: (openOnly
+              where: { ...(openOnly
                 ? { ...where, status: type === "task" ? { [Op.notIn]: CLOSED_TASK_STATUSES } : { [Op.ne]: "done" } }
-                : where) as WhereOptions,
+                : where), id: visibleIds(viewer, type) } as WhereOptions,
               include,
               order: [["updatedAt", "DESC"]],
               limit,
@@ -239,8 +242,8 @@ const readTools: Tool[] = [
       required: ["itemId", "itemType"],
     },
     mutates: false,
-    async run(args) {
-      const item = await findItem(args.itemId, args.itemType);
+    async run(args, actor) {
+      const item = await findItem(args.itemId, args.itemType, actor.id);
       const comments = await Comment.findAll({
         where: { itemId: args.itemId },
         order: [["createdAt", "ASC"]],
@@ -377,7 +380,7 @@ const readTools: Tool[] = [
       const from = args.from ? new Date(args.from) : new Date();
       const to = args.to ? new Date(args.to) : new Date(from.getTime() + 14 * 86_400_000);
       const meetings = await Meeting.findAll({
-        where: { startsAt: { [Op.gte]: from, [Op.lte]: to } },
+        where: { startsAt: { [Op.gte]: from, [Op.lte]: to }, id: visibleIds(await viewerFor(actor.id), "meeting") },
         include: [{ model: User, as: "attendees", attributes: ["id", "name"], through: { attributes: [] } }],
         order: [["startsAt", "ASC"]],
         limit: 100,
@@ -563,8 +566,8 @@ const writeTools: Tool[] = [
       required: ["itemId", "itemType"],
     },
     mutates: true,
-    async preview(args) {
-      const item = await findItem(args.itemId, args.itemType);
+    async preview(args, actor) {
+      const item = await findItem(args.itemId, args.itemType, actor.id);
       const changes: string[] = [];
       if (args.title !== undefined) changes.push(`title → "${args.title}"`);
       if (args.description !== undefined) changes.push("description rewritten");
@@ -616,8 +619,8 @@ const writeTools: Tool[] = [
       required: ["itemId", "itemType", "status"],
     },
     mutates: true,
-    async preview(args) {
-      const item = await findItem(args.itemId, args.itemType);
+    async preview(args, actor) {
+      const item = await findItem(args.itemId, args.itemType, actor.id);
       return `Move ${args.itemType} "${item.title}" from ${item.status} to ${args.status}`;
     },
     run: (args, actor) => serviceFor(args.itemType).setStatus(args.itemId, args.status, actor.id),
@@ -649,8 +652,8 @@ const writeTools: Tool[] = [
       required: ["itemId", "itemType", "body"],
     },
     mutates: true,
-    async preview(args) {
-      const item = await findItem(args.itemId, args.itemType);
+    async preview(args, actor) {
+      const item = await findItem(args.itemId, args.itemType, actor.id);
       const excerpt = args.body.length > 120 ? `${args.body.slice(0, 120)}…` : args.body;
       return `Comment on "${item.title}": ${excerpt}`;
     },
@@ -682,9 +685,9 @@ const writeTools: Tool[] = [
       required: ["itemId", "itemType", "from"],
     },
     mutates: true,
-    async preview(args) {
+    async preview(args, actor) {
       const [item, user] = await Promise.all([
-        findItem(args.itemId, args.itemType),
+        findItem(args.itemId, args.itemType, actor.id),
         resolveUser(args.from),
       ]);
       return `Request feedback from ${user.name} on "${item.title}"`;

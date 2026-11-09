@@ -15,6 +15,7 @@ import { notify } from "../shared/events";
 import { syncHint } from "../shared/live";
 import { tasksService, type WorkItemCreateInput } from "../workitems/workitems.service";
 import { assertCanSee } from "./meetings.service";
+import { assertCanSeeCalendarEvent } from "../access/visibility";
 import { inMyScopesSql, isInMeetingScope, visibleMeetingsSql } from "./meeting.visibility";
 import { occurrencesBetween } from "./occurrences";
 
@@ -321,7 +322,8 @@ export const calendarService = {
     return serializeEvent(e);
   },
 
-  async getEvent(id: string) {
+  async getEvent(id: string, userId: string) {
+    await assertCanSeeCalendarEvent(userId, id);
     const e = await CalendarEvent.findByPk(id);
     if (!e) throw notFound("Event not found");
     return serializeEvent(e);

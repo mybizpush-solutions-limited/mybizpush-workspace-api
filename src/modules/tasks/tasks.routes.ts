@@ -17,7 +17,7 @@ import {
   templateCreateSchema,
   templateUpdateSchema,
 } from "./tasks.schemas";
-import { reloadTask, tasksWorkflow } from "./tasks.service";
+import { tasksWorkflow } from "./tasks.service";
 
 // Task workflow endpoints (API-CHANGES A201 to A205). Mounted ahead of the shared
 // work item router: named paths must match before its /:id.
@@ -129,25 +129,25 @@ tasksExtRouter.post(
 tasksExtRouter.get(
   "/:id/submissions",
   asyncHandler(async (req, res) => {
-    res.json({ submissions: await tasksWorkflow.submissions(req.params.id!) });
+    res.json({ submissions: await tasksWorkflow.submissions(req.params.id!, req.auth!.sub) });
   }),
 );
 tasksExtRouter.get(
   "/:id/reviews",
   asyncHandler(async (req, res) => {
-    res.json({ reviews: await tasksWorkflow.reviews(req.params.id!) });
+    res.json({ reviews: await tasksWorkflow.reviews(req.params.id!, req.auth!.sub) });
   }),
 );
 tasksExtRouter.get(
   "/:id/history",
   asyncHandler(async (req, res) => {
-    res.json({ entries: await tasksWorkflow.history(req.params.id!) });
+    res.json({ entries: await tasksWorkflow.history(req.params.id!, req.auth!.sub) });
   }),
 );
 tasksExtRouter.get(
   "/:id/dependencies",
   asyncHandler(async (req, res) => {
-    res.json(await tasksWorkflow.dependencies(req.params.id!));
+    res.json(await tasksWorkflow.dependencies(req.params.id!, req.auth!.sub));
   }),
 );
 tasksExtRouter.post(
@@ -168,6 +168,6 @@ tasksExtRouter.delete(
 tasksExtRouter.get(
   "/:id",
   asyncHandler(async (req, res) => {
-    res.json({ item: await reloadTask(req.params.id!) });
+    res.json({ item: await tasksWorkflow.view(req.params.id!, req.auth!.sub) });
   }),
 );

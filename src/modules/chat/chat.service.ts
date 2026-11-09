@@ -23,7 +23,6 @@ import type { GroupRef } from "../groups/groups.merge";
 import { groupsService } from "../groups/groups.service";
 import { notify } from "../shared/events";
 import { refreshBadges, syncHint } from "../shared/live";
-import { serializeAttachment } from "../shared/serializers";
 import { buildMeta, directKeyOf, MessageShapeError, previewOf, toSearchQuery, type MetaAttachment } from "./chat.meta";
 import { serializeConversations, serializeMember, serializeMessage, unreadCounts } from "./chat.serialize";
 
@@ -669,7 +668,7 @@ async function claimAttachments(ids: string[], messageId: string | undefined, us
   for (const a of rows) {
     if (a.itemType !== "message" || a.itemId !== messageId || a.uploadedBy !== userId) throw forbidden("One of the files isn't yours to send");
   }
-  return rows.map(serializeAttachment);
+  return rows.map((a) => ({ id: a.id, name: a.name, size: Number(a.size), type: a.type, url: a.url, asset: { publicId: a.publicId ?? null, delivery: a.delivery ?? null, resourceType: a.resourceType ?? null, format: a.format ?? null } }));
 }
 
 async function removeMember(c: Conversation, member: ConversationMember): Promise<void> {

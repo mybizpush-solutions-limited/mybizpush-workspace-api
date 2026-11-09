@@ -176,7 +176,7 @@ export const announcementsService = {
   async get(id: string, userId: string) {
     const a = await load(id);
     const receipt = await receiptOf(id, userId);
-    if (!receipt && !(await mayManage(a, userId, "announcement.publish"))) throw forbidden("You can't see this announcement");
+    if (!receipt && !(await mayManage(a, userId, "announcement.publish"))) throw notFound("Announcement not found");
     return { announcement: await full(a), receipt: receipt ? serializeReceipt(receipt) : null };
   },
 
@@ -266,7 +266,7 @@ export const announcementsService = {
 
   async markRead(id: string, userId: string) {
     const receipt = await receiptOf(id, userId);
-    if (!receipt) throw forbidden("You can't see this announcement");
+    if (!receipt) throw notFound("Announcement not found");
     if (!receipt.readAt) await receipt.update({ readAt: new Date() });
     syncHint([userId], ["announcementReceipts"]);
     return serializeReceipt(receipt);
@@ -274,7 +274,7 @@ export const announcementsService = {
 
   async acknowledge(id: string, userId: string) {
     const receipt = await receiptOf(id, userId);
-    if (!receipt) throw forbidden("You can't see this announcement");
+    if (!receipt) throw notFound("Announcement not found");
     if (!receipt.acknowledgedAt) {
       const now = new Date();
       await receipt.update({ acknowledgedAt: now, readAt: receipt.readAt ?? now });

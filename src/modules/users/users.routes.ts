@@ -6,6 +6,7 @@ import { validateBody } from "../../middleware/validate";
 import { usersRepo } from "./users.repo";
 import { usersService } from "./users.service";
 import { audit } from "../../lib/audit";
+import { maskStaff, seesPrivateStaffFields } from "../access/visibility";
 
 export const usersRouter = Router();
 
@@ -25,8 +26,9 @@ const chiefBadgeSchema = z.object({ value: z.boolean() });
 
 usersRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
-    res.json({ users: await usersRepo.list() });
+  asyncHandler(async (req, res) => {
+    const privileged = await seesPrivateStaffFields(req.auth!.sub);
+    res.json({ users: (await usersRepo.list()).map((u) => maskStaff(u, req.auth!.sub, privileged)) });
   }),
 );
 
@@ -35,7 +37,7 @@ usersRouter.get(
   asyncHandler(async (req, res) => {
     const user = await usersRepo.publicById(req.params.id!);
     if (!user) throw notFound("User not found");
-    res.json({ user });
+    res.json({ user: maskStaff(user, req.auth!.sub, await seesPrivateStaffFields(req.auth!.sub)) });
   }),
 );
 

@@ -116,7 +116,8 @@ const schema = z.object({
   // ---- Marketing email (P6) ----
   // Public address of this API, for tracking and unsubscribe links in emails.
   PUBLIC_API_URL: z.string().url().default("http://localhost:4000"),
-  MARKETING_EMAIL_FROM: z.string().default("MyBizPush <news@mybizpush.com>"),
+  // Only a last resort, once a campaign, its product and the organization have no sender.
+  MARKETING_EMAIL_FROM: z.string().default("MyBizPush <info@mybizpush.com>"),
   // Domains campaigns may send from. They must be verified with the email provider.
   MARKETING_ALLOWED_FROM_DOMAINS: z
     .string()
@@ -145,6 +146,13 @@ const schema = z.object({
   CLIENT_LATEST_VERSION: z.string().default("1.0.0"),
   CLIENT_UPDATE_URL_IOS: z.string().optional().default(""),
   CLIENT_UPDATE_URL_ANDROID: z.string().optional().default(""),
+
+  // ---- Privacy and sending identity (P10) ----
+  // How long a signed link to a private file works.
+  ATTACHMENT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(7 * 24 * 60 * 60),
+  // The sender when a product has none of its own. Organization settings can override.
+  ORG_SENDER_EMAIL: z.string().default("info@mybizpush.com"),
+  ORG_SENDER_NAME: z.string().default("MyBizPush"),
 
   // ---- Website analytics ----
   // Rollup keeps the dashboards fast; prune keeps the raw event log bounded.

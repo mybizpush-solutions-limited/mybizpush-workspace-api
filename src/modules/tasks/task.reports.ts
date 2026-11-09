@@ -3,6 +3,7 @@ import { sequelize } from "../../db/sequelize";
 import { forbidden } from "../../lib/errors";
 import { Project, Task, User } from "../../models";
 import { projectsWith } from "../access/reach";
+import { viewerFor, visibleIds } from "../access/visibility";
 import { isOverdue, summarizeTasks, type ReportTask } from "./task.report.calc";
 import type { TaskReportQuery } from "./tasks.schemas";
 
@@ -31,7 +32,8 @@ async function resolve(q: TaskReportQuery, userId: string, permission: "report.v
   // report.export is not implied for one's own tasks.
   if (permission === "report.export" && self) throw forbidden("You don't have permission to export reports");
 
-  const ands: WhereOptions[] = [];
+  // A report never shows a task its reader couldn't open.
+  const ands: WhereOptions[] = [{ id: visibleIds(await viewerFor(userId), "task") }];
   if (visible !== "all" && !self) ands.push({ projectId: visible });
   if (self) ands.push(assignedTo(userId));
   if (q.projectId) ands.push({ projectId: q.projectId });

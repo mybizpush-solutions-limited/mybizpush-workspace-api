@@ -19,6 +19,7 @@ import {
 } from "../../models";
 import { can } from "../access/engine";
 import { projectsWith } from "../access/reach";
+import { assertCanSeeRecord, canSeeRecord, viewerFor, visibleIds } from "../access/visibility";
 import { groupsService } from "../groups/groups.service";
 import type { GroupRef } from "../groups/groups.merge";
 import { refreshBadges, syncHint } from "../shared/live";
@@ -42,6 +43,12 @@ export async function assigneeIdsOf(taskId: string): Promise<string[]> {
 }
 
 const projectScope = (projectId: string) => ({ type: "project" as const, id: projectId });
+
+// Reading or changing a task always starts here.
+async function loadVisibleTask(id: string, userId: string): Promise<Task> {
+  await assertCanSeeRecord(userId, "task", id);
+  return loadTask(id);
+}
 
 async function loadTask(id: string): Promise<Task> {
   const task = await Task.findByPk(id);
@@ -204,7 +211,7 @@ export const taskHooks = {
   async afterCreate(task: Task, input: TaskCreateExtras, assigneeIds: string[], actorId: string): Promise<void> {
     await TaskStatusHistory.create({ taskId: task.id, fromStatus: null, toStatus: task.status, actorId });
     if (input.assignGroups?.length) await addGroupAssignments(task.id, input.assignGroups, actorId);
-    for (const dependsOnId of input.dependsOnIds ?? []) await addDependencyRow(task.id, dependsOnId);
+    for (const dependsOnId of input.dependsOnIds ?? []) await addDependencyRow(task.id, dependsOnId, actorId);
     if (task.reviewerId) {
       await notify({ userId: task.reviewerId, fromUserId: actorId, kind: "reviewer_assigned", itemId: task.id, itemType: "task", message: `You'll review: ${task.title}` });
     }
@@ -272,8 +279,8 @@ async function dependencyEdges(): Promise<Map<string, string[]>> {
   return edges;
 }
 
-async function addDependencyRow(taskId: string, dependsOnId: string): Promise<void> {
-  if (!(await Task.findByPk(dependsOnId, { attributes: ["id"] }))) throw badRequest("That task no longer exists");
+async function addDependencyRow(taskId: string, dependsOnId: string, actorId: string): Promise<void> {
+  if (!(await canSeeRecord(actorId, "task", dependsOnId))) throw badRequest("That task no longer exists");
   if (wouldCreateCycle(await dependencyEdges(), taskId, dependsOnId)) {
     throw new AppError(409, "That would make these tasks wait for each other", "dependency_cycle");
   }
@@ -282,7 +289,7 @@ async function addDependencyRow(taskId: string, dependsOnId: string): Promise<vo
 
 async function setDependencies(taskId: string, dependsOnIds: string[], actorId: string): Promise<void> {
   await sequelize.query(`DELETE FROM task_dependencies WHERE task_id = :taskId`, { replacements: { taskId } });
-  for (const id of dependsOnIds) await addDependencyRow(taskId, id);
+  for (const id of dependsOnIds) await addDependencyRow(taskId, id, actorId);
   await logActivity({ itemId: taskId, itemType: "task", actorId, kind: "dependency_changed", data: { dependsOnIds } });
 }
 
@@ -309,14 +316,19 @@ const brief = (t: Task, assigneeIds: string[]) => ({ id: t.id, title: t.title, s
 // ---- Public operations ------------------------------------------------------
 
 export const tasksWorkflow = {
+  async view(id: string, userId: string) {
+    await assertCanSeeRecord(userId, "task", id);
+    return reloadTask(id);
+  },
+
   async transitions(id: string, userId: string) {
-    const task = await loadTask(id);
+    const task = await loadVisibleTask(id, userId);
     const roles = await actorRoles(task, userId);
     return { current: task.status, roles: [...roles], allowed: allowedMoves(task.status, roles, !!task.reviewerId) };
   },
 
   async submit(id: string, input: SubmitInput, userId: string) {
-    const task = await loadTask(id);
+    const task = await loadVisibleTask(id, userId);
     if (!(await can({ sub: userId }, "task.submit", projectScope(task.projectId)))) throw forbidden("You don't have permission to submit work");
     await checkMove(task, "submitted", userId, "submit");
 
@@ -351,7 +363,7 @@ export const tasksWorkflow = {
   },
 
   async review(id: string, input: ReviewInput, userId: string, req?: Parameters<typeof audit>[0]["req"]) {
-    const task = await loadTask(id);
+    const task = await loadVisibleTask(id, userId);
     if (input.id) {
       const existing = await TaskReview.findByPk(input.id);
       if (existing) return { review: serializeTaskReview(existing), item: await reloadTask(id) };
@@ -434,19 +446,19 @@ export const tasksWorkflow = {
     return { review: serializeTaskReview(review), item: await reloadTask(id) };
   },
 
-  async submissions(id: string) {
-    await loadTask(id);
+  async submissions(id: string, userId: string) {
+    await loadVisibleTask(id, userId);
     return (await TaskSubmission.findAll({ where: { taskId: id }, order: [["createdAt", "DESC"]] })).map(serializeTaskSubmission);
   },
 
-  async reviews(id: string) {
-    await loadTask(id);
+  async reviews(id: string, userId: string) {
+    await loadVisibleTask(id, userId);
     return (await TaskReview.findAll({ where: { taskId: id }, order: [["createdAt", "DESC"]] })).map(serializeTaskReview);
   },
 
   // Status moves, submissions and decisions as one timeline (TASK-15).
-  async history(id: string) {
-    await loadTask(id);
+  async history(id: string, userId: string) {
+    await loadVisibleTask(id, userId);
     const [statuses, submissions, reviews] = await Promise.all([
       TaskStatusHistory.findAll({ where: { taskId: id } }),
       TaskSubmission.findAll({ where: { taskId: id } }),
@@ -463,23 +475,25 @@ export const tasksWorkflow = {
     return entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
-  async dependencies(id: string) {
-    await loadTask(id);
+  async dependencies(id: string, userId: string) {
+    await loadVisibleTask(id, userId);
+    const viewer = await viewerFor(userId);
     const [outgoing, incoming] = await Promise.all([
       sequelize.query<{ id: string }>(`SELECT depends_on_id AS id FROM task_dependencies WHERE task_id = :id`, { replacements: { id }, type: QueryTypes.SELECT }),
       sequelize.query<{ id: string }>(`SELECT task_id AS id FROM task_dependencies WHERE depends_on_id = :id`, { replacements: { id }, type: QueryTypes.SELECT }),
     ]);
     const load = async (ids: string[]) => {
       if (!ids.length) return [];
-      const rows = await Task.findAll({ where: { id: ids }, attributes: ["id", "title", "status", "projectId", "dueDate"] });
+      // A task can wait on one this person can't see: its title stays private.
+      const rows = await Task.findAll({ where: { [Op.and]: [{ id: ids }, { id: visibleIds(viewer, "task") }] }, attributes: ["id", "title", "status", "projectId", "dueDate"] });
       return Promise.all(rows.map(async (t) => brief(t, await assigneeIdsOf(t.id))));
     };
     return { dependsOn: await load(outgoing.map((r) => r.id)), blocking: await load(incoming.map((r) => r.id)) };
   },
 
   async addDependency(id: string, dependsOnId: string, actorId: string) {
-    const task = await loadTask(id);
-    await addDependencyRow(id, dependsOnId);
+    const task = await loadVisibleTask(id, actorId);
+    await addDependencyRow(id, dependsOnId, actorId);
     await touch(task);
     await logActivity({ itemId: id, itemType: "task", actorId, kind: "dependency_changed", data: { added: dependsOnId } });
     syncHint(await stakeholders(task), ["tasks"]);
@@ -487,7 +501,7 @@ export const tasksWorkflow = {
   },
 
   async removeDependency(id: string, dependsOnId: string, actorId: string) {
-    const task = await loadTask(id);
+    const task = await loadVisibleTask(id, actorId);
     await sequelize.query(`DELETE FROM task_dependencies WHERE task_id = :id AND depends_on_id = :dependsOnId`, { replacements: { id, dependsOnId } });
     await touch(task);
     await logActivity({ itemId: id, itemType: "task", actorId, kind: "dependency_changed", data: { removed: dependsOnId } });
@@ -498,7 +512,7 @@ export const tasksWorkflow = {
   // The filtered list behind the Tasks tab (TASK-01, TASK-02).
   async list(q: TaskListQuery, userId: string) {
     const where: Record<string | symbol, unknown> = {};
-    const ands: WhereOptions[] = [];
+    const ands: WhereOptions[] = [{ id: visibleIds(await viewerFor(userId), "task") }];
     const assignedTo = (id: string) => ({ id: { [Op.in]: sequelize.literal(`(SELECT task_id FROM task_assignees WHERE user_id = ${sequelize.escape(id)})`) } });
 
     if (q.segment === "mine") ands.push(assignedTo(userId));

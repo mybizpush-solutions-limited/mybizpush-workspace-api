@@ -24,6 +24,7 @@ import {
 } from "../../models";
 import { Task as TaskModel, TaskGroupAssignment as TaskGroupAssignmentModel } from "../../models";
 import { legacyStatusOf } from "../tasks/task.workflow";
+import { fileLink } from "../../lib/cloudinary";
 
 const iso = (d: Date | null | undefined): string | undefined => (d ? d.toISOString() : undefined);
 
@@ -58,7 +59,7 @@ export function serializeProject(p: Project) {
 
 // ---- Attachment / PullRequest --------------------------------------------
 export function serializeAttachment(a: Attachment) {
-  return { id: a.id, name: a.name, size: Number(a.size), type: a.type, url: a.url };
+  return { id: a.id, name: a.name, size: Number(a.size), type: a.type, ...fileLink(a) };
 }
 
 export function serializePullRequest(pr: PullRequest) {

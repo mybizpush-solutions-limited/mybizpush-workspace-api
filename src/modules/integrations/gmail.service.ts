@@ -7,6 +7,7 @@ import { AppError, forbidden, notFound } from "../../lib/errors";
 import { isGoogleConfigured } from "../../lib/google";
 import { EmailThreadLink, GoogleAccount, Issue, Project, Task, User, type ThreadRecordType } from "../../models";
 import { can } from "../access/engine";
+import { assertCanSeeRecord, canSeeRecord } from "../access/visibility";
 import type { Scope } from "../access/catalog";
 import { notify } from "../shared/events";
 import { syncHint } from "../shared/live";
@@ -183,7 +184,7 @@ export const gmailService = {
 
   async send(userId: string, input: { to: string[]; cc?: string[]; bcc?: string[]; subject: string; body: string; html?: boolean; threadId?: string; inReplyToMessageId?: string; link?: { recordType: ThreadRecordType; recordId: string } }, req?: Req) {
     const { gmail, account } = await gmailFor(userId);
-    if (input.link && !(await can({ sub: userId }, "task.view", await recordScope(input.link.recordType, input.link.recordId)))) throw forbidden("You can't link to that record");
+    if (input.link) await assertCanSeeRecord(userId, input.link.recordType, input.link.recordId);
     try {
       let inReplyTo: string | null = null;
       if (input.inReplyToMessageId) {
@@ -222,8 +223,7 @@ export const gmailService = {
   },
 
   async link(userId: string, input: { threadId: string; recordType: ThreadRecordType; recordId: string }) {
-    const scope = await recordScope(input.recordType, input.recordId);
-    if (!(await can({ sub: userId }, "task.view", scope))) throw forbidden("You can't link to that record");
+    await assertCanSeeRecord(userId, input.recordType, input.recordId);
     const { gmail } = await gmailFor(userId);
     try {
       const { link, created } = await saveLink(userId, input.threadId, input.recordType, input.recordId, await fetchThread(gmail, input.threadId));
@@ -233,8 +233,15 @@ export const gmailService = {
     }
   },
 
-  async links(q: { recordType: ThreadRecordType; recordId: string }) {
-    const rows = await EmailThreadLink.findAll({ where: { recordType: q.recordType, recordId: q.recordId }, order: [["lastMessageAt", "DESC"]] });
+  // Subject, snippet and participants: the person who linked it, and those who can
+  // see the record. Anyone else is told nothing.
+  async links(q: { recordType: ThreadRecordType; recordId: string }, viewerId: string) {
+    const seesRecord = await canSeeRecord(viewerId, q.recordType, q.recordId);
+    const rows = await EmailThreadLink.findAll({
+      where: { recordType: q.recordType, recordId: q.recordId, ...(seesRecord ? {} : { linkedBy: viewerId }) },
+      order: [["lastMessageAt", "DESC"]],
+    });
+    if (!seesRecord && !rows.length) throw notFound("Not found");
     const people = rows.length ? await User.findAll({ where: { id: [...new Set(rows.map((r) => r.linkedBy))] }, attributes: ["id", "name"] }) : [];
     const names = new Map(people.map((p) => [p.id, p.name]));
     return rows.map((l) => serializeLink(l, names.get(l.linkedBy) ?? ""));
@@ -242,7 +249,7 @@ export const gmailService = {
 
   async seen(id: string, userId: string) {
     const l = await EmailThreadLink.findByPk(id);
-    if (!l) throw notFound("Link not found");
+    if (!l || (l.linkedBy !== userId && !(await canSeeRecord(userId, l.recordType, l.recordId)))) throw notFound("Link not found");
     if (l.linkedBy !== userId) throw forbidden("Only the person who linked this can do that");
     await l.update({ hasNewReply: false });
     syncHint([userId], ["emailThreadLinks"]);
@@ -251,7 +258,7 @@ export const gmailService = {
 
   async unlink(id: string, userId: string): Promise<void> {
     const l = await EmailThreadLink.findByPk(id);
-    if (!l) throw notFound("Link not found");
+    if (!l || (l.linkedBy !== userId && !(await canSeeRecord(userId, l.recordType, l.recordId)))) throw notFound("Link not found");
     if (l.linkedBy !== userId && !(await can({ sub: userId }, "task.assign", await recordScope(l.recordType, l.recordId)))) throw forbidden("You can't remove this link");
     await l.destroy();
     syncHint([l.linkedBy, userId], ["emailThreadLinks"]);
