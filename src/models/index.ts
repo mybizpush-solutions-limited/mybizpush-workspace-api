@@ -288,6 +288,7 @@ export class Comment extends Model<InferAttributes<Comment>, InferCreationAttrib
   // dedupe the echo webhook and prevent app↔GitHub comment loops.
   declare githubCommentId: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
 }
 Comment.init(
   {
@@ -298,8 +299,9 @@ Comment.init(
     body: { type: DataTypes.TEXT, allowNull: false },
     githubCommentId: { type: DataTypes.STRING, allowNull: true },
     createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
   },
-  { sequelize, tableName: "comments", updatedAt: false },
+  { sequelize, tableName: "comments" },
 );
 
 // ---- Activity -------------------------------------------------------------
@@ -455,6 +457,7 @@ export class Notification extends Model<InferAttributes<Notification>, InferCrea
   declare message: string;
   declare read: CreationOptional<boolean>;
   declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
 }
 Notification.init(
   {
@@ -467,8 +470,9 @@ Notification.init(
     message: { type: DataTypes.TEXT, allowNull: false },
     read: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
   },
-  { sequelize, tableName: "notifications", updatedAt: false },
+  { sequelize, tableName: "notifications" },
 );
 
 // ---- Meeting --------------------------------------------------------------
@@ -494,6 +498,7 @@ export class Meeting extends Model<InferAttributes<Meeting>, InferCreationAttrib
   // Third-party invitees by email (not app users) — added to the Google invite.
   declare externalEmails: CreationOptional<string[]>;
   declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
 }
 Meeting.init(
   {
@@ -508,8 +513,9 @@ Meeting.init(
     recurrence: { type: DataTypes.JSONB, allowNull: true },
     externalEmails: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
     createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
   },
-  { sequelize, tableName: "meetings", updatedAt: false },
+  { sequelize, tableName: "meetings" },
 );
 
 // ---- ProjectRepo (GitHub repos linked to a project) ------------------------

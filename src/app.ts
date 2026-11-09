@@ -38,6 +38,7 @@ import { invitationsPublicRouter, staffRouter } from "./modules/staff/staff.rout
 import { lookupRouter, searchRouter } from "./modules/lookup/lookup.routes";
 import { jobsRouter } from "./modules/jobs/jobs.routes";
 import { devicesRouter } from "./modules/devices/devices.routes";
+import { syncRouter } from "./modules/sync/sync.routes";
 
 // All versioned business endpoints live under this prefix.
 export const API_PREFIX = "/api/v1";
@@ -115,6 +116,7 @@ export function createApp() {
   v1.use("/search", searchRouter);
   v1.use("/jobs", jobsRouter);
   v1.use("/devices", devicesRouter);
+  v1.use("/sync", syncRouter);
   app.use(API_PREFIX, v1);
 
   // Fallbacks

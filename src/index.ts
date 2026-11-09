@@ -12,8 +12,10 @@ import { closeQueues, startWorkers, stopWorkers } from "./jobs";
 import "./models";
 import { attachRealtime, closeRealtime } from "./realtime/gateway";
 import { closeEmitter } from "./realtime/events";
+import { registerTombstoneHooks } from "./modules/sync/tombstones";
 
 async function start() {
+  registerTombstoneHooks();
   await assertDbConnection();
   console.info("✓ Database connected");
 

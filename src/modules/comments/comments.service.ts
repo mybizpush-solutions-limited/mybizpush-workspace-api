@@ -13,8 +13,9 @@ export const commentsService = {
     return rows.map(serializeComment);
   },
 
-  async add(input: { itemId: string; itemType: ItemType; authorId: string; body: string; mentions?: string[] }) {
+  async add(input: { id?: string; itemId: string; itemType: ItemType; authorId: string; body: string; mentions?: string[] }) {
     const comment = await Comment.create({
+      ...(input.id ? { id: input.id } : {}),
       itemId: input.itemId,
       itemType: input.itemType,
       authorId: input.authorId,
