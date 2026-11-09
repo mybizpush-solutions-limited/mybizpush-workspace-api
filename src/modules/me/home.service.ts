@@ -95,8 +95,8 @@ export const homeService = {
 
   async meetingsToday(userId: string) {
     return Meeting.findAll({
-      where: { startsAt: { [Op.gte]: startOfDay(), [Op.lt]: endOfDay() } },
-      include: [{ model: User, as: "attendees", attributes: ["id"], where: { id: userId }, through: { attributes: [] } }],
+      where: { startsAt: { [Op.gte]: startOfDay(), [Op.lt]: endOfDay() }, status: { [Op.ne]: "cancelled" } },
+      include: [{ model: User, as: "attendees", attributes: ["id"], where: { id: userId }, through: { attributes: [], where: { rsvp: { [Op.ne]: "declined" } } } }],
       order: [["startsAt", "ASC"]],
     });
   },
@@ -111,6 +111,13 @@ export const homeService = {
     const now = new Date();
 
     const pendingAcks = await announcementsService.pendingAcknowledgements(userId);
+    const invites = await Meeting.findAll({
+      where: { status: "scheduled", startsAt: { [Op.gte]: new Date() } },
+      attributes: ["id", "title", "startsAt"],
+      include: [{ model: User, as: "attendees", attributes: ["id"], where: { id: userId }, through: { attributes: [], where: { rsvp: "pending" } } }],
+      order: [["startsAt", "ASC"]],
+      limit: 5,
+    });
     const [myOpen, toApprove, overdue, dueToday, meetings, unread, activity] = await Promise.all([
       mine.length ? Task.count({ where: { id: mine, status: myOpenStatus, ...inScope } }) : 0,
       Task.findAll({
@@ -135,6 +142,7 @@ export const homeService = {
     );
 
     const attention = [
+      ...invites.map((m) => ({ kind: "rsvp" as const, itemType: "meeting", itemId: m.id, title: m.title, meta: m.startsAt.toISOString(), dueAt: m.startsAt.toISOString() })),
       ...pendingAcks.map((a) => ({ kind: "announcement" as const, itemType: "announcement", itemId: a.id, title: a.title, meta: "", dueAt: null })),
       ...toApprove.map((t) => ({ kind: "approval" as const, itemType: "task", itemId: t.id, title: t.title, meta: projectNames.get(t.projectId) ?? "", dueAt: t.dueDate?.toISOString() ?? null })),
       ...meetings

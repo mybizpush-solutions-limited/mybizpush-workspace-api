@@ -22,6 +22,7 @@ export const CATALOG: Resource[] = [
   { resource: "project", label: "Projects", actions: { view: "View", create: "Create", manage: "Manage", delete: "Delete" } },
   { resource: "task", label: "Tasks", actions: { view: "View", create: "Create", assign: "Assign", submit: "Submit work", approve: "Approve", reject: "Reject", delete: "Delete", manage_templates: "Manage templates" } },
   { resource: "meeting", label: "Meetings", actions: { view: "View", create: "Create", edit: "Edit", cancel: "Cancel" } },
+  { resource: "event", label: "Calendar events", actions: { create: "Create", edit: "Edit", delete: "Delete" } },
   { resource: "channel", label: "Channels", actions: { create: "Create", edit: "Edit", archive: "Archive", manage_members: "Manage members" } },
   { resource: "message", label: "Messages", actions: { send: "Send", moderate: "Moderate" } },
   { resource: "announcement", label: "Announcements", actions: { draft: "Draft", publish: "Publish", edit: "Edit", archive: "Archive" } },
@@ -82,7 +83,7 @@ export const SEED_ROLES: SeedRole[] = [
     description: "Runs a product: people, projects, approvals, marketing",
     system: false,
     defaultScope: "product",
-    permissions: [...work, "product.edit", "product.manage_members", "product.manage_projects", "project.create", "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "meeting.edit", "announcement.draft", "announcement.publish", "target.create", "target.assign", "target.evaluate", "report.generate", "report.export", "campaign.approve", "content.approve", "channel.create", "channel.edit", "channel.manage_members", "channel.archive", "message.moderate", "task.manage_templates", "report.view"],
+    permissions: [...work, "product.edit", "product.manage_members", "product.manage_projects", "project.create", "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "meeting.edit", "announcement.draft", "announcement.publish", "target.create", "target.assign", "target.evaluate", "report.generate", "report.export", "event.create", "event.edit", "event.delete", "campaign.approve", "content.approve", "channel.create", "channel.edit", "channel.manage_members", "channel.archive", "message.moderate", "task.manage_templates", "report.view"],
   },
   {
     key: "project_manager",
@@ -90,7 +91,7 @@ export const SEED_ROLES: SeedRole[] = [
     description: "Runs a project: tasks, approvals, meetings",
     system: false,
     defaultScope: "project",
-    permissions: [...work, "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "meeting.edit", "report.generate", "channel.create", "channel.edit", "channel.manage_members", "report.view"],
+    permissions: [...work, "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "meeting.edit", "event.create", "event.edit", "report.generate", "channel.create", "channel.edit", "channel.manage_members", "report.view"],
   },
   {
     key: "department_head",
@@ -98,9 +99,9 @@ export const SEED_ROLES: SeedRole[] = [
     description: "Leads a department and the projects it works on",
     system: false,
     defaultScope: "department",
-    permissions: [...work, "department.edit", "department.manage_members", "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "target.create", "target.assign", "target.evaluate", "report.generate", "report.export", "task.manage_templates", "report.view", "channel.create", "channel.edit", "channel.manage_members"],
+    permissions: [...work, "department.edit", "department.manage_members", "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "event.create", "event.edit", "event.delete", "target.create", "target.assign", "target.evaluate", "report.generate", "report.export", "task.manage_templates", "report.view", "channel.create", "channel.edit", "channel.manage_members"],
   },
-  { key: "team_lead", name: "Team lead", description: "Leads a team", system: false, defaultScope: "team", permissions: [...work, "team.edit", "task.assign", "task.approve", "task.reject", "meeting.create", "report.view", "channel.create", "channel.edit", "channel.manage_members"] },
+  { key: "team_lead", name: "Team lead", description: "Leads a team", system: false, defaultScope: "team", permissions: [...work, "team.edit", "task.assign", "task.approve", "task.reject", "meeting.create", "event.create", "event.edit", "report.view", "channel.create", "channel.edit", "channel.manage_members"] },
   { key: "reviewer", name: "Reviewer", description: "Approve and reject work", system: false, defaultScope: "product", permissions: ["task.view", "task.approve", "task.reject"] },
   { key: "contributor", name: "Contributor", description: "Does the work", system: false, defaultScope: "product", permissions: work },
   {
@@ -109,7 +110,7 @@ export const SEED_ROLES: SeedRole[] = [
     description: "Staff records, queries and appraisals",
     system: false,
     defaultScope: "organization",
-    permissions: [...work, "staff.create", "staff.edit", "staff.suspend", "staff.export", "staff.import", "hr.view", "hr.edit", "query.issue", "query.review", "query.resolve", "query.view", "announcement.draft", "announcement.publish"],
+    permissions: [...work, "staff.create", "staff.edit", "staff.suspend", "staff.export", "staff.import", "hr.view", "hr.edit", "query.issue", "query.review", "query.resolve", "query.view", "announcement.draft", "announcement.publish", "event.create", "event.edit", "event.delete"],
   },
   { key: "email_marketer", name: "Email marketer", description: "Leads and campaigns for a product", system: false, defaultScope: "product", permissions: [...work, "campaign.create", "campaign.import", "campaign.send", "campaign.view", "content.create"] },
 ];

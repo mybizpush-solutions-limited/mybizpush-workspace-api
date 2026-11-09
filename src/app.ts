@@ -14,7 +14,7 @@ import { commentsRouter } from "./modules/comments/comments.routes";
 import { activityRouter } from "./modules/activity/activity.routes";
 import { notificationsRouter } from "./modules/notifications/notifications.routes";
 import { preferencesRouter } from "./modules/preferences/preferences.routes";
-import { meetingsRouter } from "./modules/meetings/meetings.routes";
+import { calendarRouter, meetingsRouter } from "./modules/meetings/meetings.routes";
 import { labelsRouter } from "./modules/labels/labels.routes";
 import { rolesRouter } from "./modules/roles/roles.routes";
 import { meRouter } from "./modules/me/me.routes";
@@ -106,6 +106,7 @@ export function createApp() {
   v1.use("/notifications", notificationsRouter);
   v1.use("/preferences", preferencesRouter);
   v1.use("/meetings", meetingsRouter);
+  v1.use("/calendar", calendarRouter);
   v1.use("/labels", labelsRouter);
   v1.use("/roles", rolesRouter);
   v1.use("/attachments", attachmentsRouter);

@@ -12,6 +12,7 @@ import {
   type ItemType,
   type Issue,
   type Meeting,
+  type MeetingAttendee,
   type Notification,
   type NotificationPreference,
   type Task,
@@ -272,6 +273,34 @@ export function serializeMeeting(m: Meeting) {
     endsAt: m.endsAt.toISOString(),
     meetUrl: m.meetUrl,
     recurrence: m.recurrence ?? null,
+    type: m.type,
+    scopeType: m.scopeType ?? null,
+    scopeId: m.scopeId ?? null,
+    status: m.status,
+    locationType: m.locationType,
+    location: m.location ?? null,
+    hasMeetLink: m.hasMeetLink,
+    agenda: m.agenda ?? [],
+    reminderMinutes: m.reminderMinutes ?? [],
+    groups: m.groups ?? [],
+    cancelReason: m.cancelReason ?? null,
+    cancelledAt: m.cancelledAt?.toISOString() ?? null,
+    syncState: m.syncState,
+    updatedAt: m.updatedAt.toISOString(),
+  };
+}
+
+export function serializeMeetingAttendee(a: MeetingAttendee) {
+  return {
+    id: a.id,
+    meetingId: a.meetingId,
+    userId: a.userId,
+    rsvp: a.rsvp,
+    rsvpNote: a.rsvpNote ?? null,
+    respondedAt: a.respondedAt?.toISOString() ?? null,
+    attendance: a.attendance,
+    attendanceMarkedBy: a.attendanceMarkedBy ?? null,
+    updatedAt: a.updatedAt.toISOString(),
   };
 }
 

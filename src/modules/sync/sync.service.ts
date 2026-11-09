@@ -3,11 +3,12 @@ import { z } from "zod";
 import { badRequest } from "../../lib/errors";
 import { sequelize } from "../../db/sequelize";
 import { redis } from "../../redis/client";
-import { Announcement, AnnouncementReceipt, Conversation, ConversationMember, Message, MessageReaction, Comment, Issue, Label, Meeting, Notification, Task, TaskReview, TaskStatusHistory, TaskSubmission, TaskTemplate, User, type ItemType } from "../../models";
+import { CalendarEvent, MeetingActionItem, MeetingAttendee, MeetingNote, Announcement, AnnouncementReceipt, Conversation, ConversationMember, Message, MessageReaction, Comment, Issue, Label, Meeting, Notification, Task, TaskReview, TaskStatusHistory, TaskSubmission, TaskTemplate, User, type ItemType } from "../../models";
 import {
   serializeComment,
   serializeLabel,
   serializeMeeting,
+  serializeMeetingAttendee,
   serializeNotification,
   serializeTaskReview,
   serializeTaskStatusHistory,
@@ -21,6 +22,10 @@ import { announcementsService, serializeAnnouncement, serializeReceipt } from ".
 import { editSchema, emojiSchema, readSchema, sendSchema } from "../chat/chat.routes";
 import { serializeConversations, serializeMember, serializeMessage } from "../chat/chat.serialize";
 import { chatService, myConversationIds, type SendInput } from "../chat/chat.service";
+import { calendarService, serializeActionItem, serializeEvent, serializeNote } from "../meetings/calendar.service";
+import { inMyScopesSql, visibleMeetingIds, visibleMeetingsSql } from "../meetings/meeting.visibility";
+import { actionItemSchema, actionItemUpdateSchema, noteSchema, rsvpSchema } from "../meetings/meetings.routes";
+import { meetingsService } from "../meetings/meetings.service";
 import { reviewSchema, submitSchema, taskStatusSchema } from "../tasks/tasks.schemas";
 import { tasksWorkflow } from "../tasks/tasks.service";
 import { usersRepo } from "../users/users.repo";
@@ -48,6 +53,7 @@ export const DELTA_COLLECTIONS = [
   "tasks", "issues", "comments", "notifications", "meetings",
   "taskSubmissions", "taskReviews", "taskStatusHistory", "taskTemplates",
   "conversations", "conversationMembers", "messages", "announcements", "announcementReceipts",
+  "meetingAttendees", "meetingNotes", "meetingActionItems", "calendarEvents",
 ] as const;
 export const REFERENCE_COLLECTIONS = ["users", "departments", "projects", "labels"] as const;
 type DeltaCollection = (typeof DELTA_COLLECTIONS)[number];
@@ -132,7 +138,28 @@ const DELTA: Record<DeltaCollection, DeltaSource> = {
   meetings: {
     model: Meeting,
     include: [{ model: User, as: "attendees", attributes: ["id"], through: { attributes: [] } }],
+    visibleTo: (userId) => ({ [Op.and]: [sequelize.literal(visibleMeetingsSql(userId))] }),
     serialize: (r) => serializeMeeting(r as Meeting),
+  },
+  meetingAttendees: {
+    model: MeetingAttendee,
+    visibleTo: (userId) => ({ meetingId: { [Op.in]: sequelize.literal(visibleMeetingIds(userId)) } }),
+    serialize: (r) => serializeMeetingAttendee(r as MeetingAttendee),
+  },
+  meetingNotes: {
+    model: MeetingNote,
+    visibleTo: (userId) => ({ meetingId: { [Op.in]: sequelize.literal(visibleMeetingIds(userId)) } }),
+    serialize: (r) => serializeNote(r as MeetingNote),
+  },
+  meetingActionItems: {
+    model: MeetingActionItem,
+    visibleTo: (userId) => ({ meetingId: { [Op.in]: sequelize.literal(visibleMeetingIds(userId)) } }),
+    serialize: (r) => serializeActionItem(r as MeetingActionItem),
+  },
+  calendarEvents: {
+    model: CalendarEvent,
+    visibleTo: (userId) => ({ [Op.and]: [sequelize.literal(inMyScopesSql(userId, '"CalendarEvent"'))] }),
+    serialize: (r) => serializeEvent(r as CalendarEvent),
   },
 };
 
@@ -235,6 +262,10 @@ export const mutationSchema = z.object({
     "message.unreact",
     "announcement.read",
     "announcement.acknowledge",
+    "meeting.rsvp",
+    "meeting.note",
+    "meeting.actionItem",
+    "meeting.actionItemUpdate",
   ]),
   recordId: z.string().uuid().optional(),
   payload: z.record(z.unknown()).default({}),
@@ -353,6 +384,18 @@ async function apply(userId: string, m: Mutation): Promise<MutationResult> {
       return applied(await announcementsService.markRead(needRecord(), userId));
     case "announcement.acknowledge":
       return applied(await announcementsService.acknowledge(needRecord(), userId));
+    case "meeting.rsvp": {
+      const { response, note } = rsvpSchema.parse(m.payload);
+      return applied(await meetingsService.rsvp(needRecord(), userId, response, note));
+    }
+    case "meeting.note":
+      return applied(await calendarService.addNote(needRecord(), noteSchema.parse(m.payload), userId));
+    case "meeting.actionItem":
+      return applied(await calendarService.addActionItem(needRecord(), actionItemSchema.parse(m.payload), userId));
+    case "meeting.actionItemUpdate": {
+      const { meetingId, ...patch } = actionItemUpdateSchema.extend({ meetingId: z.string().uuid() }).parse(m.payload);
+      return applied(await calendarService.updateActionItem(meetingId, needRecord(), patch, userId));
+    }
   }
 
   throw badRequest(`Unsupported mutation ${m.type}`);

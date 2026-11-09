@@ -4,6 +4,7 @@ import "./handlers/maintenance";
 import "./handlers/push";
 import "./handlers/tasks";
 import "./handlers/chat";
+import "./handlers/meetings";
 
 export { enqueue, getQueue, closeQueues, QUEUE_NAMES, type QueueName } from "./queues";
 export { registerJob, startWorkers, stopWorkers } from "./workers";

@@ -81,6 +81,8 @@ export async function createMeetEventAsOrganizer(input: {
   startIso: string;
   endIso: string;
   recurrence?: string | null; // an RRULE line, e.g. "RRULE:FREQ=WEEKLY;INTERVAL=2"
+  conference?: boolean; // false: a plain calendar event with no Meet link
+  location?: string;
 }): Promise<{ meetUrl: string; eventId: string } | null> {
   if (!isMeetOrganizerConfigured()) return null;
 
@@ -88,6 +90,7 @@ export async function createMeetEventAsOrganizer(input: {
   client.setCredentials({ refresh_token: env.GOOGLE_MEET_ORGANIZER_REFRESH_TOKEN });
 
   const calendar = google.calendar({ version: "v3", auth: client });
+  const conference = input.conference !== false;
   const res = await calendar.events.insert({
     calendarId: "primary",
     conferenceDataVersion: 1,
@@ -95,15 +98,17 @@ export async function createMeetEventAsOrganizer(input: {
     requestBody: {
       summary: input.summary,
       description: input.description,
+      location: input.location,
       start: { dateTime: input.startIso },
       end: { dateTime: input.endIso },
       attendees: input.attendees.map((email) => ({ email })),
       ...(input.recurrence ? { recurrence: [input.recurrence] } : {}),
-      conferenceData: {
-        createRequest: { requestId: randomUUID(), conferenceSolutionKey: { type: "hangoutsMeet" } },
-      },
+      ...(conference
+        ? { conferenceData: { createRequest: { requestId: randomUUID(), conferenceSolutionKey: { type: "hangoutsMeet" } } } }
+        : {}),
     },
   });
+  if (!conference) return res.data.id ? { meetUrl: "", eventId: res.data.id } : null;
 
   const meetUrl =
     res.data.hangoutLink ??
@@ -123,6 +128,7 @@ export async function updateMeetEventAsOrganizer(
     startIso: string;
     endIso: string;
     recurrence?: string | null;
+    location?: string;
   },
 ): Promise<void> {
   if (!isMeetOrganizerConfigured()) return;
@@ -136,6 +142,7 @@ export async function updateMeetEventAsOrganizer(
     requestBody: {
       summary: input.summary,
       description: input.description,
+      location: input.location,
       start: { dateTime: input.startIso },
       end: { dateTime: input.endIso },
       attendees: input.attendees.map((email) => ({ email })),

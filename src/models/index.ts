@@ -7,9 +7,11 @@ import {
 } from "sequelize";
 import { sequelize } from "../db/sequelize";
 import { TASK_STATUSES, type TaskStatus } from "./task-status";
+import { MeetingAttendee, type MeetingScope, type MeetingStatus, type MeetingType } from "./calendar";
 
 export * from "./task-status";
 export * from "./chat";
+export * from "./calendar";
 
 // Domain enums (kept in sync with ui/src/types/index.ts).
 export const ACCESS_LEVELS = ["member", "admin", "chief", "executive_admin"] as const;
@@ -553,6 +555,19 @@ export class Meeting extends Model<InferAttributes<Meeting>, InferCreationAttrib
   declare recurrence: CreationOptional<RecurrenceRule | null>;
   // Third-party invitees by email (not app users) — added to the Google invite.
   declare externalEmails: CreationOptional<string[]>;
+  declare type: CreationOptional<MeetingType>;
+  declare scopeType: CreationOptional<MeetingScope | null>;
+  declare scopeId: CreationOptional<string | null>;
+  declare status: CreationOptional<MeetingStatus>;
+  declare locationType: CreationOptional<"online" | "in_person" | "hybrid">;
+  declare location: CreationOptional<string | null>;
+  declare hasMeetLink: CreationOptional<boolean>;
+  declare agenda: CreationOptional<{ title: string; durationMinutes?: number; ownerId?: string }[]>;
+  declare reminderMinutes: CreationOptional<number[]>;
+  declare groups: CreationOptional<{ type: string; id: string }[]>;
+  declare cancelReason: CreationOptional<string | null>;
+  declare cancelledAt: CreationOptional<Date | null>;
+  declare syncState: CreationOptional<"not_linked" | "synced" | "conflict">;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -568,6 +583,19 @@ Meeting.init(
     googleEventId: { type: DataTypes.STRING, allowNull: true },
     recurrence: { type: DataTypes.JSONB, allowNull: true },
     externalEmails: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
+    type: { type: DataTypes.STRING(12), allowNull: false, defaultValue: "other" },
+    scopeType: { type: DataTypes.STRING(14), allowNull: true },
+    scopeId: { type: DataTypes.UUID, allowNull: true },
+    status: { type: DataTypes.STRING(10), allowNull: false, defaultValue: "scheduled" },
+    locationType: { type: DataTypes.STRING(10), allowNull: false, defaultValue: "online" },
+    location: { type: DataTypes.STRING(300), allowNull: true },
+    hasMeetLink: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    agenda: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    reminderMinutes: { type: DataTypes.ARRAY(DataTypes.INTEGER), allowNull: false, defaultValue: [15] },
+    groups: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    cancelReason: { type: DataTypes.STRING(500), allowNull: true },
+    cancelledAt: { type: DataTypes.DATE, allowNull: true },
+    syncState: { type: DataTypes.STRING(10), allowNull: false, defaultValue: "not_linked" },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },
@@ -1449,7 +1477,6 @@ const TaskLabels = through("task_labels");
 const IssueAssignees = through("issue_assignees");
 const IssueLabels = through("issue_labels");
 const CommentMentions = through("comment_mentions");
-const MeetingAttendees = through("meeting_attendees");
 
 // ---- Associations ---------------------------------------------------------
 Department.belongsTo(User, { as: "head", foreignKey: "headId" });
@@ -1493,7 +1520,7 @@ Comment.belongsTo(User, { as: "author", foreignKey: "authorId" });
 Comment.belongsToMany(User, { through: CommentMentions, as: "mentions", foreignKey: "commentId", otherKey: "userId" });
 
 Meeting.belongsTo(User, { as: "organizer", foreignKey: "organizerId" });
-Meeting.belongsToMany(User, { through: MeetingAttendees, as: "attendees", foreignKey: "meetingId", otherKey: "userId" });
+Meeting.belongsToMany(User, { through: MeetingAttendee, as: "attendees", foreignKey: "meetingId", otherKey: "userId" });
 
 User.hasOne(NotificationPreference, { as: "preferences", foreignKey: "userId" });
 NotificationPreference.belongsTo(User, { foreignKey: "userId" });
