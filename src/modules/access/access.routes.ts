@@ -13,7 +13,7 @@ import { slugify } from "../../lib/slug";
 export const accessRouter = Router();
 accessRouter.use(requireAuth);
 
-async function require(req: Request, permission: string, scope?: Scope) {
+async function requirePermissionAt(req: Request, permission: string, scope?: Scope) {
   if (!(await can(req.auth!, permission, scope))) throw forbidden("You don't have permission to do this");
 }
 
@@ -60,7 +60,7 @@ accessRouter.get(
 accessRouter.get(
   "/roles",
   asyncHandler(async (req, res) => {
-    await require(req, "role.view");
+    await requirePermissionAt(req, "role.view");
     const [roles, counts] = await Promise.all([
       AccessRole.findAll({ order: [["isSystem", "DESC"], ["name", "ASC"]] }),
       AccessAssignment.count({ group: ["roleId"] }) as unknown as Promise<{ roleId: string; count: number }[]>,
@@ -82,7 +82,7 @@ accessRouter.post(
   "/roles",
   validateBody(roleSchema),
   asyncHandler(async (req, res) => {
-    await require(req, "role.manage");
+    await requirePermissionAt(req, "role.manage");
     const body = req.body as z.infer<typeof roleSchema>;
     let permissions = body.permissions ?? [];
     if (body.copyFromRoleId) {
@@ -111,7 +111,7 @@ accessRouter.patch(
   "/roles/:id",
   validateBody(roleSchema.partial().omit({ copyFromRoleId: true })),
   asyncHandler(async (req, res) => {
-    await require(req, "role.manage");
+    await requirePermissionAt(req, "role.manage");
     const role = await AccessRole.findByPk(req.params.id!);
     if (!role) throw notFound("Role not found");
     if (role.key === "executive_admin") throw badRequest("Executive admin always has every permission");
@@ -138,7 +138,7 @@ accessRouter.patch(
 accessRouter.delete(
   "/roles/:id",
   asyncHandler(async (req, res) => {
-    await require(req, "role.manage");
+    await requirePermissionAt(req, "role.manage");
     const role = await AccessRole.findByPk(req.params.id!);
     if (!role) throw notFound("Role not found");
     if (role.isSystem) throw badRequest("System roles can't be deleted");
@@ -162,7 +162,7 @@ const assignSchema = z.object({
 accessRouter.get(
   "/assignments",
   asyncHandler(async (req, res) => {
-    await require(req, "role.view");
+    await requirePermissionAt(req, "role.view");
     const where: Record<string, unknown> = {};
     if (typeof req.query.userId === "string") Object.assign(where, { subjectType: "user", subjectId: req.query.userId });
     if (typeof req.query.roleId === "string") where.roleId = req.query.roleId;
@@ -180,7 +180,7 @@ accessRouter.post(
     const body = req.body as z.infer<typeof assignSchema>;
     const scope = scopeFrom({ scopeType: body.scopeType, scopeId: body.scopeId });
     // Assigning inside a product or project needs role.assign there; org-wide needs it org-wide.
-    await require(req, "role.assign", scope);
+    await requirePermissionAt(req, "role.assign", scope);
     const role = await AccessRole.findByPk(body.roleId);
     if (!role) throw notFound("Role not found");
     if (role.key === "executive_admin" && !(await can(req.auth!, "role.manage"))) throw forbidden("Only executives can assign executive admin");
@@ -203,7 +203,7 @@ accessRouter.delete(
   asyncHandler(async (req, res) => {
     const a = await AccessAssignment.findByPk(req.params.id!);
     if (!a) throw notFound("Assignment not found");
-    await require(req, "role.assign", scopeOf(a.scopeType, a.scopeId));
+    await requirePermissionAt(req, "role.assign", scopeOf(a.scopeType, a.scopeId));
     const role = await AccessRole.findByPk(a.roleId);
     await audit({ req, action: "role.unassign", target: { type: a.subjectType, id: a.subjectId }, scope: { type: a.scopeType, id: a.scopeId ?? null }, before: { role: role?.key } });
     await a.destroy();
@@ -227,7 +227,7 @@ const overrideSchema = z.object({
 accessRouter.get(
   "/overrides",
   asyncHandler(async (req, res) => {
-    await require(req, "role.view");
+    await requirePermissionAt(req, "role.view");
     const where = typeof req.query.userId === "string" ? { userId: req.query.userId } : {};
     const rows = await AccessOverride.findAll({ where, order: [["createdAt", "DESC"]], limit: 500 });
     res.json({ overrides: rows });
@@ -238,7 +238,7 @@ accessRouter.post(
   "/overrides",
   validateBody(overrideSchema),
   asyncHandler(async (req, res) => {
-    await require(req, "role.manage");
+    await requirePermissionAt(req, "role.manage");
     const body = req.body as z.infer<typeof overrideSchema>;
     const scope = scopeFrom({ scopeType: body.scopeType, scopeId: body.scopeId });
     if (body.userId === req.auth!.sub && body.effect === "grant") throw badRequest("You can't grant yourself permissions");
@@ -267,7 +267,7 @@ accessRouter.post(
 accessRouter.delete(
   "/overrides/:id",
   asyncHandler(async (req, res) => {
-    await require(req, "role.manage");
+    await requirePermissionAt(req, "role.manage");
     const o = await AccessOverride.findByPk(req.params.id!);
     if (!o) throw notFound("Override not found");
     await audit({ req, action: "permission.override.remove", target: { type: "user", id: o.userId }, scope: { type: o.scopeType, id: o.scopeId ?? null }, before: { permission: o.permission, effect: o.effect } });
@@ -282,7 +282,7 @@ accessRouter.delete(
 accessRouter.get(
   "/who-can",
   asyncHandler(async (req, res) => {
-    await require(req, "role.view");
+    await requirePermissionAt(req, "role.view");
     const permission = String(req.query.permission ?? "");
     if (!PERMISSION_SET.has(permission)) throw badRequest("Unknown permission");
     const scope = scopeFrom(req.query);
@@ -299,7 +299,7 @@ accessRouter.get(
 accessRouter.get(
   "/users/:id/effective",
   asyncHandler(async (req, res) => {
-    if (req.params.id !== req.auth!.sub) await require(req, "role.view");
+    if (req.params.id !== req.auth!.sub) await requirePermissionAt(req, "role.view");
     const scope = scopeFrom(req.query);
     const decisions = await Promise.all(ALL_PERMISSIONS.map(async (p) => ({ permission: p, ...(await explain(req.params.id!, p, scope)) })));
     res.json({ scope, decisions });
@@ -310,7 +310,7 @@ accessRouter.get(
 accessRouter.get(
   "/users/:id/roles",
   asyncHandler(async (req, res) => {
-    if (req.params.id !== req.auth!.sub) await require(req, "role.view");
+    if (req.params.id !== req.auth!.sub) await requirePermissionAt(req, "role.view");
     const rows = await AccessAssignment.findAll({
       where: { subjectType: "user", subjectId: req.params.id! },
       include: [{ model: AccessRole, as: "role", attributes: ["key", "name"] }],
