@@ -3,6 +3,8 @@ import type { ItemType } from "../../models";
 import { emails } from "../../lib/email";
 import { env } from "../../config/env";
 import { enqueue } from "../../jobs/queues";
+import { serializeNotification } from "./serializers";
+import { emitToUser } from "../../realtime/events";
 
 type ActivityKind =
   | "created" | "status_changed" | "assigned" | "commented"
@@ -70,6 +72,18 @@ export async function notifyRoleAssigned(userId: string, role: string, contextNa
   }
 }
 
+// Tell the recipient's open apps right away: the new notification and the
+// updated unread count for the badge.
+async function announceNotification(notification: Notification): Promise<void> {
+  try {
+    emitToUser(notification.userId, "notification:new", { notification: serializeNotification(notification) });
+    const unread = await Notification.count({ where: { userId: notification.userId, read: false } });
+    emitToUser(notification.userId, "badges", { notifications: unread });
+  } catch (err) {
+    console.error("realtime announce failed", err);
+  }
+}
+
 // Create a notification for a recipient (no-op if it'd notify the actor themself)
 // and fire a real-time email alert.
 export async function notify(input: {
@@ -96,4 +110,5 @@ export async function notify(input: {
   void enqueue("push", "notification", { notificationId: notification.id }, { jobId: `notification:${notification.id}` }).catch(
     (err) => console.error("push not queued", err),
   );
+  void announceNotification(notification);
 }
