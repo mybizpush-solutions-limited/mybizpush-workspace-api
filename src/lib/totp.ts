@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
-// RFC 6238 TOTP — HMAC-SHA1, 30-second steps, 6 digits — the parameters every
+// RFC 6238 TOTP: HMAC-SHA1, 30-second steps, 6 digits. These are the parameters every
 // authenticator app (Google Authenticator, 1Password, Authy, Microsoft) assumes
 // when an otpauth:// URI doesn't say otherwise. Written out rather than pulled
 // in as a dependency: it's forty lines, and it's the same scheme Hyparrow uses.
@@ -66,7 +66,7 @@ function codeAt(key: Buffer, step: number): string {
 }
 
 // Returns the step the code matched, or null. The caller must refuse a step at
-// or below the last one it accepted — that's the replay guard, and it needs the
+// or below the last one it accepted. That's the replay guard, and it needs the
 // stored state this pure function doesn't have.
 export function verifyTotp(secret: string, code: string, now = Date.now()): number | null {
   if (!/^\d{6}$/.test(code)) return null;
