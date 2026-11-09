@@ -1,6 +1,7 @@
 import { Op, QueryTypes, type Transaction, type WhereOptions } from "sequelize";
 import { sequelize } from "../../db/sequelize";
 import { audit } from "../../lib/audit";
+import { enqueue } from "../../jobs/queues";
 import { AppError, badRequest, forbidden, notFound } from "../../lib/errors";
 import {
   CLOSED_TASK_STATUSES,
@@ -101,6 +102,11 @@ async function moveStatus(task: Task, to: TaskStatus, actorId: string, opts: { n
     },
     { transaction: opts.tx },
   );
+  // Targets counting completed tasks catch up. Reopening a task counts too.
+  if (completes || from === "approved" || from === "done") {
+    const userIds = await assigneeIdsOf(task.id);
+    void enqueue("maintenance", "targets-refresh", { userIds }, { delay: 5_000 }).catch((err) => console.error("targets refresh not queued", err));
+  }
   await TaskStatusHistory.create({ taskId: task.id, fromStatus: from, toStatus: to, actorId, note: opts.note ?? null }, { transaction: opts.tx });
   await logActivity({ itemId: task.id, itemType: "task", actorId, kind: "status_changed", data: { from, to } });
 }

@@ -12,6 +12,7 @@ import { MeetingAttendee, type MeetingScope, type MeetingStatus, type MeetingTyp
 export * from "./task-status";
 export * from "./chat";
 export * from "./calendar";
+export * from "./performance";
 
 // Domain enums (kept in sync with ui/src/types/index.ts).
 export const ACCESS_LEVELS = ["member", "admin", "chief", "executive_admin"] as const;
@@ -35,6 +36,7 @@ export const RECORD_TYPES = [
   "campaign",
   "conversation",
   "message",
+  "appraisal",
   "target",
   "project",
   "product",

@@ -67,6 +67,31 @@ export async function projectsInReach(userId: string, permission: string, reach:
   return allowed.filter((x): x is string => !!x);
 }
 
+// Does this person hold a permission over someone: organization wide, or on a
+// group they belong to? Limit `kinds` where only some groups should count.
+export async function canOverUser(viewerId: string, permission: string, staffId: string, kinds: ("department" | "team" | "product" | "project")[] = ["department", "team", "product", "project"]): Promise<boolean> {
+  if (await can({ sub: viewerId }, permission)) return true;
+  const reach = await reachFor(viewerId, permission);
+  const uses = (k: (typeof kinds)[number], list: string[]) => kinds.includes(k) && list.length > 0;
+  const checks: [string, string[]][] = [];
+  if (uses("department", reach.departments)) checks.push([`SELECT 1 FROM department_members WHERE user_id = :staffId AND department_id IN (:ids)`, reach.departments]);
+  if (uses("team", reach.teams)) checks.push([`SELECT 1 FROM team_members WHERE user_id = :staffId AND team_id IN (:ids)`, reach.teams]);
+  if (uses("product", reach.products)) checks.push([`SELECT 1 FROM product_members WHERE user_id = :staffId AND product_id IN (:ids)`, reach.products]);
+  if (uses("project", reach.projects)) {
+    checks.push([
+      `SELECT 1 FROM project_members WHERE user_id = :staffId AND project_id IN (:ids)
+       UNION SELECT 1 FROM projects WHERE manager_id = :staffId AND id IN (:ids)
+       UNION SELECT 1 FROM department_members dm JOIN project_departments pd ON pd.department_id = dm.department_id WHERE dm.user_id = :staffId AND pd.project_id IN (:ids)`,
+      reach.projects,
+    ]);
+  }
+  for (const [sql, ids] of checks) {
+    const rows = await sequelize.query(sql, { replacements: { staffId, ids }, type: QueryTypes.SELECT });
+    if (rows.length) return true;
+  }
+  return false;
+}
+
 export async function projectsWith(userId: string, permission: string): Promise<"all" | string[]> {
   return projectsInReach(userId, permission, await reachFor(userId, permission));
 }

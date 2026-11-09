@@ -82,6 +82,19 @@ async function avgApprovalHours(ids: string[], range: { from: Date; to: Date }):
 }
 
 export const taskReports = {
+  // The numbers for a set of tasks, without any scope of their own. Callers have
+  // already decided what the viewer may see (P5 reports).
+  async totals(where: WhereOptions, range: { from: Date; to: Date }) {
+    const rows = await Task.findAll({ where: { [Op.and]: [where, liveDuring(range)] }, include: reportInclude });
+    const summary = summarizeTasks(rows.map(toReportTask), range, new Date());
+    return { ...summary.totals, avgApprovalHours: await avgApprovalHours(rows.map((t) => t.id), range) };
+  },
+
+  async breakdown(where: WhereOptions, range: { from: Date; to: Date }) {
+    const rows = await Task.findAll({ where: { [Op.and]: [where, liveDuring(range)] }, include: reportInclude });
+    return summarizeTasks(rows.map(toReportTask), range, new Date());
+  },
+
   async summary(q: TaskReportQuery, userId: string) {
     const r = await resolve(q, userId, "report.view");
     const rows = await Task.findAll({ where: { [Op.and]: [r.where, liveDuring(r.range)] }, include: reportInclude });

@@ -24,6 +24,7 @@ export interface ServerEvents {
   read: { conversationId: string; userId: string; lastReadSeq: number };
   "conversation:updated": { conversationId: string };
   "announcement:new": { announcementId: string };
+  "export:done": { exportId: string; status: string };
 }
 
 let emitter: Emitter | null = null;

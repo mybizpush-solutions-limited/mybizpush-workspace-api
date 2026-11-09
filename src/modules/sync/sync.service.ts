@@ -3,7 +3,7 @@ import { z } from "zod";
 import { badRequest } from "../../lib/errors";
 import { sequelize } from "../../db/sequelize";
 import { redis } from "../../redis/client";
-import { CalendarEvent, MeetingActionItem, MeetingAttendee, MeetingNote, Announcement, AnnouncementReceipt, Conversation, ConversationMember, Message, MessageReaction, Comment, Issue, Label, Meeting, Notification, Task, TaskReview, TaskStatusHistory, TaskSubmission, TaskTemplate, User, type ItemType } from "../../models";
+import { Appraisal, AppraisalCycle, StaffQuery, Target, TargetAssignment, TargetProgress, CalendarEvent, MeetingActionItem, MeetingAttendee, MeetingNote, Announcement, AnnouncementReceipt, Conversation, ConversationMember, Message, MessageReaction, Comment, Issue, Label, Meeting, Notification, Task, TaskReview, TaskStatusHistory, TaskSubmission, TaskTemplate, User, type ItemType } from "../../models";
 import {
   serializeComment,
   serializeLabel,
@@ -26,6 +26,10 @@ import { calendarService, serializeActionItem, serializeEvent, serializeNote } f
 import { inMyScopesSql, visibleMeetingIds, visibleMeetingsSql } from "../meetings/meeting.visibility";
 import { actionItemSchema, actionItemUpdateSchema, noteSchema, rsvpSchema } from "../meetings/meetings.routes";
 import { meetingsService } from "../meetings/meetings.service";
+import { appraisalsService, serializeAppraisal, serializeCycle } from "../performance/appraisals.service";
+import { managerSchema, progressSchema, respondSchema, selfSchema } from "../performance/performance.routes";
+import { queriesService, queriesVisibleTo, seesAllQueries, serializeQuery } from "../performance/queries.service";
+import { serializeProgress, serializeTarget, targetsService, targetsVisibleWhere } from "../performance/targets.service";
 import { reviewSchema, submitSchema, taskStatusSchema } from "../tasks/tasks.schemas";
 import { tasksWorkflow } from "../tasks/tasks.service";
 import { usersRepo } from "../users/users.repo";
@@ -54,6 +58,7 @@ export const DELTA_COLLECTIONS = [
   "taskSubmissions", "taskReviews", "taskStatusHistory", "taskTemplates",
   "conversations", "conversationMembers", "messages", "announcements", "announcementReceipts",
   "meetingAttendees", "meetingNotes", "meetingActionItems", "calendarEvents",
+  "staffQueries", "targets", "targetProgress", "appraisals", "appraisalCycles",
 ] as const;
 export const REFERENCE_COLLECTIONS = ["users", "departments", "projects", "labels"] as const;
 type DeltaCollection = (typeof DELTA_COLLECTIONS)[number];
@@ -92,7 +97,7 @@ interface DeltaSource {
   serializeAll?: (rows: Model[], userId: string) => Promise<unknown[]>;
   ownerOnly?: boolean; // rows have userId and belong to one user
   // Limits rows to what this person may see.
-  visibleTo?: (userId: string) => Record<string | symbol, unknown>;
+  visibleTo?: (userId: string) => Record<string | symbol, unknown> | Promise<Record<string | symbol, unknown>>;
 }
 
 const DELTA: Record<DeltaCollection, DeltaSource> = {
@@ -156,6 +161,39 @@ const DELTA: Record<DeltaCollection, DeltaSource> = {
     visibleTo: (userId) => ({ meetingId: { [Op.in]: sequelize.literal(visibleMeetingIds(userId)) } }),
     serialize: (r) => serializeActionItem(r as MeetingActionItem),
   },
+  staffQueries: {
+    model: StaffQuery,
+    visibleTo: async (userId) => queriesVisibleTo(userId, await seesAllQueries(userId)) as Record<string | symbol, unknown>,
+    serialize: (r) => serializeQuery(r as StaffQuery),
+  },
+  targets: {
+    model: Target,
+    include: [{ model: TargetAssignment, as: "assignments" }],
+    visibleTo: (userId) => targetsVisibleWhere(userId) as Record<string | symbol, unknown>,
+    serialize: (r) => serializeTarget(r as Target),
+  },
+  targetProgress: {
+    model: TargetProgress,
+    visibleTo: (userId) => ({
+      targetId: {
+        [Op.in]: sequelize.literal(
+          `(SELECT t.id FROM targets t WHERE t.reviewer_id = ${sequelize.escape(userId)} OR t.created_by = ${sequelize.escape(userId)}
+            OR t.id IN (SELECT target_id FROM target_assignments WHERE user_id = ${sequelize.escape(userId)}))`,
+        ),
+      },
+    }),
+    serialize: (r) => serializeProgress(r as TargetProgress),
+  },
+  appraisals: {
+    model: Appraisal,
+    visibleTo: (userId) => ({ [Op.or]: [{ userId }, { managerId: userId }] }),
+    serializeAll: async (rows, userId) => (rows as Appraisal[]).map((a) => serializeAppraisal(a, userId)),
+  },
+  appraisalCycles: {
+    model: AppraisalCycle,
+    visibleTo: () => ({ status: { [Op.ne]: "draft" } }),
+    serialize: (r) => serializeCycle(r as AppraisalCycle),
+  },
   calendarEvents: {
     model: CalendarEvent,
     visibleTo: (userId) => ({ [Op.and]: [sequelize.literal(inMyScopesSql(userId, '"CalendarEvent"'))] }),
@@ -194,7 +232,7 @@ export async function pull(
     const since = cursor.t[name] ? new Date(cursor.t[name]!) : new Date(0);
     const where: Record<string | symbol, unknown> = { updatedAt: { [Op.gt]: since } };
     if (source.ownerOnly) where.userId = userId;
-    if (source.visibleTo) Object.assign(where, source.visibleTo(userId));
+    if (source.visibleTo) Object.assign(where, await source.visibleTo(userId));
 
     const rows = await source.model.findAll({
       where,
@@ -266,6 +304,10 @@ export const mutationSchema = z.object({
     "meeting.note",
     "meeting.actionItem",
     "meeting.actionItemUpdate",
+    "query.respond",
+    "target.progress",
+    "appraisal.self",
+    "appraisal.manager",
   ]),
   recordId: z.string().uuid().optional(),
   payload: z.record(z.unknown()).default({}),
@@ -384,6 +426,14 @@ async function apply(userId: string, m: Mutation): Promise<MutationResult> {
       return applied(await announcementsService.markRead(needRecord(), userId));
     case "announcement.acknowledge":
       return applied(await announcementsService.acknowledge(needRecord(), userId));
+    case "query.respond":
+      return applied(await queriesService.respond(needRecord(), respondSchema.parse(m.payload), userId));
+    case "target.progress":
+      return applied((await targetsService.addProgress(needRecord(), progressSchema.parse(m.payload), userId)).target);
+    case "appraisal.self":
+      return applied(await appraisalsService.saveSelf(needRecord(), selfSchema.parse(m.payload), userId));
+    case "appraisal.manager":
+      return applied(await appraisalsService.saveManager(needRecord(), managerSchema.parse(m.payload), userId));
     case "meeting.rsvp": {
       const { response, note } = rsvpSchema.parse(m.payload);
       return applied(await meetingsService.rsvp(needRecord(), userId, response, note));
