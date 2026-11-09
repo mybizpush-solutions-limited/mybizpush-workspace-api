@@ -41,7 +41,7 @@ import { departmentsService } from "../departments/departments.service";
 import { projectsService } from "../projects/projects.service";
 import { issuesService, tasksService, type WorkItemCreateInput, type WorkItemUpdateInput } from "../workitems/workitems.service";
 import { buildSchemas, statusSchema } from "../workitems/workitems.routes";
-import { commentsService } from "../comments/comments.service";
+import { COMMENTABLE, commentsService } from "../comments/comments.service";
 import { notificationsService } from "../notifications/notifications.service";
 import { SyncTombstone } from "./tombstones";
 
@@ -357,7 +357,8 @@ const mutationKey = (userId: string, id: string) => `sync:mut:${userId}:${id}`;
 const commentCreateSchema = z.object({
   id: z.string().uuid().optional(),
   itemId: z.string().uuid(),
-  itemType: z.enum(["task", "issue"]),
+  // Same list as POST /comments, so a comment written offline works everywhere.
+  itemType: z.enum(COMMENTABLE),
   body: z.string().trim().min(1).max(8000),
   mentions: z.array(z.string().uuid()).optional(),
 });

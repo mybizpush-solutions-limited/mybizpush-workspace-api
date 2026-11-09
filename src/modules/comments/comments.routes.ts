@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { COMMENTABLE } from "./comments.service";
 import { asyncHandler, badRequest } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
@@ -8,8 +9,6 @@ import { commentsService } from "./comments.service";
 export const commentsRouter = Router();
 commentsRouter.use(requireAuth);
 
-// Private records (chat, staff queries) have their own threads.
-const COMMENTABLE = ["task", "issue", "meeting", "announcement", "content", "campaign", "target", "project", "product"] as const;
 
 const addSchema = z.object({
   itemId: z.string().uuid(),

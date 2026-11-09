@@ -7,6 +7,9 @@ const withMentions = {
   include: [{ model: User, as: "mentions", attributes: ["id"], through: { attributes: [] } }],
 };
 
+// Private records (chat, staff queries) have their own threads.
+export const COMMENTABLE = ["task", "issue", "meeting", "announcement", "content", "campaign", "target", "project", "product"] as const;
+
 export const commentsService = {
   async forItem(itemId: string) {
     const rows = await Comment.findAll({ where: { itemId }, ...withMentions, order: [["createdAt", "ASC"]] });
