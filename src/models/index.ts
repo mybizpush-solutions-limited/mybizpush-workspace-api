@@ -6,6 +6,9 @@ import {
   type InferCreationAttributes,
 } from "sequelize";
 import { sequelize } from "../db/sequelize";
+import { TASK_STATUSES, type TaskStatus } from "./task-status";
+
+export * from "./task-status";
 
 // Domain enums (kept in sync with ui/src/types/index.ts).
 export const ACCESS_LEVELS = ["member", "admin", "chief", "executive_admin"] as const;
@@ -35,10 +38,13 @@ export const ISSUE_SEVERITIES = ["minor", "major", "critical"] as const;
 export const ACTIVITY_KINDS = [
   "created", "status_changed", "assigned", "commented",
   "feedback_requested", "feedback_provided", "pr_linked",
+  "submitted", "reviewed", "dependency_changed",
 ] as const;
 export const NOTIFICATION_KINDS = [
   "assigned", "mentioned", "feedback_requested", "status_changed", "commented",
+  "submitted", "approved", "rejected", "revision_requested", "reviewer_assigned", "blocked", "deadline",
 ] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 export const PR_STATUSES = ["open", "merged", "closed", "draft"] as const;
 export const DIGEST_FREQUENCIES = ["off", "daily", "weekly"] as const;
 // Selectable team roles (kept in sync with ui/src/types/index.ts `Role`).
@@ -223,13 +229,27 @@ export class Task extends Model<InferAttributes<Task>, InferCreationAttributes<T
   declare departmentId: CreationOptional<string | null>; // which department "lane"
   declare title: string;
   declare description: CreationOptional<string>;
-  declare status: CreationOptional<WorkStatus>;
+  declare status: CreationOptional<TaskStatus>;
   declare priority: CreationOptional<Priority>;
   declare reporterId: CreationOptional<string | null>;
   declare dueDate: CreationOptional<Date | null>;
   declare feedbackAwaitingFrom: CreationOptional<string | null>;
   declare feedbackRequestedBy: CreationOptional<string | null>;
   declare feedbackRequestedAt: CreationOptional<Date | null>;
+  // Task workflow (A201, A202).
+  declare reviewerId: CreationOptional<string | null>;
+  declare productId: CreationOptional<string | null>;
+  declare teamId: CreationOptional<string | null>;
+  declare startDate: CreationOptional<Date | null>;
+  declare expectedDeliverable: CreationOptional<string>;
+  declare templateId: CreationOptional<string | null>;
+  declare blockedReason: CreationOptional<string | null>;
+  declare revisionCount: CreationOptional<number>;
+  declare submittedAt: CreationOptional<Date | null>;
+  declare reviewedAt: CreationOptional<Date | null>;
+  declare completedAt: CreationOptional<Date | null>;
+  declare sourceType: CreationOptional<string | null>;
+  declare sourceId: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -240,13 +260,26 @@ Task.init(
     departmentId: { type: DataTypes.UUID, allowNull: true },
     title: { type: DataTypes.STRING, allowNull: false },
     description: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
-    status: { type: DataTypes.ENUM(...WORK_STATUSES), allowNull: false, defaultValue: "todo" },
+    status: { type: DataTypes.ENUM(...TASK_STATUSES), allowNull: false, defaultValue: "todo" },
     priority: { type: DataTypes.ENUM(...PRIORITIES), allowNull: false, defaultValue: "medium" },
     reporterId: { type: DataTypes.UUID, allowNull: true },
     dueDate: { type: DataTypes.DATE, allowNull: true },
     feedbackAwaitingFrom: { type: DataTypes.UUID, allowNull: true },
     feedbackRequestedBy: { type: DataTypes.UUID, allowNull: true },
     feedbackRequestedAt: { type: DataTypes.DATE, allowNull: true },
+    reviewerId: { type: DataTypes.UUID, allowNull: true },
+    productId: { type: DataTypes.UUID, allowNull: true },
+    teamId: { type: DataTypes.UUID, allowNull: true },
+    startDate: { type: DataTypes.DATE, allowNull: true },
+    expectedDeliverable: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    templateId: { type: DataTypes.UUID, allowNull: true },
+    blockedReason: { type: DataTypes.STRING(500), allowNull: true },
+    revisionCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    submittedAt: { type: DataTypes.DATE, allowNull: true },
+    reviewedAt: { type: DataTypes.DATE, allowNull: true },
+    completedAt: { type: DataTypes.DATE, allowNull: true },
+    sourceType: { type: DataTypes.STRING(30), allowNull: true },
+    sourceId: { type: DataTypes.STRING(80), allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },
@@ -1642,6 +1675,170 @@ ProjectCommit.init(
 ProjectCommit.belongsTo(User, { as: "author", foreignKey: "authorUserId" });
 ProjectCommit.belongsTo(Project, { as: "project", foreignKey: "projectId" });
 Project.hasMany(ProjectCommit, { as: "commits", foreignKey: "projectId" });
+
+// ---- Task workflow (A202, A203, A204) --------------------------------------
+export class TaskTemplate extends Model<InferAttributes<TaskTemplate>, InferCreationAttributes<TaskTemplate>> {
+  declare id: CreationOptional<string>;
+  declare name: string;
+  declare title: CreationOptional<string>;
+  declare description: CreationOptional<string>;
+  declare expectedDeliverable: CreationOptional<string>;
+  declare priority: CreationOptional<Priority | null>;
+  declare productId: CreationOptional<string | null>;
+  declare projectId: CreationOptional<string | null>;
+  declare departmentId: CreationOptional<string | null>;
+  declare reviewerId: CreationOptional<string | null>;
+  declare defaultDueDays: CreationOptional<number | null>;
+  declare checklist: CreationOptional<string[]>;
+  declare labelIds: CreationOptional<string[]>;
+  declare createdBy: CreationOptional<string | null>;
+  declare archivedAt: CreationOptional<Date | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+TaskTemplate.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    name: { type: DataTypes.STRING(120), allowNull: false },
+    title: { type: DataTypes.STRING, allowNull: false, defaultValue: "" },
+    description: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    expectedDeliverable: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    priority: { type: DataTypes.STRING(10), allowNull: true },
+    productId: { type: DataTypes.UUID, allowNull: true },
+    projectId: { type: DataTypes.UUID, allowNull: true },
+    departmentId: { type: DataTypes.UUID, allowNull: true },
+    reviewerId: { type: DataTypes.UUID, allowNull: true },
+    defaultDueDays: { type: DataTypes.INTEGER, allowNull: true },
+    checklist: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    labelIds: { type: DataTypes.ARRAY(DataTypes.UUID), allowNull: false, defaultValue: [] },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    archivedAt: { type: DataTypes.DATE, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "task_templates" },
+);
+
+export class TaskGroupAssignment extends Model<InferAttributes<TaskGroupAssignment>, InferCreationAttributes<TaskGroupAssignment>> {
+  declare id: CreationOptional<string>;
+  declare taskId: string;
+  declare groupType: string;
+  declare groupId: string;
+  declare userIds: CreationOptional<string[]>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+TaskGroupAssignment.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    taskId: { type: DataTypes.UUID, allowNull: false },
+    groupType: { type: DataTypes.STRING(12), allowNull: false },
+    groupId: { type: DataTypes.UUID, allowNull: false },
+    userIds: { type: DataTypes.ARRAY(DataTypes.UUID), allowNull: false, defaultValue: [] },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "task_group_assignments" },
+);
+
+export const SUBMISSION_STATUSES = ["pending", "approved", "rejected", "revision_required", "withdrawn"] as const;
+export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
+
+export class TaskSubmission extends Model<InferAttributes<TaskSubmission>, InferCreationAttributes<TaskSubmission>> {
+  declare id: CreationOptional<string>;
+  declare taskId: string;
+  declare round: CreationOptional<number>;
+  declare submittedBy: CreationOptional<string | null>;
+  declare reviewerId: CreationOptional<string | null>;
+  declare notes: CreationOptional<string>;
+  declare links: CreationOptional<{ title?: string; url: string }[]>;
+  declare evidence: CreationOptional<{ label: string; done: boolean }[]>;
+  declare attachmentIds: CreationOptional<string[]>;
+  declare status: CreationOptional<SubmissionStatus>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+TaskSubmission.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    taskId: { type: DataTypes.UUID, allowNull: false },
+    round: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+    submittedBy: { type: DataTypes.UUID, allowNull: true },
+    reviewerId: { type: DataTypes.UUID, allowNull: true },
+    notes: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    links: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    evidence: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    attachmentIds: { type: DataTypes.ARRAY(DataTypes.UUID), allowNull: false, defaultValue: [] },
+    status: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "pending" },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "task_submissions" },
+);
+
+export const REVIEW_DECISIONS = ["approve", "reject", "request_revision", "reassign"] as const;
+export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
+
+export class TaskReview extends Model<InferAttributes<TaskReview>, InferCreationAttributes<TaskReview>> {
+  declare id: CreationOptional<string>;
+  declare taskId: string;
+  declare submissionId: CreationOptional<string | null>;
+  declare reviewerId: CreationOptional<string | null>;
+  declare decision: ReviewDecision;
+  declare feedback: CreationOptional<string>;
+  declare newReviewerId: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+TaskReview.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    taskId: { type: DataTypes.UUID, allowNull: false },
+    submissionId: { type: DataTypes.UUID, allowNull: true },
+    reviewerId: { type: DataTypes.UUID, allowNull: true },
+    decision: { type: DataTypes.STRING(20), allowNull: false },
+    feedback: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    newReviewerId: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "task_reviews" },
+);
+
+export class TaskStatusHistory extends Model<InferAttributes<TaskStatusHistory>, InferCreationAttributes<TaskStatusHistory>> {
+  declare id: CreationOptional<string>;
+  declare taskId: string;
+  declare fromStatus: CreationOptional<string | null>;
+  declare toStatus: string;
+  declare actorId: CreationOptional<string | null>;
+  declare note: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+TaskStatusHistory.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    taskId: { type: DataTypes.UUID, allowNull: false },
+    fromStatus: { type: DataTypes.STRING(20), allowNull: true },
+    toStatus: { type: DataTypes.STRING(20), allowNull: false },
+    actorId: { type: DataTypes.UUID, allowNull: true },
+    note: { type: DataTypes.TEXT, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "task_status_history" },
+);
+
+const TaskDependencies = through("task_dependencies");
+Task.belongsToMany(Task, { through: TaskDependencies, as: "dependencies", foreignKey: "taskId", otherKey: "dependsOnId" });
+Task.belongsToMany(Task, { through: TaskDependencies, as: "dependents", foreignKey: "dependsOnId", otherKey: "taskId" });
+Task.hasMany(TaskGroupAssignment, { as: "groupAssignments", foreignKey: "taskId" });
+Task.hasMany(TaskSubmission, { as: "submissions", foreignKey: "taskId" });
+Task.belongsTo(User, { as: "reviewer", foreignKey: "reviewerId" });
+TaskSubmission.belongsTo(Task, { foreignKey: "taskId" });
+TaskReview.belongsTo(Task, { foreignKey: "taskId" });
 
 export const models = {
   User, Department, Project, Label, Task, Issue, Comment, Activity,

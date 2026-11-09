@@ -1,9 +1,10 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
-import { issuesService, tasksService, type makeWorkItemService } from "./workitems.service";
+import { taskCreateFields, taskStatusSchema, taskUpdateFields } from "../tasks/tasks.schemas";
+import { issuesService, tasksService, type makeWorkItemService, type WorkItemCreateInput } from "./workitems.service";
 
 const STATUS = z.enum(["todo", "in_progress", "in_review", "blocked", "done"]);
 const PRIORITY = z.enum(["low", "medium", "high", "urgent"]);
@@ -16,12 +17,11 @@ export function buildSchemas(withSeverity: boolean) {
     departmentId: z.string().uuid().nullable().optional(),
     title: z.string().trim().min(1).max(200),
     description: z.string().trim().max(8000).optional(),
-    status: STATUS.optional(),
     priority: PRIORITY.optional(),
     assigneeIds: z.array(z.string().uuid()).optional(),
     labelIds: z.array(z.string().uuid()).optional(),
     dueDate: z.string().datetime().optional(),
-    ...(withSeverity ? { severity: SEVERITY.optional() } : {}),
+    ...(withSeverity ? { status: STATUS.optional(), severity: SEVERITY.optional() } : taskCreateFields),
   });
   const update = z.object({
     title: z.string().trim().min(1).max(200).optional(),
@@ -31,7 +31,7 @@ export function buildSchemas(withSeverity: boolean) {
     assigneeIds: z.array(z.string().uuid()).optional(),
     labelIds: z.array(z.string().uuid()).optional(),
     dueDate: z.string().datetime().nullable().optional(),
-    ...(withSeverity ? { severity: SEVERITY.optional() } : {}),
+    ...(withSeverity ? { severity: SEVERITY.optional() } : taskUpdateFields),
   });
   return { create, update };
 }
@@ -49,6 +49,8 @@ const docSchema = z.object({
   title: z.string().trim().min(1).max(200),
   url: z.string().url(),
 });
+
+const isMobile = (req: Request) => req.get("x-client")?.toLowerCase() === "mobile";
 
 // One router shape for both tasks and issues.
 function makeWorkItemRouter(service: ReturnType<typeof makeWorkItemService>, withSeverity: boolean) {
@@ -70,15 +72,16 @@ function makeWorkItemRouter(service: ReturnType<typeof makeWorkItemService>, wit
   }));
 
   router.post("/", validateBody(create), asyncHandler(async (req, res) => {
-    res.status(201).json({ item: await service.create(req.body, req.auth!.sub) });
+    res.status(201).json({ item: await service.create(req.body as WorkItemCreateInput, req.auth!.sub, { strict: isMobile(req) }) });
   }));
 
   router.patch("/:id", validateBody(update), asyncHandler(async (req, res) => {
-    res.json({ item: await service.update(req.params.id!, req.body, req.auth!.sub) });
+    res.json({ item: await service.update(req.params.id!, req.body, req.auth!.sub, { strict: isMobile(req) }) });
   }));
 
-  router.post("/:id/status", validateBody(statusSchema), asyncHandler(async (req, res) => {
-    res.json({ item: await service.setStatus(req.params.id!, req.body.status, req.auth!.sub) });
+  router.post("/:id/status", validateBody(withSeverity ? statusSchema : taskStatusSchema), asyncHandler(async (req, res) => {
+    const { status, note, blockedReason } = req.body;
+    res.json({ item: await service.setStatus(req.params.id!, status, req.auth!.sub, { note, blockedReason }) });
   }));
 
   router.post("/:id/feedback/request", validateBody(feedbackRequestSchema), asyncHandler(async (req, res) => {

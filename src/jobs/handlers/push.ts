@@ -39,7 +39,7 @@ registerJob<{ notificationId: string }>("push", "notification", async ({ notific
     },
   });
   if (tickets.length) {
-    await enqueue("push", "receipts", { tickets }, { delay: RECEIPT_DELAY_MS, jobId: `receipts:${n.id}` });
+    await enqueue("push", "receipts", { tickets }, { delay: RECEIPT_DELAY_MS, jobId: `receipts-${n.id}` });
   }
 });
 

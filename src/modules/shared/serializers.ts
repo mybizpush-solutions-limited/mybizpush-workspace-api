@@ -15,7 +15,14 @@ import {
   type Notification,
   type NotificationPreference,
   type Task,
+  type TaskGroupAssignment,
+  type TaskReview,
+  type TaskStatusHistory,
+  type TaskSubmission,
+  type TaskTemplate,
 } from "../../models";
+import { Task as TaskModel, TaskGroupAssignment as TaskGroupAssignmentModel } from "../../models";
+import { legacyStatusOf } from "../tasks/task.workflow";
 
 const iso = (d: Date | null | undefined): string | undefined => (d ? d.toISOString() : undefined);
 
@@ -114,7 +121,93 @@ export function serializeWorkItem(item: Task | Issue, type: ItemType) {
   if (type === "issue") {
     return { ...base, severity: (item as Issue).severity ?? undefined };
   }
-  return base;
+  const task = item as Task;
+  const groups = (task.get("groupAssignments") as TaskGroupAssignment[] | undefined) ?? [];
+  return {
+    ...base,
+    legacyStatus: legacyStatusOf(task.status),
+    reviewerId: task.reviewerId ?? null,
+    productId: task.productId ?? null,
+    teamId: task.teamId ?? null,
+    startDate: task.startDate?.toISOString() ?? null,
+    expectedDeliverable: task.expectedDeliverable ?? "",
+    templateId: task.templateId ?? null,
+    blockedReason: task.blockedReason ?? null,
+    dependsOnIds: ((task.get("dependencies") as Task[] | undefined) ?? []).map((d) => d.id),
+    groupAssignments: groups.map((g) => ({ id: g.id, type: g.groupType, groupId: g.groupId, userIds: g.userIds })),
+    revisionCount: task.revisionCount ?? 0,
+    submittedAt: task.submittedAt?.toISOString() ?? null,
+    reviewedAt: task.reviewedAt?.toISOString() ?? null,
+    completedAt: task.completedAt?.toISOString() ?? null,
+    sourceType: task.sourceType ?? null,
+    sourceId: task.sourceId ?? null,
+  };
+}
+
+export function serializeTaskSubmission(s: TaskSubmission) {
+  return {
+    id: s.id,
+    taskId: s.taskId,
+    round: s.round,
+    submittedBy: s.submittedBy ?? null,
+    reviewerId: s.reviewerId ?? null,
+    notes: s.notes,
+    links: s.links,
+    evidence: s.evidence,
+    attachmentIds: s.attachmentIds,
+    status: s.status,
+    createdAt: s.createdAt.toISOString(),
+    updatedAt: s.updatedAt.toISOString(),
+  };
+}
+
+export function serializeTaskReview(r: TaskReview) {
+  return {
+    id: r.id,
+    taskId: r.taskId,
+    submissionId: r.submissionId ?? null,
+    reviewerId: r.reviewerId ?? null,
+    decision: r.decision,
+    feedback: r.feedback,
+    newReviewerId: r.newReviewerId ?? null,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+  };
+}
+
+export function serializeTaskStatusHistory(h: TaskStatusHistory) {
+  return {
+    id: h.id,
+    taskId: h.taskId,
+    fromStatus: h.fromStatus ?? null,
+    toStatus: h.toStatus,
+    actorId: h.actorId ?? null,
+    note: h.note ?? null,
+    createdAt: h.createdAt.toISOString(),
+    updatedAt: h.updatedAt.toISOString(),
+  };
+}
+
+export function serializeTaskTemplate(t: TaskTemplate) {
+  return {
+    id: t.id,
+    name: t.name,
+    title: t.title,
+    description: t.description,
+    expectedDeliverable: t.expectedDeliverable,
+    priority: t.priority ?? null,
+    productId: t.productId ?? null,
+    projectId: t.projectId ?? null,
+    departmentId: t.departmentId ?? null,
+    reviewerId: t.reviewerId ?? null,
+    defaultDueDays: t.defaultDueDays ?? null,
+    checklist: t.checklist,
+    labelIds: t.labelIds,
+    createdBy: t.createdBy ?? null,
+    archivedAt: t.archivedAt?.toISOString() ?? null,
+    createdAt: t.createdAt.toISOString(),
+    updatedAt: t.updatedAt.toISOString(),
+  };
 }
 
 // ---- Label ----------------------------------------------------------------
@@ -204,4 +297,11 @@ export const workItemInclude = [
   { model: PullRequest, as: "pullRequests" },
   { model: DocumentationLink, as: "docs" },
   { model: GithubIssueLink, as: "githubIssue", required: false },
+];
+
+// Tasks also carry their dependencies and group assignments.
+export const taskInclude = [
+  ...workItemInclude,
+  { model: TaskModel, as: "dependencies", attributes: ["id"], through: { attributes: [] } },
+  { model: TaskGroupAssignmentModel, as: "groupAssignments" },
 ];

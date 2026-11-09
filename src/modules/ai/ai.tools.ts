@@ -1,4 +1,4 @@
-import { Op, type WhereOptions } from "sequelize";
+import { Op, type ModelStatic, type WhereOptions } from "sequelize";
 import { z } from "zod";
 import type { ToolDefinition } from "../../lib/openrouter";
 import { badRequest, notFound } from "../../lib/errors";
@@ -12,6 +12,7 @@ import {
   User,
   type ItemType,
 } from "../../models";
+import { CLOSED_TASK_STATUSES } from "../../models/task-status";
 import { serializeWorkItem, workItemInclude } from "../shared/serializers";
 import { commentsService } from "../comments/comments.service";
 import { issuesService, tasksService } from "../workitems/workitems.service";
@@ -39,7 +40,8 @@ const STATUS = z.enum(["todo", "in_progress", "in_review", "blocked", "done"]);
 const PRIORITY = z.enum(["low", "medium", "high", "urgent"]);
 
 const serviceFor = (type: ItemType) => (type === "task" ? tasksService : issuesService);
-const modelFor = (type: ItemType) => (type === "task" ? Task : Issue);
+// Tasks have more columns than issues; only the shared ones are used through this.
+const modelFor = (type: ItemType) => (type === "task" ? Task : Issue) as unknown as ModelStatic<Issue>;
 
 // Tool results are fed back to the model as JSON, so they must stay small.
 // Trimming here is much cheaper than paying for the tokens twice (once in the
@@ -182,8 +184,10 @@ const readTools: Tool[] = [
       if (args.priority) where.priority = args.priority;
       if (args.overdue) {
         where.dueDate = { [Op.ne]: null, [Op.lt]: new Date() };
-        if (!args.status) where.status = { [Op.ne]: "done" };
       }
+      // Tasks have more closed states than issues, and a filter on a value an
+      // enum doesn't have is a database error, so this is decided per type.
+      const openOnly = !!args.overdue && !args.status;
 
       // Filtering by assignee means constraining the assignees join rather than
       // adding a column predicate, so it replaces that one include.
@@ -206,7 +210,9 @@ const readTools: Tool[] = [
         types.map((type) =>
           modelFor(type)
             .findAll({
-              where: where as WhereOptions,
+              where: (openOnly
+                ? { ...where, status: type === "task" ? { [Op.notIn]: CLOSED_TASK_STATUSES } : { [Op.ne]: "done" } }
+                : where) as WhereOptions,
               include,
               order: [["updatedAt", "DESC"]],
               limit,

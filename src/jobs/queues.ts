@@ -36,7 +36,8 @@ export function getQueue(name: QueueName): Queue {
   return queue;
 }
 
-// Add a job. `jobId` makes it idempotent: enqueueing the same id twice while the
+// Add a job. BullMQ refuses ":" in a jobId (it separates its Redis keys), so ids
+// use "-". `jobId` makes it idempotent: enqueueing the same id twice while the
 // first is still known to BullMQ is a no-op (used to deduplicate pushes per event).
 export async function enqueue<T extends object>(
   queue: QueueName,

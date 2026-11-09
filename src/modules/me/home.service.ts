@@ -1,9 +1,10 @@
 import { Op, QueryTypes } from "sequelize";
 import { sequelize } from "../../db/sequelize";
 import { redis } from "../../redis/client";
-import { Activity, Meeting, Notification, Product, Project, Task, User } from "../../models";
+import { Activity, CLOSED_TASK_STATUSES, Meeting, Notification, Product, Project, REVIEW_TASK_STATUSES, Task, User } from "../../models";
 import { productsService } from "../products/products.service";
-import { grantsFor, roleIndex } from "../access/engine";
+import { grantsFor } from "../access/engine";
+import { projectsWith } from "../access/reach";
 
 // Home, workspace switcher and badges (API-CHANGES A108, HOME-01, SYS-02).
 // Everything is scoped to the caller and, when given, to one product.
@@ -32,30 +33,16 @@ async function assignedTaskIds(userId: string): Promise<string[]> {
   return rows.map((r) => r.task_id);
 }
 
-// Projects where the user may approve work: org-wide approvers see all.
-async function approvableProjectIds(userId: string): Promise<string[] | "all"> {
-  const { grants, overrides } = await grantsFor(userId);
-  const roles = await roleIndex();
-  const permits = (key: string) => {
-    const r = roles.byKey.get(key);
-    return !!r && (r.permissions.includes("*") || r.permissions.includes("task.approve"));
+// My own open work: not closed, not a draft, and not sitting with a reviewer.
+const myOpenStatus = { [Op.notIn]: [...CLOSED_TASK_STATUSES, ...REVIEW_TASK_STATUSES, "draft"] };
+
+// Waiting on me: I'm the named reviewer, or nobody is named and I can approve in
+// that project. A task with a named reviewer belongs to them alone.
+function awaitingReview(userId: string, approvable: "all" | string[]) {
+  return {
+    status: REVIEW_TASK_STATUSES,
+    [Op.or]: [{ reviewerId: userId }, { reviewerId: null, ...(approvable === "all" ? {} : { projectId: approvable }) }],
   };
-  if (overrides.some((o) => o.permission === "task.approve" && o.effect === "deny" && o.scope.type === "organization")) return [];
-  if (grants.some((g) => g.scope.type === "organization" && permits(g.role))) return "all";
-  const ids = new Set<string>();
-  for (const g of grants.filter((x) => permits(x.role) && x.scope.id)) {
-    if (g.scope.type === "project") ids.add(g.scope.id!);
-    if (g.scope.type === "product") (await Project.findAll({ where: { productId: g.scope.id! }, attributes: ["id"] })).forEach((p) => ids.add(p.id));
-    if (g.scope.type === "department") {
-      const rows = await sequelize.query<{ project_id: string }>(`SELECT project_id FROM project_departments WHERE department_id = :id`, { replacements: { id: g.scope.id }, type: QueryTypes.SELECT });
-      rows.forEach((r) => ids.add(r.project_id));
-    }
-    if (g.scope.type === "team") {
-      const rows = await sequelize.query<{ project_id: string }>(`SELECT project_id FROM team_projects WHERE team_id = :id`, { replacements: { id: g.scope.id }, type: QueryTypes.SELECT });
-      rows.forEach((r) => ids.add(r.project_id));
-    }
-  }
-  return [...ids];
 }
 
 function intersect(ids: string[] | "all", within: string[] | null): string[] | "all" {
@@ -94,17 +81,12 @@ export const homeService = {
   async badges(userId: string) {
     const [mine, approvable, notifications, meetings] = await Promise.all([
       assignedTaskIds(userId),
-      approvableProjectIds(userId),
+      projectsWith(userId, "task.approve"),
       Notification.count({ where: { userId, read: false } }),
       this.meetingsToday(userId),
     ]);
-    const myOpen = mine.length ? await Task.count({ where: { id: mine, status: { [Op.ne]: "done" } } }) : 0;
-    const toApprove =
-      approvable === "all"
-        ? await Task.count({ where: { status: "in_review" } })
-        : approvable.length
-          ? await Task.count({ where: { status: "in_review", projectId: approvable } })
-          : 0;
+    const myOpen = mine.length ? await Task.count({ where: { id: mine, status: myOpenStatus } }) : 0;
+    const toApprove = await Task.count({ where: awaitingReview(userId, approvable) });
     return { tasks: myOpen + toApprove, notifications, calendar: meetings.length, chat: 0 };
   },
 
@@ -122,24 +104,22 @@ export const homeService = {
     const scopeProjects = await projectIdsIn(productId);
     const inScope = scopeProjects ? { projectId: scopeProjects } : {};
     const mine = await assignedTaskIds(userId);
-    const approvable = intersect(await approvableProjectIds(userId), scopeProjects);
+    const approvable = intersect(await projectsWith(userId, "task.approve"), scopeProjects);
     const now = new Date();
 
     const [myOpen, toApprove, overdue, dueToday, meetings, unread, activity] = await Promise.all([
-      mine.length ? Task.count({ where: { id: mine, status: { [Op.ne]: "done" }, ...inScope } }) : 0,
-      approvable === "all" || approvable.length
-        ? Task.findAll({
-            where: { status: "in_review", ...(approvable === "all" ? inScope : { projectId: approvable }) },
-            attributes: ["id", "title", "projectId", "dueDate", "updatedAt"],
-            order: [["updatedAt", "DESC"]],
-            limit: 10,
-          })
+      mine.length ? Task.count({ where: { id: mine, status: myOpenStatus, ...inScope } }) : 0,
+      Task.findAll({
+        where: { ...awaitingReview(userId, approvable), ...inScope },
+        attributes: ["id", "title", "projectId", "dueDate", "updatedAt"],
+        order: [["updatedAt", "DESC"]],
+        limit: 10,
+      }),
+      mine.length
+        ? Task.findAll({ where: { id: mine, status: myOpenStatus, dueDate: { [Op.lt]: startOfDay(now) }, ...inScope }, attributes: ["id", "title", "projectId", "dueDate"], limit: 10 })
         : [],
       mine.length
-        ? Task.findAll({ where: { id: mine, status: { [Op.ne]: "done" }, dueDate: { [Op.lt]: startOfDay(now) }, ...inScope }, attributes: ["id", "title", "projectId", "dueDate"], limit: 10 })
-        : [],
-      mine.length
-        ? Task.findAll({ where: { id: mine, status: { [Op.ne]: "done" }, dueDate: { [Op.gte]: startOfDay(now), [Op.lt]: endOfDay(now) }, ...inScope }, attributes: ["id", "title", "projectId", "dueDate"], limit: 10 })
+        ? Task.findAll({ where: { id: mine, status: myOpenStatus, dueDate: { [Op.gte]: startOfDay(now), [Op.lt]: endOfDay(now) }, ...inScope }, attributes: ["id", "title", "projectId", "dueDate"], limit: 10 })
         : [],
       this.meetingsToday(userId),
       Notification.count({ where: { userId, read: false } }),

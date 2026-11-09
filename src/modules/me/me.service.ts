@@ -1,6 +1,6 @@
 import { Op, type WhereOptions } from "sequelize";
-import { Issue, Task, User } from "../../models";
-import { serializeWorkItem, workItemInclude } from "../shared/serializers";
+import { CLOSED_TASK_STATUSES, Issue, Task, User } from "../../models";
+import { serializeWorkItem, taskInclude, workItemInclude } from "../shared/serializers";
 
 // Find ids of tasks/issues assigned to a user (via the M2M join), without
 // disturbing the full assignee list we later serialize.
@@ -15,7 +15,7 @@ async function assignedIds(userId: string) {
 
 async function loadAndSerialize(taskWhere: WhereOptions, issueWhere: WhereOptions) {
   const [tasks, issues] = await Promise.all([
-    Task.findAll({ where: taskWhere, include: workItemInclude, order: [["updatedAt", "DESC"]] }),
+    Task.findAll({ where: taskWhere, include: taskInclude, order: [["updatedAt", "DESC"]] }),
     Issue.findAll({ where: issueWhere, include: workItemInclude, order: [["updatedAt", "DESC"]] }),
   ]);
   return [
@@ -29,7 +29,7 @@ export const meService = {
   async assigned(userId: string) {
     const { taskIds, issueIds } = await assignedIds(userId);
     return loadAndSerialize(
-      { id: { [Op.in]: taskIds }, status: { [Op.ne]: "done" } },
+      { id: { [Op.in]: taskIds }, status: { [Op.notIn]: CLOSED_TASK_STATUSES } },
       { id: { [Op.in]: issueIds }, status: { [Op.ne]: "done" } },
     );
   },
@@ -45,7 +45,7 @@ export const meService = {
     const { taskIds, issueIds } = await assignedIds(userId);
     const due = { [Op.ne]: null, [Op.lt]: cutoff };
     return loadAndSerialize(
-      { id: { [Op.in]: taskIds }, status: { [Op.ne]: "done" }, dueDate: due },
+      { id: { [Op.in]: taskIds }, status: { [Op.notIn]: CLOSED_TASK_STATUSES }, dueDate: due },
       { id: { [Op.in]: issueIds }, status: { [Op.ne]: "done" }, dueDate: due },
     );
   },

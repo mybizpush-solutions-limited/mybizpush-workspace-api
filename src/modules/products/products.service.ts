@@ -2,7 +2,7 @@ import { Op } from "sequelize";
 import { sequelize } from "../../db/sequelize";
 import { forbidden, notFound, badRequest } from "../../lib/errors";
 import { uniqueSlug } from "../../lib/slug";
-import { isOrgManager, Issue, Product, ProductMember, Project, Task, User, type ProductStage } from "../../models";
+import { CLOSED_TASK_STATUSES, isOrgManager, Issue, Product, ProductMember, Project, Task, User, type ProductStage } from "../../models";
 
 // Products: the business umbrella over projects, people, marketing and social
 // (API-CHANGES A101). Access checks here are interim (owner or org manager)
@@ -38,7 +38,7 @@ async function openTaskCounts(productIds: string[]): Promise<Map<string, number>
   const rows = (await Task.findAll({
     attributes: [[sequelize.col("Project.product_id"), "productId"], [sequelize.fn("COUNT", sequelize.col("Task.id")), "n"]],
     include: [{ model: Project, attributes: [], where: { productId: { [Op.in]: productIds } } }],
-    where: { status: { [Op.ne]: "done" } },
+    where: { status: { [Op.notIn]: CLOSED_TASK_STATUSES } },
     group: ["Project.product_id"],
     raw: true,
   })) as unknown as { productId: string; n: string }[];
@@ -209,8 +209,8 @@ export const productsService = {
     const projectIds = (await Project.findAll({ where: { productId: id }, attributes: ["id"] })).map((p) => p.id);
     if (!projectIds.length) return { openTasks: 0, overdue: 0, openIssues: 0 };
     const [openTasks, overdue, openIssues] = await Promise.all([
-      Task.count({ where: { projectId: projectIds, status: { [Op.ne]: "done" } } }),
-      Task.count({ where: { projectId: projectIds, status: { [Op.ne]: "done" }, dueDate: { [Op.lt]: new Date() } } }),
+      Task.count({ where: { projectId: projectIds, status: { [Op.notIn]: CLOSED_TASK_STATUSES } } }),
+      Task.count({ where: { projectId: projectIds, status: { [Op.notIn]: CLOSED_TASK_STATUSES }, dueDate: { [Op.lt]: new Date() } } }),
       Issue.count({ where: { projectId: projectIds, status: { [Op.ne]: "done" } } }),
     ]);
     return { openTasks, overdue, openIssues };

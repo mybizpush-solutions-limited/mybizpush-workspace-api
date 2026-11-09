@@ -39,6 +39,8 @@ import { lookupRouter, searchRouter } from "./modules/lookup/lookup.routes";
 import { jobsRouter } from "./modules/jobs/jobs.routes";
 import { devicesRouter } from "./modules/devices/devices.routes";
 import { syncRouter } from "./modules/sync/sync.routes";
+import { tasksExtRouter } from "./modules/tasks/tasks.routes";
+import { groupsRouter } from "./modules/groups/groups.routes";
 
 // All versioned business endpoints live under this prefix.
 export const API_PREFIX = "/api/v1";
@@ -88,7 +90,11 @@ export function createApp() {
   // Report endpoints share the /projects prefix (distinct sub-paths) so URLs
   // read /api/v1/projects/:id/report/staff/:userId.
   v1.use("/projects", reportsRouter);
+  // Goes first: it owns /tasks/templates, /tasks/reports and /tasks/workflow, and
+  // falls through to the shared router for everything else.
+  v1.use("/tasks", tasksExtRouter);
   v1.use("/tasks", tasksRouter);
+  v1.use("/groups", groupsRouter);
   v1.use("/issues", issuesRouter);
   v1.use("/comments", commentsRouter);
   v1.use("/activity", activityRouter);

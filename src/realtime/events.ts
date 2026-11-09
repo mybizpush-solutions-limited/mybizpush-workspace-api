@@ -13,7 +13,7 @@ export interface ServerEvents {
   // A new in-app notification for this user (same shape as GET /notifications).
   "notification:new": { notification: Record<string, unknown> };
   // Tab bar and home badge counts. Sent whenever one may have changed.
-  badges: { notifications: number };
+  badges: { notifications: number; tasks?: number; calendar?: number; chat?: number };
   // Records in these collections changed: the app runs a sync pull (A006).
   "sync:changed": { collections: string[] };
 }

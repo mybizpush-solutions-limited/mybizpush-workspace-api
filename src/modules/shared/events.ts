@@ -1,5 +1,5 @@
 import { Activity, Notification, NotificationPreference, User } from "../../models";
-import type { RecordType } from "../../models";
+import type { NotificationKind, RecordType } from "../../models";
 import { emails } from "../../lib/email";
 import { env } from "../../config/env";
 import { enqueue } from "../../jobs/queues";
@@ -8,9 +8,9 @@ import { emitToUser } from "../../realtime/events";
 
 type ActivityKind =
   | "created" | "status_changed" | "assigned" | "commented"
-  | "feedback_requested" | "feedback_provided" | "pr_linked";
+  | "feedback_requested" | "feedback_provided" | "pr_linked"
+  | "submitted" | "reviewed" | "dependency_changed";
 
-type NotificationKind = "assigned" | "mentioned" | "feedback_requested" | "status_changed" | "commented";
 
 // Append to the immutable activity log.
 export function logActivity(input: {
@@ -31,12 +31,16 @@ export function logActivity(input: {
 
 // Which notification preference gates the email for each kind. Defaults apply
 // when the user has no preferences row yet (we email by default — comprehensive).
-const PREF_FOR_KIND: Record<NotificationKind, "pendingTasks" | "feedbackRequests" | "mentions" | "events"> = {
+const PREF_FOR_KIND: Partial<Record<NotificationKind, "pendingTasks" | "feedbackRequests" | "mentions" | "events">> = {
   assigned: "pendingTasks",
   status_changed: "events",
   feedback_requested: "feedbackRequests",
   mentioned: "mentions",
   commented: "events",
+  submitted: "pendingTasks",
+  reviewer_assigned: "pendingTasks",
+  revision_requested: "pendingTasks",
+  deadline: "pendingTasks",
 };
 const PREF_DEFAULT: Record<string, boolean> = {
   pendingTasks: true,
@@ -51,7 +55,7 @@ async function emailAlert(userId: string, kind: NotificationKind, message: strin
   try {
     const user = await User.findByPk(userId, { attributes: ["email", "name"] });
     if (!user?.email) return;
-    const flag = PREF_FOR_KIND[kind];
+    const flag = PREF_FOR_KIND[kind] ?? "events";
     const pref = await NotificationPreference.findByPk(userId);
     const enabled = pref ? Boolean((pref as unknown as Record<string, boolean>)[flag]) : PREF_DEFAULT[flag];
     if (!enabled) return;
@@ -88,7 +92,7 @@ async function announceNotification(notification: Notification): Promise<void> {
 // and fire a real-time email alert.
 export async function notify(input: {
   userId: string;
-  fromUserId: string;
+  fromUserId: string | null; // null for system-generated reminders
   kind: NotificationKind;
   itemId: string;
   itemType: RecordType;
@@ -107,7 +111,7 @@ export async function notify(input: {
   void emailAlert(input.userId, input.kind, input.message);
   // Push to the recipient's phones. The job id is the notification id, so a
   // retry of this request can never push the same notification twice.
-  void enqueue("push", "notification", { notificationId: notification.id }, { jobId: `notification:${notification.id}` }).catch(
+  void enqueue("push", "notification", { notificationId: notification.id }, { jobId: `notification-${notification.id}` }).catch(
     (err) => console.error("push not queued", err),
   );
   void announceNotification(notification);

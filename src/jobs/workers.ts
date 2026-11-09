@@ -1,5 +1,5 @@
 import { Worker, type Job } from "bullmq";
-import { createJobConnection, QUEUE_NAMES, type QueueName } from "./queues";
+import { createJobConnection, getQueue, QUEUE_NAMES, type QueueName } from "./queues";
 
 // Job handlers register here by queue and job name; startWorkers() runs one
 // BullMQ worker per queue that dispatches to them. Feature modules call
@@ -27,8 +27,22 @@ const CONCURRENCY: Record<QueueName, number> = {
 
 let running: Worker[] = [];
 
+// Recurring jobs. Registered at import time, created in Redis when workers start;
+// BullMQ keeps exactly one schedule per id however many processes call this.
+const schedules: { queue: QueueName; name: string; cron: string }[] = [];
+export function registerSchedule(queue: QueueName, name: string, cron: string): void {
+  schedules.push({ queue, name, cron });
+}
+
+async function applySchedules(): Promise<void> {
+  for (const s of schedules) {
+    await getQueue(s.queue).upsertJobScheduler(`${s.queue}-${s.name}`, { pattern: s.cron }, { name: s.name });
+  }
+}
+
 export function startWorkers(): void {
   if (running.length) return;
+  void applySchedules().catch((err) => console.error("[jobs] schedules not applied:", err.message));
   running = QUEUE_NAMES.map((queue) => {
     const worker = new Worker(
       queue,

@@ -20,7 +20,7 @@ export const CATALOG: Resource[] = [
   { resource: "team", label: "Teams", actions: { view: "View", create: "Create", edit: "Edit", delete: "Delete" } },
   { resource: "product", label: "Products", actions: { view: "View", create: "Create", edit: "Edit", manage_members: "Manage people", manage_projects: "Manage projects" } },
   { resource: "project", label: "Projects", actions: { view: "View", create: "Create", manage: "Manage", delete: "Delete" } },
-  { resource: "task", label: "Tasks", actions: { view: "View", create: "Create", assign: "Assign", submit: "Submit work", approve: "Approve", reject: "Reject", delete: "Delete" } },
+  { resource: "task", label: "Tasks", actions: { view: "View", create: "Create", assign: "Assign", submit: "Submit work", approve: "Approve", reject: "Reject", delete: "Delete", manage_templates: "Manage templates" } },
   { resource: "meeting", label: "Meetings", actions: { view: "View", create: "Create", edit: "Edit", cancel: "Cancel" } },
   { resource: "channel", label: "Channels", actions: { create: "Create", edit: "Edit", archive: "Archive", manage_members: "Manage members" } },
   { resource: "message", label: "Messages", actions: { send: "Send", moderate: "Moderate" } },
@@ -53,7 +53,9 @@ export interface SeedRole {
   permissions: string[]; // "*" = everything
 }
 
-const work = ["task.view", "task.create", "task.submit", "meeting.view", "message.send", "report.view"];
+// report.view is deliberately not here: "work" roles are often held organization
+// wide, and everyone already sees their own work without it.
+const work = ["task.view", "task.create", "task.submit", "meeting.view", "message.send"];
 
 export const SEED_ROLES: SeedRole[] = [
   { key: "executive_admin", name: "Executive admin", description: "Everything, organization wide", system: true, defaultScope: "organization", permissions: ["*"] },
@@ -80,7 +82,7 @@ export const SEED_ROLES: SeedRole[] = [
     description: "Runs a product: people, projects, approvals, marketing",
     system: false,
     defaultScope: "product",
-    permissions: [...work, "product.edit", "product.manage_members", "product.manage_projects", "project.create", "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "meeting.edit", "announcement.draft", "announcement.publish", "target.create", "target.assign", "target.evaluate", "report.generate", "report.export", "campaign.approve", "content.approve", "channel.create"],
+    permissions: [...work, "product.edit", "product.manage_members", "product.manage_projects", "project.create", "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "meeting.edit", "announcement.draft", "announcement.publish", "target.create", "target.assign", "target.evaluate", "report.generate", "report.export", "campaign.approve", "content.approve", "channel.create", "task.manage_templates", "report.view"],
   },
   {
     key: "project_manager",
@@ -88,7 +90,7 @@ export const SEED_ROLES: SeedRole[] = [
     description: "Runs a project: tasks, approvals, meetings",
     system: false,
     defaultScope: "project",
-    permissions: [...work, "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "meeting.edit", "report.generate", "channel.create"],
+    permissions: [...work, "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "meeting.edit", "report.generate", "channel.create", "report.view"],
   },
   {
     key: "department_head",
@@ -96,9 +98,9 @@ export const SEED_ROLES: SeedRole[] = [
     description: "Leads a department and the projects it works on",
     system: false,
     defaultScope: "department",
-    permissions: [...work, "department.edit", "department.manage_members", "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "target.create", "target.assign", "target.evaluate", "report.generate", "report.export"],
+    permissions: [...work, "department.edit", "department.manage_members", "project.manage", "task.assign", "task.approve", "task.reject", "meeting.create", "target.create", "target.assign", "target.evaluate", "report.generate", "report.export", "task.manage_templates", "report.view"],
   },
-  { key: "team_lead", name: "Team lead", description: "Leads a team", system: false, defaultScope: "team", permissions: [...work, "team.edit", "task.assign", "task.approve", "task.reject", "meeting.create"] },
+  { key: "team_lead", name: "Team lead", description: "Leads a team", system: false, defaultScope: "team", permissions: [...work, "team.edit", "task.assign", "task.approve", "task.reject", "meeting.create", "report.view"] },
   { key: "reviewer", name: "Reviewer", description: "Approve and reject work", system: false, defaultScope: "product", permissions: ["task.view", "task.approve", "task.reject"] },
   { key: "contributor", name: "Contributor", description: "Does the work", system: false, defaultScope: "product", permissions: work },
   {

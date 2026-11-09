@@ -2,15 +2,22 @@ import { Op, type ModelStatic, type Model } from "sequelize";
 import { z } from "zod";
 import { badRequest } from "../../lib/errors";
 import { redis } from "../../redis/client";
-import { Comment, Issue, Label, Meeting, Notification, Task, User, type ItemType } from "../../models";
+import { Comment, Issue, Label, Meeting, Notification, Task, TaskReview, TaskStatusHistory, TaskSubmission, TaskTemplate, User, type ItemType } from "../../models";
 import {
   serializeComment,
   serializeLabel,
   serializeMeeting,
   serializeNotification,
+  serializeTaskReview,
+  serializeTaskStatusHistory,
+  serializeTaskSubmission,
+  serializeTaskTemplate,
   serializeWorkItem,
+  taskInclude,
   workItemInclude,
 } from "../shared/serializers";
+import { reviewSchema, submitSchema, taskStatusSchema } from "../tasks/tasks.schemas";
+import { tasksWorkflow } from "../tasks/tasks.service";
 import { usersRepo } from "../users/users.repo";
 import { departmentsService } from "../departments/departments.service";
 import { projectsService } from "../projects/projects.service";
@@ -32,7 +39,10 @@ import { SyncTombstone } from "./tombstones";
 //   client mutation id, so a retried push never applies a write twice, and an
 //   optional baseUpdatedAt so concurrent edits come back as conflicts.
 
-export const DELTA_COLLECTIONS = ["tasks", "issues", "comments", "notifications", "meetings"] as const;
+export const DELTA_COLLECTIONS = [
+  "tasks", "issues", "comments", "notifications", "meetings",
+  "taskSubmissions", "taskReviews", "taskStatusHistory", "taskTemplates",
+] as const;
 export const REFERENCE_COLLECTIONS = ["users", "departments", "projects", "labels"] as const;
 type DeltaCollection = (typeof DELTA_COLLECTIONS)[number];
 type ReferenceCollection = (typeof REFERENCE_COLLECTIONS)[number];
@@ -70,7 +80,11 @@ interface DeltaSource {
 }
 
 const DELTA: Record<DeltaCollection, DeltaSource> = {
-  tasks: { model: Task, include: workItemInclude, serialize: (r) => serializeWorkItem(r as Task, "task") },
+  tasks: { model: Task, include: taskInclude, serialize: (r) => serializeWorkItem(r as Task, "task") },
+  taskSubmissions: { model: TaskSubmission, serialize: (r) => serializeTaskSubmission(r as TaskSubmission) },
+  taskReviews: { model: TaskReview, serialize: (r) => serializeTaskReview(r as TaskReview) },
+  taskStatusHistory: { model: TaskStatusHistory, serialize: (r) => serializeTaskStatusHistory(r as TaskStatusHistory) },
+  taskTemplates: { model: TaskTemplate, serialize: (r) => serializeTaskTemplate(r as TaskTemplate) },
   issues: { model: Issue, include: workItemInclude, serialize: (r) => serializeWorkItem(r as Issue, "issue") },
   comments: {
     model: Comment,
@@ -164,6 +178,8 @@ export const mutationSchema = z.object({
     "task.create",
     "task.update",
     "task.status",
+    "task.submit",
+    "task.review",
     "issue.create",
     "issue.update",
     "issue.status",
@@ -228,17 +244,25 @@ async function apply(userId: string, m: Mutation): Promise<MutationResult> {
       const input = schemas.create
         .extend({ id: z.string().uuid().optional() })
         .parse({ ...m.payload, id: m.recordId ?? m.payload.id }) as WorkItemCreateInput;
-      return { mutationId: m.mutationId, status: "applied", record: await service.create(input, userId) };
+      return { mutationId: m.mutationId, status: "applied", record: await service.create(input, userId, { strict: true }) };
     }
     if (!m.recordId) throw badRequest("recordId is required");
     const stale = await conflictIfStale(model, m.recordId, m.baseUpdatedAt, () => service.byId(m.recordId!));
     if (stale) return { ...stale, mutationId: m.mutationId };
     if (action === "update") {
       const patch = schemas.update.parse(m.payload) as WorkItemUpdateInput;
-      return { mutationId: m.mutationId, status: "applied", record: await service.update(m.recordId, patch, userId) };
+      return { mutationId: m.mutationId, status: "applied", record: await service.update(m.recordId, patch, userId, { strict: true }) };
     }
-    const { status } = statusSchema.parse(m.payload);
-    return { mutationId: m.mutationId, status: "applied", record: await service.setStatus(m.recordId, status, userId) };
+    if (action === "submit") {
+      const out = await tasksWorkflow.submit(m.recordId, submitSchema.parse(m.payload), userId);
+      return { mutationId: m.mutationId, status: "applied", record: out.item };
+    }
+    if (action === "review") {
+      const out = await tasksWorkflow.review(m.recordId, reviewSchema.parse(m.payload), userId);
+      return { mutationId: m.mutationId, status: "applied", record: out.item };
+    }
+    const { status, note, blockedReason } = (resource === "task" ? taskStatusSchema : statusSchema.extend({ note: z.string().optional(), blockedReason: z.string().optional() })).parse(m.payload);
+    return { mutationId: m.mutationId, status: "applied", record: await service.setStatus(m.recordId, status, userId, { note, blockedReason }) };
   }
 
   if (m.type === "comment.create") {

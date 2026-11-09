@@ -62,10 +62,10 @@ export function toCsv(columns: string[], rows: Row[]): Buffer {
   return Buffer.from("\uFEFF" + lines.join("\r\n"), "utf8"); // BOM so Excel reads UTF-8
 }
 
-export async function toXlsx(columns: string[], rows: Row[], meta: { generatedBy: string }): Promise<Buffer> {
+export async function toXlsx(columns: string[], rows: Row[], meta: { generatedBy: string; sheet?: string }): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "MyBizPush Workspace";
-  const ws = wb.addWorksheet("Staff");
+  const ws = wb.addWorksheet(meta.sheet ?? "Staff");
   ws.columns = columns.map((c) => ({ header: c, key: c, width: Math.min(40, Math.max(12, c.length + 4)) }));
   ws.getRow(1).font = { bold: true };
   ws.views = [{ state: "frozen", ySplit: 1 }];
