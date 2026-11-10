@@ -5,6 +5,7 @@ import { env } from "../../config/env";
 import { badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { emails } from "../../lib/email";
 import { hashPassword } from "../../lib/password";
+import { meetsPasswordPolicy } from "../../lib/passwordPolicy";
 import { revokeAllRefreshTokens } from "../../lib/jwt";
 import {
   AccessAssignment,
@@ -199,7 +200,7 @@ export const staffService = {
 
     const userId = await sequelize.transaction(async (transaction) => {
       const user = await User.create(
-        { name, email: inv.email, passwordHash, roles: inv.jobTitles, onboarded: false, dateJoined: new Date().toISOString().slice(0, 10) },
+        { name, email: inv.email, passwordHash, passwordMeetsPolicy: meetsPasswordPolicy(input.password), roles: inv.jobTitles, onboarded: false, dateJoined: new Date().toISOString().slice(0, 10) },
         { transaction },
       );
       if (inv.departmentId) {

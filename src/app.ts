@@ -29,6 +29,7 @@ import { analyticsRouter } from "./modules/analytics/analytics.routes";
 import { analyticsCollectRouter } from "./modules/analytics/analytics.collect.routes";
 import { blogsRouter } from "./modules/blogs/blogs.routes";
 import { databasesRouter } from "./modules/databases/databases.routes";
+import { serversRouter } from "./modules/servers/servers.routes";
 import { reportsRouter } from "./modules/reports/reports.routes";
 import { meetingReportsRouter } from "./modules/reports/meetingReports.routes";
 import { auditRouter } from "./modules/audit/audit.routes";
@@ -135,6 +136,7 @@ export function createApp() {
   v1.use("/analytics", analyticsRouter);
   v1.use("/blogs", blogsRouter);
   v1.use("/databases", databasesRouter);
+  v1.use("/servers", serversRouter);
   v1.use("/meeting-reports", meetingReportsRouter);
   v1.use("/audit", auditRouter);
   v1.use("/products", productsRouter);

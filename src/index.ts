@@ -1,3 +1,5 @@
+// Sentry has to load first so it can instrument the modules imported below.
+import "./instrument";
 import { createApp } from "./app";
 import { env } from "./config/env";
 import { assertDbConnection, sequelize } from "./db/sequelize";
@@ -8,6 +10,7 @@ import { startBackupScheduler } from "./modules/databases/databases.scheduler";
 import { startCommitsScheduler } from "./modules/github/commits.scheduler";
 import { startMeetingReportsScheduler } from "./modules/reports/meetingReports.scheduler";
 import { closeQueues, startWorkers, stopWorkers } from "./jobs";
+import { startServerScheduler } from "./modules/servers/servers.scheduler";
 // Importing the models registers them with Sequelize and wires associations.
 import "./models";
 import { attachRealtime, closeRealtime } from "./realtime/gateway";
@@ -31,6 +34,7 @@ async function start() {
   startCommitsScheduler();
   startMeetingReportsScheduler();
   if (env.RUN_JOB_WORKERS) startWorkers();
+  startServerScheduler();
 
   const shutdown = async (signal: string) => {
     console.info(`\n${signal} received — shutting down…`);

@@ -1,28 +1,8 @@
 import { DataTypes, Model, type CreationOptional, type InferAttributes, type InferCreationAttributes } from "sequelize";
 import { sequelize } from "../db/sequelize";
 
-// Two-step recovery codes and organization settings (API-CHANGES A902, A903).
-// Re-exported by models/index.ts.
-
-export class MfaRecoveryCode extends Model<InferAttributes<MfaRecoveryCode>, InferCreationAttributes<MfaRecoveryCode>> {
-  declare id: CreationOptional<string>;
-  declare userId: string;
-  declare codeHash: string;
-  declare usedAt: CreationOptional<Date | null>;
-  declare createdAt: CreationOptional<Date>;
-  declare updatedAt: CreationOptional<Date>;
-}
-MfaRecoveryCode.init(
-  {
-    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-    userId: { type: DataTypes.UUID, allowNull: false },
-    codeHash: { type: DataTypes.STRING, allowNull: false },
-    usedAt: { type: DataTypes.DATE, allowNull: true },
-    createdAt: DataTypes.DATE,
-    updatedAt: DataTypes.DATE,
-  },
-  { sequelize, tableName: "mfa_recovery_codes" },
-);
+// Organization settings (API-CHANGES A903). Re-exported by models/index.ts.
+// Recovery codes live with the User model in models/index.ts (main's MFA, P11).
 
 export class OrganizationSetting extends Model<InferAttributes<OrganizationSetting>, InferCreationAttributes<OrganizationSetting>> {
   declare id: CreationOptional<number>;

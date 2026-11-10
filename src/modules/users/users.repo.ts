@@ -31,6 +31,7 @@ export interface PublicUser {
   status: "active" | "suspended";
   dateJoined: string | null;
   reportsToId: string | null;
+  mfaEnabled: boolean;
 }
 
 // Serialize a User model (optionally with its `departments`/`projects`
@@ -59,6 +60,7 @@ export function toPublicUser(user: User): PublicUser {
     status: user.status ?? "active",
     dateJoined: user.dateJoined ?? null,
     reportsToId: user.reportsToId ?? null,
+    mfaEnabled: user.totpEnabled,
   };
 }
 

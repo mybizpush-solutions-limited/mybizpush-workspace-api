@@ -7,8 +7,8 @@ import { requireAuth, requirePermission } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { rateLimit } from "../../middleware/rateLimit";
 import { EMPLOYMENT_STATUSES } from "../../models";
-import { clientInfo } from "../auth/auth.controller";
-import { authService } from "../auth/auth.service";
+import { newPassword } from "../auth/auth.schemas";
+import { nextStep } from "../auth/session";
 import { serializeInvitation, staffService } from "./staff.service";
 import { fixRow, getImport, preview, saveImport, summarize } from "./staff.import";
 import { EXPORT_GROUPS, buildRows, toCsv, toXlsx, type ExportGroup } from "./staff.export";
@@ -244,19 +244,18 @@ invitationsPublicRouter.get(
   }),
 );
 
-// Creates the account; the client then signs in with the new password.
+// Creates the account. The password must meet the shared policy, and like every
+// account this one has to enroll two-factor before it gets a session (P11).
 invitationsPublicRouter.post(
   "/:token/accept",
   inviteLimiter,
-  validateBody(z.object({ name: z.string().trim().min(1).max(120).optional(), password: z.string().min(8).max(200) })),
+  validateBody(z.object({ name: z.string().trim().min(1).max(120).optional(), password: newPassword })),
   asyncHandler(async (req, res) => {
     const user = await staffService.accept(req.params.token!, req.body);
     await audit({ actorId: user.id, req, action: "staff.invite.accept", target: { type: "user", id: user.id } });
-    // Apps get a session straight away. Browsers sign in themselves, as they always have.
-    if (req.get("x-client")?.toLowerCase() === "mobile") {
-      const session = await authService.sessionFor(user, clientInfo(req));
-      return res.status(201).json({ ok: true, email: user.email, ...session });
-    }
-    res.status(201).json({ ok: true, email: user.email });
+    // Every client goes straight on to the next sign-in step (two-factor
+    // enrollment), so the new member doesn't type the password again. The
+    // session comes from /auth/mfa/confirm, as for any other sign-in.
+    res.status(201).json({ ok: true, email: user.email, ...(await nextStep(user)) });
   }),
 );

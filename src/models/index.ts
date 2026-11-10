@@ -99,12 +99,17 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   declare suspendedAt: CreationOptional<Date | null>;
   declare suspendedReason: CreationOptional<string | null>;
   declare dateJoined: CreationOptional<string | null>;
-  // Two-step sign-in (A902). The secret is encrypted and never leaves the API.
+  declare reportsToId: CreationOptional<string | null>;
+  // False until a sign-in proves the password meets the 12-character policy —
+  // bcrypt can't be inspected, so it can only be judged from the plaintext.
+  declare passwordMeetsPolicy: CreationOptional<boolean>;
+  // Authenticator-app MFA. The secret is AES-GCM encrypted (lib/crypto) and
+  // only set once enrollment starts; totpEnabled flips when a code confirms it.
   declare totpSecretEncrypted: CreationOptional<string | null>;
   declare totpEnabled: CreationOptional<boolean>;
   declare totpConfirmedAt: CreationOptional<Date | null>;
-  declare totpLastStep: CreationOptional<number>;
-  declare reportsToId: CreationOptional<string | null>;
+  // Last accepted 30s step (replay guard). BIGINT comes back from pg as a string.
+  declare totpLastStep: CreationOptional<string>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -128,6 +133,7 @@ User.init(
     suspendedAt: { type: DataTypes.DATE, allowNull: true },
     suspendedReason: { type: DataTypes.STRING(240), allowNull: true },
     dateJoined: { type: DataTypes.DATEONLY, allowNull: true },
+    passwordMeetsPolicy: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     totpSecretEncrypted: { type: DataTypes.TEXT, allowNull: true },
     totpEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     totpConfirmedAt: { type: DataTypes.DATE, allowNull: true },
@@ -137,6 +143,32 @@ User.init(
     updatedAt: DataTypes.DATE,
   },
   { sequelize, tableName: "users" },
+);
+
+// ---- MfaRecoveryCode -------------------------------------------------------
+// One-time codes for signing in without the authenticator app. Only bcrypt
+// hashes are stored; the plaintext is shown once, at generation.
+export class MfaRecoveryCode extends Model<
+  InferAttributes<MfaRecoveryCode>,
+  InferCreationAttributes<MfaRecoveryCode>
+> {
+  declare id: CreationOptional<string>;
+  declare userId: string;
+  declare codeHash: string;
+  declare usedAt: CreationOptional<Date | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+MfaRecoveryCode.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    userId: { type: DataTypes.UUID, allowNull: false },
+    codeHash: { type: DataTypes.STRING, allowNull: false },
+    usedAt: { type: DataTypes.DATE, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "mfa_recovery_codes" },
 );
 
 // ---- Department -----------------------------------------------------------
@@ -1257,6 +1289,11 @@ AnalyticsDaily.init(
 );
 
 // ---- Blog console ----------------------------------------------------------
+// The lowest automated-review severity that stops an author sending a post to a
+// publisher. "low" blocks on any finding; "off" lets everything through.
+export const BLOG_AI_GATE_SEVERITIES = ["off", "critical", "high", "medium", "low"] as const;
+export type BlogAIGateSeverity = (typeof BLOG_AI_GATE_SEVERITIES)[number];
+
 // A project's connection to the blog API that powers its public website. Posts
 // themselves are never stored here — the site's own API stays authoritative.
 export class BlogChannel extends Model<
@@ -1270,6 +1307,7 @@ export class BlogChannel extends Model<
   declare apiBaseUrl: string;
   declare serviceToken: string;
   declare siteUrl: CreationOptional<string>;
+  declare aiGateSeverity: CreationOptional<BlogAIGateSeverity>;
   declare createdBy: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
@@ -1283,6 +1321,7 @@ BlogChannel.init(
     apiBaseUrl: { type: DataTypes.STRING(500), allowNull: false },
     serviceToken: { type: DataTypes.TEXT, allowNull: false },
     siteUrl: { type: DataTypes.STRING(500), allowNull: false, defaultValue: "" },
+    aiGateSeverity: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "low" },
     createdBy: { type: DataTypes.UUID, allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
@@ -1917,9 +1956,148 @@ Task.hasMany(TaskSubmission, { as: "submissions", foreignKey: "taskId" });
 Task.belongsTo(User, { as: "reviewer", foreignKey: "reviewerId" });
 TaskSubmission.belongsTo(Task, { foreignKey: "taskId" });
 TaskReview.belongsTo(Task, { foreignKey: "taskId" });
+// ---- Servers ---------------------------------------------------------------
+// The VPSs behind our projects, reached over SSH by the server console. See
+// modules/servers/bootstrap.ts for what the console can and can't do on a box.
+export const SERVER_MODES = ["managed", "read-only"] as const;
+export type ServerMode = (typeof SERVER_MODES)[number];
+export const SERVER_STATUSES = ["unknown", "ok", "error"] as const;
+export const SERVER_JOB_KINDS = ["update", "upgrade", "upgrade_docker", "reboot", "scan"] as const;
+export type ServerJobKind = (typeof SERVER_JOB_KINDS)[number];
+// Jobs that change the server — refused on read-only servers.
+export const MUTATING_JOB_KINDS: readonly ServerJobKind[] = ["update", "upgrade", "upgrade_docker", "reboot"];
+export const SERVER_JOB_STATUSES = ["running", "succeeded", "failed", "lost"] as const;
+
+export class Server extends Model<InferAttributes<Server>, InferCreationAttributes<Server>> {
+  declare id: CreationOptional<string>;
+  declare name: string;
+  declare host: string;
+  declare port: CreationOptional<number>;
+  declare username: CreationOptional<string>;
+  declare hostKeyFingerprint: CreationOptional<string | null>;
+  declare mode: CreationOptional<ServerMode>;
+  declare provider: CreationOptional<string>;
+  declare notes: CreationOptional<string>;
+  declare maintenanceStart: CreationOptional<string | null>;
+  declare maintenanceMinutes: CreationOptional<number>;
+  declare autoUpgrade: CreationOptional<boolean>;
+  declare autoUpgradeDay: CreationOptional<number>;
+  declare autoUpgradeHour: CreationOptional<number>;
+  declare nextAutoUpgradeAt: CreationOptional<Date | null>;
+  declare status: CreationOptional<string>;
+  declare lastError: CreationOptional<string>;
+  declare lastSeenAt: CreationOptional<Date | null>;
+  declare lastStatsAt: CreationOptional<Date | null>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+Server.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    name: { type: DataTypes.STRING, allowNull: false },
+    host: { type: DataTypes.STRING, allowNull: false },
+    port: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 22 },
+    username: { type: DataTypes.STRING, allowNull: false, defaultValue: "mbp-ops" },
+    hostKeyFingerprint: { type: DataTypes.STRING, allowNull: true },
+    mode: { type: DataTypes.STRING, allowNull: false, defaultValue: "managed" },
+    provider: { type: DataTypes.STRING, allowNull: false, defaultValue: "" },
+    notes: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    maintenanceStart: { type: DataTypes.STRING(5), allowNull: true },
+    maintenanceMinutes: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 60 },
+    autoUpgrade: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    autoUpgradeDay: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    autoUpgradeHour: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+    nextAutoUpgradeAt: { type: DataTypes.DATE, allowNull: true },
+    status: { type: DataTypes.STRING, allowNull: false, defaultValue: "unknown" },
+    lastError: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    lastSeenAt: { type: DataTypes.DATE, allowNull: true },
+    lastStatsAt: { type: DataTypes.DATE, allowNull: true },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "servers" },
+);
+
+export class ServerSnapshot extends Model<
+  InferAttributes<ServerSnapshot>,
+  InferCreationAttributes<ServerSnapshot>
+> {
+  declare id: CreationOptional<string>;
+  declare serverId: string;
+  declare collectedAt: Date;
+  declare pendingUpdates: number;
+  declare securityUpdates: number;
+  declare rebootRequired: boolean;
+  declare load1: number;
+  declare memUsedPct: number;
+  declare diskUsedPct: number;
+  declare data: Record<string, unknown>;
+}
+ServerSnapshot.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    serverId: { type: DataTypes.UUID, allowNull: false },
+    collectedAt: { type: DataTypes.DATE, allowNull: false },
+    pendingUpdates: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    securityUpdates: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    rebootRequired: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    load1: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 0 },
+    memUsedPct: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 0 },
+    diskUsedPct: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 0 },
+    data: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+  },
+  { sequelize, tableName: "server_snapshots", timestamps: false },
+);
+
+export class ServerJob extends Model<InferAttributes<ServerJob>, InferCreationAttributes<ServerJob>> {
+  declare id: CreationOptional<string>;
+  declare serverId: string;
+  declare kind: ServerJobKind;
+  declare status: CreationOptional<(typeof SERVER_JOB_STATUSES)[number]>;
+  declare trigger: CreationOptional<"manual" | "scheduled">;
+  declare triggeredById: CreationOptional<string | null>;
+  declare remoteStarted: CreationOptional<string | null>;
+  declare startedAt: Date;
+  declare finishedAt: CreationOptional<Date | null>;
+  declare exitCode: CreationOptional<number | null>;
+  declare log: CreationOptional<string>;
+  declare result: CreationOptional<Record<string, unknown> | null>;
+  declare error: CreationOptional<string>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+ServerJob.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    serverId: { type: DataTypes.UUID, allowNull: false },
+    kind: { type: DataTypes.STRING, allowNull: false },
+    status: { type: DataTypes.STRING, allowNull: false, defaultValue: "running" },
+    trigger: { type: DataTypes.STRING, allowNull: false, defaultValue: "manual" },
+    triggeredById: { type: DataTypes.UUID, allowNull: true },
+    remoteStarted: { type: DataTypes.STRING, allowNull: true },
+    startedAt: { type: DataTypes.DATE, allowNull: false },
+    finishedAt: { type: DataTypes.DATE, allowNull: true },
+    exitCode: { type: DataTypes.INTEGER, allowNull: true },
+    log: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    result: { type: DataTypes.JSONB, allowNull: true },
+    error: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "server_jobs" },
+);
+
+const ServerProjects = sequelize.define("server_projects", {}, { tableName: "server_projects", timestamps: false });
+Server.belongsToMany(Project, { through: ServerProjects, as: "projects", foreignKey: "serverId", otherKey: "projectId" });
+Project.belongsToMany(Server, { through: ServerProjects, as: "servers", foreignKey: "projectId", otherKey: "serverId" });
+Server.hasMany(ServerJob, { as: "jobs", foreignKey: "serverId" });
+ServerJob.belongsTo(Server, { as: "server", foreignKey: "serverId" });
+ServerJob.belongsTo(User, { as: "triggeredBy", foreignKey: "triggeredById" });
 
 export const models = {
-  User, Department, Project, Label, Task, Issue, Comment, Activity,
+  User, MfaRecoveryCode, Department, Project, Label, Task, Issue, Comment, Activity,
   PullRequest, Attachment, Notification, Meeting, NotificationPreference, GoogleAccount, GithubAccount, ProjectRepo,
   BlacklistedEmail, CustomRole, DocumentationLink,
   AnalyticsSite, AnalyticsEvent, AnalyticsDaily, BlogChannel, BlogEditor,
@@ -1927,4 +2105,5 @@ export const models = {
   Report,
   MeetingReport,
   ProjectCommit,
+  Server, ServerSnapshot, ServerJob,
 };

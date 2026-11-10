@@ -1,5 +1,3 @@
-import { z } from "zod";
-import { twoStepService } from "./twoStep.service";
 import { Router } from "express";
 import { asyncHandler } from "../../lib/errors";
 import { validateBody } from "../../middleware/validate";
@@ -8,6 +6,10 @@ import { rateLimit } from "../../middleware/rateLimit";
 import { authController } from "./auth.controller";
 import {
   changePasswordSchema,
+  completePasswordChangeSchema,
+  mfaChallengeSchema,
+  mfaCodeSchema,
+  mfaSetupSchema,
   forgotPasswordSchema,
   loginSchema,
   registerSchema,
@@ -29,31 +31,35 @@ authRouter.post("/register/resend", otpLimiter, validateBody(resendOtpSchema), a
 authRouter.post("/register/verify", otpLimiter, validateBody(verifyRegistrationSchema), asyncHandler(authController.registerVerify));
 
 authRouter.post("/login", loginLimiter, validateBody(loginSchema), asyncHandler(authController.login));
-// Two-step sign-in (A902). Verify takes the challenge from login, not a bearer token.
-// Per person when signed in. Verify can only go by address, but it can allow more
-// because each challenge already stops at 5 tries, and an office shares one address.
-const twoStepLimiter = rateLimit({ windowSec: 600, max: 20, keyPrefix: "two-step", key: (req) => req.auth?.sub ?? req.ip ?? "unknown" });
-const twoStepVerifyLimiter = rateLimit({ windowSec: 600, max: 100, keyPrefix: "two-step-verify" });
-const codeBody = z.string().trim().min(6).max(20);
-authRouter.get("/2fa/status", requireAuth, asyncHandler(async (req, res) => {
-  res.json(await twoStepService.status(req.auth!.sub));
-}));
-authRouter.post("/2fa/setup", requireAuth, twoStepLimiter, asyncHandler(async (req, res) => {
-  res.json(await twoStepService.setup(req.auth!.sub));
-}));
-authRouter.post("/2fa/enable", requireAuth, twoStepLimiter, validateBody(z.object({ code: codeBody })), asyncHandler(async (req, res) => {
-  res.json(await twoStepService.enable(req.auth!.sub, req.body.code, req));
-}));
+
+// Sign-in steps after the password. Each takes the challenge token the previous
+// step returned; none accepts a bearer token, and only /mfa/confirm and
+// /mfa/verify can end in a session.
+// Sign-in steps can only be limited by address, and a whole office shares one,
+// so this allows more: each challenge already ends after 5 wrong codes and each
+// account locks after 10 (mfa.service), which is what stops guessing. Signed-in
+// calls are limited per person instead, so a colleague isn't affected.
+const mfaLimiter = rateLimit({ windowSec: 600, max: 100, keyPrefix: "mfa" });
+const mfaAccountLimiter = rateLimit({ windowSec: 600, max: 20, keyPrefix: "mfa-account", key: (req) => req.auth?.sub ?? req.ip ?? "unknown" });
 authRouter.post(
-  "/2fa/disable",
-  requireAuth,
-  twoStepLimiter,
-  validateBody(z.object({ code: codeBody.optional(), password: z.string().min(1).max(200).optional() }).refine((v) => !!v.code || !!v.password, { message: "Send your code or password" })),
-  asyncHandler(async (req, res) => {
-    res.json(await twoStepService.disable(req.auth!.sub, req.body, req));
-  }),
+  "/password/complete-change",
+  loginLimiter,
+  validateBody(completePasswordChangeSchema),
+  asyncHandler(authController.completePasswordChange),
 );
-authRouter.post("/2fa/verify", twoStepVerifyLimiter, validateBody(z.object({ challengeToken: z.string().min(1).max(200), code: codeBody })), asyncHandler(authController.twoStepVerify));
+authRouter.post("/mfa/setup", mfaLimiter, validateBody(mfaSetupSchema), asyncHandler(authController.mfaSetup));
+authRouter.post("/mfa/confirm", mfaLimiter, validateBody(mfaChallengeSchema), asyncHandler(authController.mfaConfirm));
+authRouter.post("/mfa/verify", mfaLimiter, validateBody(mfaChallengeSchema), asyncHandler(authController.mfaVerify));
+
+// Signed-in MFA management.
+authRouter.get("/mfa/status", requireAuth, asyncHandler(authController.mfaStatus));
+authRouter.post(
+  "/mfa/recovery-codes",
+  requireAuth,
+  mfaAccountLimiter,
+  validateBody(mfaCodeSchema),
+  asyncHandler(authController.mfaRegenerateRecoveryCodes),
+);
 
 authRouter.post("/refresh", asyncHandler(authController.refresh));
 authRouter.post("/logout", asyncHandler(authController.logout));

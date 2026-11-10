@@ -2,6 +2,8 @@ import type { CookieOptions, Request, Response } from "express";
 import { badRequest, unauthorized } from "../../lib/errors";
 import type { ClientInfo } from "../../lib/jwt";
 import { authService } from "./auth.service";
+import { mfaService } from "./mfa.service";
+import type { AuthStep } from "./session";
 
 const REFRESH_COOKIE = "refresh_token";
 
@@ -68,6 +70,19 @@ export function clientInfo(req: Request): ClientInfo {
   };
 }
 
+// Every sign-in step answers the same way, for web and mobile alike: either the
+// session or the challenge for the next step. On "complete" the refresh token
+// goes where the client can keep it: the JSON body for native clients (A001),
+// the httpOnly cookie for browsers, never both.
+function sendStep(req: Request, res: Response, step: AuthStep, status = 200) {
+  if (step.status === "complete") {
+    const { refreshToken, ...body } = step;
+    res.status(status).json({ ...body, ...deliverRefreshToken(req, res, refreshToken) });
+    return;
+  }
+  res.status(status).json(step);
+}
+
 export const authController = {
   // Step 1 — email a verification code.
   async registerStart(req: Request, res: Response) {
@@ -80,27 +95,41 @@ export const authController = {
     res.json({ ok: true });
   },
 
-  // Step 2 — verify the code, create the account, and sign in.
+  // Step 2 — verify the code and create the account; MFA enrollment is next.
   async registerVerify(req: Request, res: Response) {
-    const { user, accessToken, refreshToken } = await authService.verifyRegistration(
-      req.body.email,
-      req.body.otp,
-      clientInfo(req),
-    );
-    res.status(201).json({ user, accessToken, ...deliverRefreshToken(req, res, refreshToken) });
+    sendStep(req, res, await authService.verifyRegistration(req.body.email, req.body.otp));
   },
 
   async login(req: Request, res: Response) {
-    const result = await authService.login(req.body, clientInfo(req));
-    // Nothing to deliver yet: no tokens exist until the code is verified.
-    if ("twoStepRequired" in result) return res.json(result);
-    const { user, accessToken, refreshToken } = result;
-    res.json({ user, accessToken, ...deliverRefreshToken(req, res, refreshToken) });
+    sendStep(req, res, await authService.login(req.body, clientInfo(req)));
   },
 
-  async twoStepVerify(req: Request, res: Response) {
-    const { user, accessToken, refreshToken } = await authService.verifyTwoStep(req.body.challengeToken, req.body.code, clientInfo(req));
-    res.json({ user, accessToken, ...deliverRefreshToken(req, res, refreshToken) });
+  async completePasswordChange(req: Request, res: Response) {
+    sendStep(
+      req,
+      res,
+      await authService.completeForcedPasswordChange(req.body.challengeToken, req.body.newPassword),
+    );
+  },
+
+  async mfaSetup(req: Request, res: Response) {
+    res.json(await mfaService.beginSetup(req.body.challengeToken));
+  },
+
+  async mfaConfirm(req: Request, res: Response) {
+    sendStep(req, res, await mfaService.confirmSetup(req.body.challengeToken, req.body.code, clientInfo(req)));
+  },
+
+  async mfaVerify(req: Request, res: Response) {
+    sendStep(req, res, await mfaService.verifyChallenge(req.body.challengeToken, req.body.code, clientInfo(req)));
+  },
+
+  async mfaStatus(req: Request, res: Response) {
+    res.json(await mfaService.status(req.auth!.sub));
+  },
+
+  async mfaRegenerateRecoveryCodes(req: Request, res: Response) {
+    res.json({ recoveryCodes: await mfaService.regenerateRecoveryCodes(req.auth!.sub, req.body.code) });
   },
 
   async refresh(req: Request, res: Response) {

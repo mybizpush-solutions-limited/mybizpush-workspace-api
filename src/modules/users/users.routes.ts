@@ -7,6 +7,7 @@ import { usersRepo } from "./users.repo";
 import { usersService } from "./users.service";
 import { audit } from "../../lib/audit";
 import { maskStaff, seesPrivateStaffFields } from "../access/visibility";
+import { mfaService } from "../auth/mfa.service";
 
 export const usersRouter = Router();
 
@@ -38,6 +39,20 @@ usersRouter.get(
     const user = await usersRepo.publicById(req.params.id!);
     if (!user) throw notFound("User not found");
     res.json({ user: maskStaff(user, req.auth!.sub, await seesPrivateStaffFields(req.auth!.sub)) });
+  }),
+);
+
+// Exec-only: clear a member's two-factor setup (lost phone, no recovery codes
+// left). Signs them out everywhere; they enroll again at their next sign-in.
+usersRouter.post(
+  "/:id/mfa/reset",
+  requireAccessLevel("executive_admin"),
+  asyncHandler(async (req, res) => {
+    await mfaService.resetForUser(req.auth!.sub, req.params.id!);
+    const user = await usersRepo.publicById(req.params.id!);
+    if (!user) throw notFound("User not found");
+    await audit({ req, action: "user.mfa.reset", target: { type: "user", id: req.params.id! }, scope: { type: "organization" } });
+    res.json({ user });
   }),
 );
 
