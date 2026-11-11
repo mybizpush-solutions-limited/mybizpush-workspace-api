@@ -6,7 +6,7 @@ import {
   type BlogAIGateSeverity,
   type BlogEditorRole,
 } from "../../models";
-import { badRequest, forbidden, notFound } from "../../lib/errors";
+import { AppError, badRequest, forbidden, notFound } from "../../lib/errors";
 import { tasksService } from "../workitems/workitems.service";
 import { canManageProject, manageableProjectIds, type Auth } from "../../lib/permissions";
 import {
@@ -192,9 +192,23 @@ async function submitThroughGate(
 
   // Reuse a review that still matches the content — re-running one costs a
   // model call and would give the same answer.
-  const bundle = await client.review(saved.id);
-  const review =
-    bundle.aiReview && !bundle.aiReviewStale ? bundle.aiReview : await client.runAIReview(saved.id);
+  let review: AIReview;
+  try {
+    const bundle = await client.review(saved.id);
+    review =
+      bundle.aiReview && !bundle.aiReviewStale ? bundle.aiReview : await client.runAIReview(saved.id);
+  } catch (err) {
+    // The edits are already on the site at this point; only the check failed.
+    // Say so, rather than passing on a proxy's error page, so the author knows
+    // nothing was lost and that sending again is the fix.
+    console.error("[blogs] automated review failed during submit", err);
+    const reason = err instanceof AppError && err.status < 500 ? ` (${err.message})` : "";
+    throw new AppError(
+      502,
+      `Your changes are saved, but the automated review couldn't finish${reason}. The post hasn't been sent to a publisher yet — send it for review again in a minute.`,
+      "review_unavailable",
+    );
+  }
 
   const { blocked, count } = blockingFindings(review, channel.aiGateSeverity);
   if (blocked) return { post: saved, gate: { passed: false, blocking: count, review } };
