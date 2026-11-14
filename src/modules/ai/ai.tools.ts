@@ -1,4 +1,4 @@
-import { Op, type WhereOptions } from "sequelize";
+import { Op, type ModelStatic, type WhereOptions } from "sequelize";
 import { z } from "zod";
 import type { ToolDefinition } from "../../lib/openrouter";
 import { badRequest, notFound } from "../../lib/errors";
@@ -12,7 +12,9 @@ import {
   User,
   type ItemType,
 } from "../../models";
+import { CLOSED_TASK_STATUSES } from "../../models/task-status";
 import { serializeWorkItem, workItemInclude } from "../shared/serializers";
+import { assertCanSeeRecord, viewerFor, visibleIds } from "../access/visibility";
 import { commentsService } from "../comments/comments.service";
 import { issuesService, tasksService } from "../workitems/workitems.service";
 import { meService } from "../me/me.service";
@@ -39,7 +41,8 @@ const STATUS = z.enum(["todo", "in_progress", "in_review", "blocked", "done"]);
 const PRIORITY = z.enum(["low", "medium", "high", "urgent"]);
 
 const serviceFor = (type: ItemType) => (type === "task" ? tasksService : issuesService);
-const modelFor = (type: ItemType) => (type === "task" ? Task : Issue);
+// Tasks have more columns than issues; only the shared ones are used through this.
+const modelFor = (type: ItemType) => (type === "task" ? Task : Issue) as unknown as ModelStatic<Issue>;
 
 // Tool results are fed back to the model as JSON, so they must stay small.
 // Trimming here is much cheaper than paying for the tokens twice (once in the
@@ -58,7 +61,8 @@ function briefItem(item: Task | Issue, type: ItemType) {
   };
 }
 
-async function findItem(itemId: string, itemType: ItemType) {
+async function findItem(itemId: string, itemType: ItemType, viewerId: string) {
+  await assertCanSeeRecord(viewerId, itemType, itemId);
   const item = await modelFor(itemType).findByPk(itemId, { include: workItemInclude });
   if (!item) throw notFound(`${itemType} not found`);
   return item;
@@ -169,7 +173,8 @@ const readTools: Tool[] = [
       required: [],
     },
     mutates: false,
-    async run(args) {
+    async run(args, actor) {
+      const viewer = await viewerFor(actor.id);
       const where: Record<string | symbol, unknown> = {};
       if (args.query) {
         where[Op.or] = [
@@ -182,8 +187,10 @@ const readTools: Tool[] = [
       if (args.priority) where.priority = args.priority;
       if (args.overdue) {
         where.dueDate = { [Op.ne]: null, [Op.lt]: new Date() };
-        if (!args.status) where.status = { [Op.ne]: "done" };
       }
+      // Tasks have more closed states than issues, and a filter on a value an
+      // enum doesn't have is a database error, so this is decided per type.
+      const openOnly = !!args.overdue && !args.status;
 
       // Filtering by assignee means constraining the assignees join rather than
       // adding a column predicate, so it replaces that one include.
@@ -206,7 +213,9 @@ const readTools: Tool[] = [
         types.map((type) =>
           modelFor(type)
             .findAll({
-              where: where as WhereOptions,
+              where: { ...(openOnly
+                ? { ...where, status: type === "task" ? { [Op.notIn]: CLOSED_TASK_STATUSES } : { [Op.ne]: "done" } }
+                : where), id: visibleIds(viewer, type) } as WhereOptions,
               include,
               order: [["updatedAt", "DESC"]],
               limit,
@@ -233,8 +242,8 @@ const readTools: Tool[] = [
       required: ["itemId", "itemType"],
     },
     mutates: false,
-    async run(args) {
-      const item = await findItem(args.itemId, args.itemType);
+    async run(args, actor) {
+      const item = await findItem(args.itemId, args.itemType, actor.id);
       const comments = await Comment.findAll({
         where: { itemId: args.itemId },
         order: [["createdAt", "ASC"]],
@@ -371,7 +380,7 @@ const readTools: Tool[] = [
       const from = args.from ? new Date(args.from) : new Date();
       const to = args.to ? new Date(args.to) : new Date(from.getTime() + 14 * 86_400_000);
       const meetings = await Meeting.findAll({
-        where: { startsAt: { [Op.gte]: from, [Op.lte]: to } },
+        where: { startsAt: { [Op.gte]: from, [Op.lte]: to }, id: visibleIds(await viewerFor(actor.id), "meeting") },
         include: [{ model: User, as: "attendees", attributes: ["id", "name"], through: { attributes: [] } }],
         order: [["startsAt", "ASC"]],
         limit: 100,
@@ -557,8 +566,8 @@ const writeTools: Tool[] = [
       required: ["itemId", "itemType"],
     },
     mutates: true,
-    async preview(args) {
-      const item = await findItem(args.itemId, args.itemType);
+    async preview(args, actor) {
+      const item = await findItem(args.itemId, args.itemType, actor.id);
       const changes: string[] = [];
       if (args.title !== undefined) changes.push(`title → "${args.title}"`);
       if (args.description !== undefined) changes.push("description rewritten");
@@ -610,8 +619,8 @@ const writeTools: Tool[] = [
       required: ["itemId", "itemType", "status"],
     },
     mutates: true,
-    async preview(args) {
-      const item = await findItem(args.itemId, args.itemType);
+    async preview(args, actor) {
+      const item = await findItem(args.itemId, args.itemType, actor.id);
       return `Move ${args.itemType} "${item.title}" from ${item.status} to ${args.status}`;
     },
     run: (args, actor) => serviceFor(args.itemType).setStatus(args.itemId, args.status, actor.id),
@@ -643,8 +652,8 @@ const writeTools: Tool[] = [
       required: ["itemId", "itemType", "body"],
     },
     mutates: true,
-    async preview(args) {
-      const item = await findItem(args.itemId, args.itemType);
+    async preview(args, actor) {
+      const item = await findItem(args.itemId, args.itemType, actor.id);
       const excerpt = args.body.length > 120 ? `${args.body.slice(0, 120)}…` : args.body;
       return `Comment on "${item.title}": ${excerpt}`;
     },
@@ -676,9 +685,9 @@ const writeTools: Tool[] = [
       required: ["itemId", "itemType", "from"],
     },
     mutates: true,
-    async preview(args) {
+    async preview(args, actor) {
       const [item, user] = await Promise.all([
-        findItem(args.itemId, args.itemType),
+        findItem(args.itemId, args.itemType, actor.id),
         resolveUser(args.from),
       ]);
       return `Request feedback from ${user.name} on "${item.title}"`;

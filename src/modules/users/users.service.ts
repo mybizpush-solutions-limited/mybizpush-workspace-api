@@ -1,3 +1,4 @@
+import type { ModelStatic } from "sequelize";
 import { QueryTypes } from "sequelize";
 import { sequelize } from "../../db/sequelize";
 import {
@@ -54,7 +55,7 @@ export const usersService = {
       // Null scalar references so the work survives without a dangling FK.
       await Department.update({ headId: null }, { where: { headId: targetId }, transaction: tx });
       await Project.update({ managerId: null }, { where: { managerId: targetId }, transaction: tx });
-      for (const M of [Task, Issue]) {
+      for (const M of [Task, Issue] as unknown as ModelStatic<Issue>[]) {
         await M.update({ reporterId: null }, { where: { reporterId: targetId }, transaction: tx });
         await M.update({ feedbackAwaitingFrom: null }, { where: { feedbackAwaitingFrom: targetId }, transaction: tx });
         await M.update({ feedbackRequestedBy: null }, { where: { feedbackRequestedBy: targetId }, transaction: tx });

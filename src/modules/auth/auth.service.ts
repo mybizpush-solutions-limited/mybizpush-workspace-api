@@ -3,19 +3,23 @@ import { env } from "../../config/env";
 import { badRequest, conflict, forbidden, unauthorized } from "../../lib/errors";
 import { hashPassword, verifyPassword } from "../../lib/password";
 import {
-  issueRefreshToken,
+  listSessions,
   rotateRefreshToken,
   revokeAllRefreshTokens,
   revokeRefreshToken,
+  revokeSession,
   signAccessToken,
   verifyRefreshToken,
+  type ClientInfo,
 } from "../../lib/jwt";
+import { meetsPasswordPolicy, passwordPolicyFailures, passwordPolicyMessage } from "../../lib/passwordPolicy";
 import { emails } from "../../lib/email";
 import { redis } from "../../redis/client";
 import { usersRepo, toPublicUser, type PublicUser } from "../users/users.repo";
 import { usersService } from "../users/users.service";
-import { GoogleAccount, User } from "../../models";
+import { GoogleAccount, LoginEvent, User } from "../../models";
 import type { LoginInput, RegisterInput } from "./auth.schemas";
+import { assertActive, consumeChallenge, isSessionEligible, nextStep, readChallenge, recordLogin, type AuthStep } from "./session";
 
 const RESET_PREFIX = "pwreset:";
 const RESET_TTL_SECONDS = 30 * 60;
@@ -49,10 +53,21 @@ function assertAllowedDomain(email: string): void {
   }
 }
 
-async function buildTokens(user: User): Promise<{ accessToken: string; refreshToken: string }> {
-  const accessToken = signAccessToken({ sub: user.id, email: user.email, accessLevel: user.accessLevel });
-  const refreshToken = await issueRefreshToken(user.id);
-  return { accessToken, refreshToken };
+export interface SessionView {
+  id: string;
+  device: string | null;
+  platform: string | null;
+  ip: string | null;
+  createdAt: string | null;
+  lastUsedAt: string | null;
+  current: boolean;
+}
+
+// The schemas already enforce the policy; this is the backstop for any path
+// that sets a password, so none of them can store one that fails it.
+function assertPasswordPolicy(password: string): void {
+  const failures = passwordPolicyFailures(password);
+  if (failures.length) throw badRequest(passwordPolicyMessage(failures));
 }
 
 export const authService = {
@@ -83,11 +98,9 @@ export const authService = {
     await emails.verifyOtp(email, pending.otp).catch(() => undefined);
   },
 
-  // Step 2: verify the OTP and create the account.
-  async verifyRegistration(
-    email: string,
-    otp: string,
-  ): Promise<{ user: PublicUser; accessToken: string; refreshToken: string }> {
+  // Step 2: verify the OTP and create the account. No session yet: a new
+  // account goes straight on to enrolling MFA, like everyone else.
+  async verifyRegistration(email: string, otp: string): Promise<AuthStep> {
     const key = `${REG_PREFIX}${email}`;
     const raw = await redis.get(key);
     if (!raw) throw badRequest("Your code has expired — please start sign up again");
@@ -111,37 +124,108 @@ export const authService = {
     }
 
     const user = await usersRepo.create({ name: pending.name, email, passwordHash: pending.passwordHash });
+    // The signup schema enforced the policy on the plaintext before it was hashed.
+    user.passwordMeetsPolicy = true;
+    await user.save();
     await redis.del(key);
     void emails.welcome(user.email, user.name).catch(() => undefined);
 
-    const tokens = await buildTokens(user);
-    const publicUser = (await usersRepo.publicById(user.id))!;
-    return { user: publicUser, ...tokens };
+    return nextStep(user);
   },
 
-  async login(input: LoginInput): Promise<{ user: PublicUser; accessToken: string; refreshToken: string }> {
+  // A correct password never yields a session by itself: it yields the next
+  // step (change password, enroll MFA, or enter a code).
+  async login(input: LoginInput, client?: ClientInfo): Promise<AuthStep> {
     assertAllowedDomain(input.email);
     // Either the primary or the secondary email may be used to sign in.
     const user = await usersRepo.rawByEmailOrSecondary(input.email);
-    if (!user) throw unauthorized("Invalid email or password");
+    if (!user) {
+      recordLogin("failed", input.email, null, client);
+      throw unauthorized("Invalid email or password");
+    }
 
     const ok = await verifyPassword(input.password, user.passwordHash);
-    if (!ok) throw unauthorized("Invalid email or password");
+    if (!ok) {
+      recordLogin("failed", input.email, user.id, client);
+      throw unauthorized("Invalid email or password");
+    }
+    assertActive(user);
 
-    const tokens = await buildTokens(user);
-    const publicUser = (await usersRepo.publicById(user.id))!;
-    return { user: publicUser, ...tokens };
+    // The one moment we hold the plaintext, so the one moment we can judge it.
+    const meets = meetsPasswordPolicy(input.password);
+    if (meets !== user.passwordMeetsPolicy) {
+      user.passwordMeetsPolicy = meets;
+      await user.save();
+    }
+    return nextStep(user);
+  },
+
+  // Forced rotation at sign-in. The challenge token stands in for the current
+  // password, which the user typed moments ago to get it.
+  async completeForcedPasswordChange(challengeToken: string, newPassword: string): Promise<AuthStep> {
+    const challenge = await readChallenge(challengeToken, "password_change");
+    assertPasswordPolicy(newPassword);
+    const user = await User.findByPk(challenge.userId);
+    if (!user) throw unauthorized("Your sign-in session expired. Please sign in again.");
+    assertActive(user); // they may have been suspended since entering the password
+    if (await verifyPassword(newPassword, user.passwordHash)) {
+      throw badRequest("Choose a password you haven't used before");
+    }
+    user.passwordHash = await hashPassword(newPassword);
+    user.passwordMeetsPolicy = true;
+    await user.save();
+    await consumeChallenge(challengeToken);
+    await revokeAllRefreshTokens(user.id);
+    return nextStep(user);
   },
 
   // Rotate the refresh token and mint a new access token.
-  async refresh(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+  async refresh(refreshToken: string, client?: ClientInfo): Promise<{ accessToken: string; refreshToken: string }> {
     const decoded = await verifyRefreshToken(refreshToken);
     const user = await User.findByPk(decoded.sub);
     if (!user) throw unauthorized("User no longer exists");
+    assertActive(user);
+    if (!isSessionEligible(user)) {
+      await revokeAllRefreshTokens(user.id);
+      throw unauthorized("Sign in again to finish securing your account");
+    }
 
-    const newRefresh = await rotateRefreshToken(decoded.sub, decoded.jti);
-    const accessToken = signAccessToken({ sub: user.id, email: user.email, accessLevel: user.accessLevel });
+    const { token: newRefresh, sid } = await rotateRefreshToken(decoded.sub, decoded.jti, client);
+    const accessToken = signAccessToken({ sub: user.id, email: user.email, accessLevel: user.accessLevel, sid });
     return { accessToken, refreshToken: newRefresh };
+  },
+
+  // Signed-in devices for the "Sessions and devices" screen.
+  async sessions(userId: string, currentSid?: string): Promise<SessionView[]> {
+    const sessions = await listSessions(userId);
+    return sessions.map((s) => ({
+      id: s.sid,
+      device: s.device,
+      platform: s.platform,
+      ip: s.ip,
+      createdAt: s.createdAt || null,
+      lastUsedAt: s.lastUsedAt || null,
+      current: s.sid === currentSid,
+    }));
+  },
+
+  async revokeSession(userId: string, sid: string): Promise<void> {
+    const found = await revokeSession(userId, sid);
+    if (!found) throw badRequest("That session is no longer active");
+  },
+
+  // "Sign out everywhere else": keeps the caller's own session when known.
+  async revokeOtherSessions(userId: string, currentSid?: string): Promise<void> {
+    await revokeAllRefreshTokens(userId, currentSid);
+  },
+
+  async loginHistory(userId: string, limit: number): Promise<LoginEvent[]> {
+    return LoginEvent.findAll({
+      where: { userId },
+      order: [["createdAt", "DESC"]],
+      limit,
+      attributes: ["id", "kind", "ip", "device", "platform", "userAgent", "createdAt"],
+    });
   },
 
   async logout(refreshToken: string | undefined): Promise<void> {
@@ -162,7 +246,7 @@ export const authService = {
 
   // Issue a reset token + email. Always resolves (never reveals whether the
   // email exists) to avoid account enumeration.
-  async requestPasswordReset(email: string, useGoogle = false): Promise<void> {
+  async requestPasswordReset(email: string, useGoogle = false, opts: { mobile?: boolean } = {}): Promise<void> {
     const user = await usersRepo.rawByEmailOrSecondary(email);
     if (!user) {
       // Anti-enumeration: the client still gets {ok:true}. Log server-side so we
@@ -181,7 +265,9 @@ export const authService = {
     await redis.set(`${RESET_PREFIX}${token}`, user.id, "EX", RESET_TTL_SECONDS);
     const link = `${env.APP_URL}/reset-password?token=${token}`;
     console.info(`[reset] sending reset link to ${to}`);
-    await emails.passwordReset(to, link).catch(() => undefined);
+    // Built here, never from the request, so a token can't be sent somewhere else.
+    const appLink = opts.mobile ? `${env.MOBILE_APP_SCHEME}://reset-password?token=${token}` : null;
+    await emails.passwordReset(to, link, appLink).catch(() => undefined);
   },
 
   // Logged-in user changes their own password: email a 6-digit code, then verify
@@ -207,9 +293,11 @@ export const authService = {
   async changePasswordWithOtp(userId: string, otp: string, password: string): Promise<void> {
     const stored = await redis.get(`${PWCHANGE_PREFIX}${userId}`);
     if (!stored || stored !== otp.trim()) throw badRequest("That code is invalid or has expired");
+    assertPasswordPolicy(password);
     const user = await User.findByPk(userId);
     if (!user) throw badRequest("User not found");
     user.passwordHash = await hashPassword(password);
+    user.passwordMeetsPolicy = true;
     await user.save();
     await redis.del(`${PWCHANGE_PREFIX}${userId}`);
   },
@@ -265,7 +353,9 @@ export const authService = {
     const user = await User.findByPk(userId);
     if (!user) throw badRequest("This reset link is invalid or has expired");
 
+    assertPasswordPolicy(password);
     user.passwordHash = await hashPassword(password);
+    user.passwordMeetsPolicy = true;
     await user.save();
     await redis.del(`${RESET_PREFIX}${token}`);
     await revokeAllRefreshTokens(user.id); // log out everywhere
