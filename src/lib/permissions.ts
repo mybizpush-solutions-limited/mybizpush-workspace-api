@@ -1,22 +1,17 @@
 import { forbidden, notFound } from "./errors";
-import { Department, Project, isOrgManager } from "../models";
+import { Department, Project, User, isOrgManager } from "../models";
+import { can } from "../modules/access/engine";
 
 export type Auth = { sub: string; accessLevel: string };
 
-// "Can this person run the project?" — its manager, the head of any department
-// working on it, or an org manager (chief / executive admin). This is the gate
-// for editing a project and for appointing its blog editors.
+// "Can this person run the project?" Decided by the permission engine
+// (project.manage at the project or any scope above it). Parity with the old
+// rule: org managers hold it org wide; project managers and the heads of
+// departments working on the project hold it through derived roles (A104).
 export async function canManageProject(projectId: string, auth: Auth): Promise<boolean> {
-  if (isOrgManager(auth.accessLevel)) return true;
-  const project = await Project.findByPk(projectId, {
-    include: [
-      { model: Department, as: "departments", attributes: ["headId"], through: { attributes: [] } },
-    ],
-  });
-  if (!project) throw notFound("Project not found");
-  if (project.managerId === auth.sub) return true;
-  const depts = (project.get("departments") as Department[] | undefined) ?? [];
-  return depts.some((d) => d.headId === auth.sub);
+  const exists = await Project.count({ where: { id: projectId } });
+  if (!exists) throw notFound("Project not found");
+  return can(auth, "project.manage", { type: "project", id: projectId });
 }
 
 export async function assertCanManageProject(projectId: string, auth: Auth): Promise<void> {
@@ -36,6 +31,30 @@ export function canManageDatabases(auth: Auth): boolean {
 export function assertCanManageDatabases(auth: Auth): void {
   if (canManageDatabases(auth)) return;
   throw forbidden("Only an admin, chief, or executive admin can manage databases");
+}
+
+// The server console reaches production hosts as root-capable SSH, so it
+// follows the database rule (admins, chiefs, executive admins) and adds the
+// people whose job it is: anyone with the DevOps role or in the DevOps
+// department. Both, because DevOps is a role today and a department too.
+export const DEVOPS_DEPARTMENT_SLUG = "devops";
+export const DEVOPS_ROLE = "DevOps";
+
+export async function canManageServers(auth: Auth): Promise<boolean> {
+  if (canManageDatabases(auth)) return true;
+  const user = await User.findByPk(auth.sub, {
+    attributes: ["id", "roles"],
+    include: [{ model: Department, as: "departments", attributes: ["slug"], through: { attributes: [] } }],
+  });
+  if (!user) return false;
+  if (user.roles.some((r) => r.toLowerCase() === DEVOPS_ROLE.toLowerCase())) return true;
+  const depts = (user.get("departments") as Department[] | undefined) ?? [];
+  return depts.some((d) => d.slug === DEVOPS_DEPARTMENT_SLUG);
+}
+
+export async function assertCanManageServers(auth: Auth): Promise<void> {
+  if (await canManageServers(auth)) return;
+  throw forbidden("Only DevOps, admins, chiefs and executive admins can manage servers");
 }
 
 // The same rule as canManageProject, answered for every project at once. Use

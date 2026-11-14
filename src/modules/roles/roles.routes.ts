@@ -4,6 +4,7 @@ import { asyncHandler } from "../../lib/errors";
 import { requireAuth, requireAccessLevel } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { rolesService } from "./roles.service";
+import { audit } from "../../lib/audit";
 
 export const rolesRouter = Router();
 rolesRouter.use(requireAuth);
@@ -28,7 +29,9 @@ rolesRouter.post(
   requireAccessLevel("executive_admin"),
   validateBody(addRoleSchema),
   asyncHandler(async (req, res) => {
-    res.status(201).json({ roles: await rolesService.add(req.body.name, req.auth!.sub) });
+    const roles = await rolesService.add(req.body.name, req.auth!.sub);
+    await audit({ req, action: "job_title.create", target: { type: "job_title", id: req.body.name } });
+    res.status(201).json({ roles });
   }),
 );
 
@@ -39,7 +42,15 @@ rolesRouter.patch(
   requireAccessLevel("executive_admin"),
   validateBody(renameRoleSchema),
   asyncHandler(async (req, res) => {
-    res.json({ roles: await rolesService.rename(req.body.from, req.body.to) });
+    const roles = await rolesService.rename(req.body.from, req.body.to);
+    await audit({
+      req,
+      action: "job_title.rename",
+      target: { type: "job_title", id: req.body.to },
+      before: { name: req.body.from },
+      after: { name: req.body.to },
+    });
+    res.json({ roles });
   }),
 );
 
@@ -49,6 +60,9 @@ rolesRouter.delete(
   "/",
   requireAccessLevel("executive_admin"),
   asyncHandler(async (req, res) => {
-    res.json({ roles: await rolesService.remove(String(req.query.name ?? "")) });
+    const name = String(req.query.name ?? "");
+    const roles = await rolesService.remove(name);
+    await audit({ req, action: "job_title.delete", target: { type: "job_title", id: name } });
+    res.json({ roles });
   }),
 );

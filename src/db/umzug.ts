@@ -2,6 +2,13 @@ import { Umzug, SequelizeStorage } from "umzug";
 import type { QueryInterface } from "sequelize";
 import { sequelize } from "./sequelize";
 
+// require() rather than import(): the code compiles to CommonJS anyway, and under
+// tsx on Windows import() rejects absolute paths like C:\... as invalid URLs.
+function loadMigration(path: string): { up: Migration; down?: Migration } {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require(path) as { up: Migration; down?: Migration };
+}
+
 // Umzug drives our migrations (the engine sequelize-cli is built on).
 export const migrator = new Umzug({
   migrations: {
@@ -14,11 +21,11 @@ export const migrator = new Umzug({
       return {
         name: normalized,
         up: async () => {
-          const mod = (await import(path!)) as { up: Migration };
+          const mod = loadMigration(path!);
           return mod.up({ context });
         },
         down: async () => {
-          const mod = (await import(path!)) as { down?: Migration };
+          const mod = loadMigration(path!);
           return mod.down?.({ context });
         },
       };

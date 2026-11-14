@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import * as Sentry from "@sentry/node";
 import { ZodError } from "zod";
 import { AppError } from "../lib/errors";
 import { isProd } from "../config/env";
@@ -22,6 +23,7 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
   }
 
   console.error("Unhandled error:", err);
+  Sentry.captureException(err);
   return res.status(500).json({
     error: {
       code: "internal_error",

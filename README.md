@@ -36,6 +36,8 @@ npm run dev                   # start with hot reload on http://localhost:4000
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run migrate` — run pending migrations (`npm run migrate -- down` to roll back one)
 - `npm run seed` — load idempotent demo data
+- `npm run attachments:privatize`: list files uploaded before private delivery; add `-- --apply` to move them (see Private files)
+- `npm run dev:worker` / `npm run worker` — run background job workers on their own (with `RUN_JOB_WORKERS=false` on the API)
 
 ## Project structure
 
@@ -68,10 +70,14 @@ Versioned business endpoints live under `/api/v1`. The infra health check stays 
 | ------ | ---------------------------- | --------------- | -------------------------------------- |
 | GET    | `/api/health`                | —               | db + redis status (unversioned)        |
 | POST   | `/api/v1/auth/register`      | —               | `@mybizpush.com` only                  |
-| POST   | `/api/v1/auth/login`         | —               | sets httpOnly refresh cookie           |
-| POST   | `/api/v1/auth/refresh`       | refresh cookie  | rotates refresh, returns new access    |
-| POST   | `/api/v1/auth/logout`        | refresh cookie  | revokes refresh token                  |
+| POST   | `/api/v1/auth/login`         | —               | sets httpOnly refresh cookie (mobile: returns `refreshToken` in body) |
+| POST   | `/api/v1/auth/refresh`       | refresh cookie or body | rotates refresh, returns new access (mobile: new `refreshToken` in body) |
+| POST   | `/api/v1/auth/logout`        | refresh cookie or body | revokes refresh token           |
 | GET    | `/api/v1/auth/me`            | Bearer          | current user                           |
+| GET    | `/api/v1/auth/sessions`      | Bearer          | my signed-in devices, `current` marks this one |
+| DELETE | `/api/v1/auth/sessions/:id`  | Bearer          | sign one device out                    |
+| POST   | `/api/v1/auth/sessions/revoke-others` | Bearer | sign out every other device            |
+| GET    | `/api/v1/auth/login-history` | Bearer          | my recent sign-ins and failed attempts (`?limit=`, max 100) |
 | POST   | `/api/v1/auth/forgot-password` | — (rate-limited) | emails a reset link (via Resend)    |
 | POST   | `/api/v1/auth/reset-password`  | — (rate-limited) | sets a new password from a token    |
 | GET    | `/api/v1/users`              | Bearer          | list users                             |
@@ -106,6 +112,7 @@ Versioned business endpoints live under `/api/v1`. The infra health check stays 
 | POST   | `/api/v1/ai/summarize`       | Bearer          | summarize a task/issue (`{ itemId, itemType }`) |
 | GET    | `/api/v1/digests/preview`    | Bearer          | preview your digest HTML (no send)     |
 | POST   | `/api/v1/digests/send-me`    | Bearer          | send yourself a test digest now        |
+| GET    | `/api/v1/audit`              | admin, chief    | audit trail, filters `action`, `targetType`, `targetId`, `actorId`, `scopeType`, `scopeId`, paging `?before=` |
 | POST   | `/api/v1/digests/run`        | admin           | run the batch for a cadence (`{ frequency }`) |
 | GET    | `/api/v1/google/auth-url`    | Bearer          | start the Google Calendar connect flow |
 | GET    | `/api/v1/google/callback`    | — (OAuth state) | Google redirect target → stores tokens |
@@ -116,6 +123,53 @@ Versioned business endpoints live under `/api/v1`. The infra health check stays 
 | GET    | `/api/v1/github/status`      | Bearer          | `{ connected, login, avatarUrl, orgMember, org }` |
 | POST   | `/api/v1/github/disconnect`  | Bearer          | remove the stored GitHub account       |
 | POST   | `/api/v1/github/webhook`     | HMAC signature  | GitHub events → auto-updates linked PR status |
+
+### Mobile clients
+
+Native apps cannot hold the httpOnly refresh cookie, so they send `X-Client: mobile` on
+`/auth/register/verify`, `/auth/login`, `/auth/refresh` and `/auth/logout`.
+
+- Sign in and verify return `{ user, accessToken, refreshToken }` and set no cookie.
+- Refresh takes `{ "refreshToken": "..." }` and returns `{ accessToken, refreshToken }` (rotated; store the new one).
+- Logout takes `{ "refreshToken": "..." }` and revokes it.
+
+Sending `refreshToken` in the body is treated the same as the header. Browsers keep the cookie flow unchanged.
+
+Optional headers `X-Device-Name` (for example `Pixel 8`) and `X-Platform` (`ios`, `android`, `web`) label the session in `/auth/sessions` and the login history.
+
+### Offline sync
+
+The mobile app keeps a local database and syncs with two endpoints.
+
+**Pull** `GET /api/v1/sync/pull?cursor=<opaque>&collections=tasks,notifications`
+returns `{ changes, cursor, hasMore, serverTime }`. For each collection, `changes.<name>` is `{ upserted, deleted, full? }`.
+- `users`, `departments`, `projects`, `labels`: the full set each time (`full: true`, replace locally).
+- `tasks`, `issues`, `comments`, `notifications` (own only), `meetings`: rows changed since the cursor, plus deleted ids.
+Store the returned `cursor` and repeat while `hasMore` is true. Omit `cursor` for a first full sync.
+
+**Push** `POST /api/v1/sync/push { mutations: [...] }` (max 200, applied in order) returns `{ results }` in the same order.
+Each mutation is `{ mutationId, type, recordId?, payload, baseUpdatedAt? }` with type one of
+`task.create|update|status`, `issue.create|update|status`, `comment.create`, `notification.read`.
+- `mutationId` (uuid) makes retries safe: a repeated id returns the first result without applying again (kept 7 days).
+- Records created offline use a client-generated uuid as `recordId`.
+- `baseUpdatedAt` is the record's `updatedAt` the device last saw. If the server copy is newer the result is
+  `conflict` with the server `record`; the app asks the user, then resends with a fresh `baseUpdatedAt`.
+- Results are `applied`, `conflict` or `rejected` (with `error`). One rejection does not stop the batch.
+
+Deletes are recorded in `sync_tombstones` by model hooks (including bulk deletes), so clients remove them on the next pull.
+
+Losing sight of a record isn't a delete, and nothing about the record changes. Each pull compares what the person can see now with `sync_record_access`, records any difference with the time, and sends a device everything that changed since its cursor. Lost records and their children come in `deleted`, gained ones in `upserted`, on every device. The first pull after this shipped marks everything the person can't see as lost, which clears copies held from before these rules.
+
+### Private files
+
+Files on everything except campaigns are stored with Cloudinary `authenticated` delivery. `attachment.url` is a signed link made when the record is sent to someone allowed to see it, and it works for `ATTACHMENT_URL_TTL_SECONDS` (7 days). Campaign files stay public because their images are mailed out. About every 3.5 days, a pull sends tasks, issues and messages holding private files again with fresh links, plus an `attachmentUrls` list of every link. `GET /attachments/:id/url` gives a fresh link at any time.
+
+Files uploaded earlier stay public until someone moves them:
+
+1. Back up first. Moving a file ends its public link, including any place it was pasted.
+2. `npm run attachments:privatize` lists what would move and changes nothing.
+3. `npm run attachments:privatize -- --apply --limit=1`, then open that file through the app to check it.
+4. `npm run attachments:privatize -- --apply`. It can be run again: a file that failed stays public and is tried next time. It exits with an error if any failed.
 
 ### GitHub setup
 
@@ -196,3 +250,16 @@ Each module is a `*.service.ts` (model queries + serialization to the UI's publi
 
 - Cloudinary and Resend are optional in dev: without keys, uploads throw a clear 503 and emails log to the console.
 - The schema lives in **both** the models (ORM) and the initial migration (DB) — standard Sequelize practice. Evolve it by adding a new migration in `src/db/migrations` and updating the matching model.
+
+### Realtime (Socket.IO)
+
+Clients connect with their access token and receive pushes for their own user only:
+
+```js
+io(API_URL, { path: "/api/socket", auth: { token: accessToken } })
+```
+
+Events (server to client): `ready`, `notification:new` `{ notification }`, `badges` `{ notifications }` (unread count),
+`sync:changed` `{ collections }`. A `connect_error` of `unauthorized` means refresh the access token and reconnect.
+The Redis adapter shares sockets across API instances; `emitToUser()` (`src/realtime/events.ts`) works from any process.
+

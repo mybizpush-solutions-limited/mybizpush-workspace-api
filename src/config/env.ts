@@ -97,6 +97,63 @@ const schema = z.object({
   // executives and project managers).
   HR_DEPARTMENT_SLUG: z.string().default("hr"),
 
+  // ---- Background jobs (BullMQ) ----
+  // Run job workers inside the API process. Set "false" when a separate
+  // `npm run worker` process handles jobs.
+  RUN_JOB_WORKERS: z
+    .string()
+    .default("true")
+    .transform((s) => s !== "false"),
+
+  // ---- Push notifications (Expo) ----
+  // Optional Expo access token (enable "enhanced push security" in Expo).
+  EXPO_ACCESS_TOKEN: z.string().optional().default(""),
+  PUSH_ENABLED: z
+    .string()
+    .default("true")
+    .transform((s) => s !== "false"),
+
+  // ---- Marketing email (P6) ----
+  // Public address of this API, for tracking and unsubscribe links in emails.
+  PUBLIC_API_URL: z.string().url().default("http://localhost:4000"),
+  // Only a last resort, once a campaign, its product and the organization have no sender.
+  MARKETING_EMAIL_FROM: z.string().default("MyBizPush <info@mybizpush.com>"),
+  // Domains campaigns may send from. They must be verified with the email provider.
+  MARKETING_ALLOWED_FROM_DOMAINS: z
+    .string()
+    .default("mybizpush.com")
+    .transform((s) => s.split(",").map((d) => d.trim().toLowerCase()).filter(Boolean)),
+  // Signing secret for delivery webhooks. Webhooks are refused while it's empty.
+  RESEND_WEBHOOK_SECRET: z.string().optional().default(""),
+
+  // ---- Integrations (P7) ----
+  // Where OAuth may send people back to, as comma-separated prefixes.
+  OAUTH_RETURN_ALLOWLIST: z
+    .string()
+    .default("mybizpush://")
+    .transform((s) => s.split(",").map((p) => p.trim()).filter(Boolean)),
+
+  // ---- Voice input (P8) ----
+  // none, openai or deepgram. With none, /ai/transcribe answers 503.
+  TRANSCRIBE_PROVIDER: z.enum(["none", "openai", "deepgram"]).default("none"),
+  TRANSCRIBE_API_KEY: z.string().optional().default(""),
+  TRANSCRIBE_MODEL: z.string().optional().default(""),
+
+  // ---- Mobile app (P9) ----
+  MOBILE_APP_SCHEME: z.string().default("mybizpush"),
+  // What GET /meta/client tells the app: below minVersion it must update.
+  CLIENT_MIN_VERSION: z.string().default("1.0.0"),
+  CLIENT_LATEST_VERSION: z.string().default("1.0.0"),
+  CLIENT_UPDATE_URL_IOS: z.string().optional().default(""),
+  CLIENT_UPDATE_URL_ANDROID: z.string().optional().default(""),
+
+  // ---- Privacy and sending identity (P10) ----
+  // How long a signed link to a private file works.
+  ATTACHMENT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(7 * 24 * 60 * 60),
+  // The sender when a product has none of its own. Organization settings can override.
+  ORG_SENDER_EMAIL: z.string().default("info@mybizpush.com"),
+  ORG_SENDER_NAME: z.string().default("MyBizPush"),
+
   // ---- Website analytics ----
   // Rollup keeps the dashboards fast; prune keeps the raw event log bounded.
   ENABLE_ANALYTICS_SCHEDULER: z
@@ -140,6 +197,36 @@ const schema = z.object({
   BACKUP_SCHEDULER_CRON: z.string().default("* * * * *"), // every minute
   // Default IANA timezone new schedules are expressed in.
   BACKUP_DEFAULT_TIMEZONE: z.string().default("Africa/Lagos"),
+
+  // ---- Server console (agentless SSH) ------------------------------------
+  // Private half of the workspace's SSH key, OpenSSH format. Generate on the
+  // central VPS with `ssh-keygen -t ed25519 -N "" -C mybizpush-workspace -f mbp-ops`
+  // and paste the private file here (literal "\n" sequences are accepted).
+  // Empty = the console runs but cannot reach any server.
+  SERVER_SSH_PRIVATE_KEY: z.string().optional().default(""),
+  // Public IP the workspace's SSH connections leave from (the central VPS).
+  // Written into each server's authorized_keys as from="…", so the key is
+  // useless from anywhere else.
+  SERVER_SSH_SOURCE_IP: z.string().optional().default(""),
+  SERVER_SSH_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
+  ENABLE_SERVER_SCHEDULER: z
+    .string()
+    .default("true")
+    .transform((s) => s !== "false"),
+  SERVER_SCHEDULER_CRON: z.string().default("* * * * *"), // every minute
+  // How often each server's health snapshot is refreshed.
+  SERVER_STATS_INTERVAL_MINUTES: z.coerce.number().int().positive().default(5),
+  // Hour (UTC) the daily security scan runs. Kept clear of 03:00–05:00 UTC,
+  // when the Hyparrow hosts take their automatic security reboots.
+  SERVER_SCAN_HOUR_UTC: z.coerce.number().int().min(0).max(23).default(1),
+  SERVER_SNAPSHOT_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+
+  // ---- Sentry (error + performance monitoring) ---------------------------
+  // Empty DSN = Sentry stays off. The environment is separate from NODE_ENV
+  // because the deployed API runs with NODE_ENV=development.
+  SENTRY_DSN: z.string().optional().default(""),
+  SENTRY_ENVIRONMENT: z.string().optional().default(""),
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
 });
 
 const parsed = schema.safeParse(process.env);

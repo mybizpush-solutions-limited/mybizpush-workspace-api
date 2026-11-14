@@ -69,7 +69,7 @@ aiRouter.post(
   "/summarize",
   validateBody(summarizeSchema),
   asyncHandler(async (req, res) => {
-    res.json({ summary: await aiService.summarizeItem(req.body.itemId, req.body.itemType) });
+    res.json({ summary: await aiService.summarizeItem(req.body.itemId, req.body.itemType, req.auth!.sub) });
   }),
 );
 
@@ -79,6 +79,6 @@ aiRouter.post(
   "/agent-brief",
   validateBody(summarizeSchema),
   asyncHandler(async (req, res) => {
-    res.json({ brief: await aiService.agentBrief(req.body.itemId, req.body.itemType) });
+    res.json({ brief: await aiService.agentBrief(req.body.itemId, req.body.itemType, req.auth!.sub) });
   }),
 );

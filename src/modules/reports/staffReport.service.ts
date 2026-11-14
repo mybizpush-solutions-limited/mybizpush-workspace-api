@@ -1,4 +1,4 @@
-import { Op } from "sequelize";
+import { Op, type ModelStatic } from "sequelize";
 import {
   Activity,
   GithubAccount,
@@ -10,7 +10,8 @@ import {
   User,
 } from "../../models";
 import { notFound } from "../../lib/errors";
-import type { WorkStatus } from "../../models";
+import type { TaskStatus, WorkStatus } from "../../models";
+import { legacyStatusOf } from "../tasks/task.workflow";
 import { listMergedPullRequests } from "../../lib/github.features";
 import { commitsSyncService } from "../github/commits.sync.service";
 import { generateStaffNarrative, generateWorkDelivered } from "./narrative";
@@ -129,7 +130,7 @@ interface WorkItemLike {
   projectId: string;
   departmentId: string | null;
   title: string;
-  status: WorkStatus;
+  status: TaskStatus; // issues only ever hold the original values
   priority: string;
   severity?: string | null;
   dueDate: Date | null;
@@ -143,7 +144,7 @@ async function assignedItems(
   projectId: string,
   userId: string,
 ): Promise<WorkItemLike[]> {
-  const rows = (await model.findAll({
+  const rows = (await (model as unknown as ModelStatic<Issue>).findAll({
     where: { projectId },
     include: [{ model: User, as: "assignees", through: { attributes: [] }, attributes: ["id"] }],
   })) as unknown as (WorkItemLike & { assignees?: { id: string }[] })[];
@@ -305,21 +306,24 @@ export const staffReportService = {
     const completedIds = new Set<string>();
     for (const a of activities) {
       const to = (a.data as Record<string, unknown> | null)?.to;
-      if (a.kind === "status_changed" && to === STATUS_CHANGED_TO_DONE) completedIds.add(a.itemId);
+      if (a.kind === "status_changed" && (to === STATUS_CHANGED_TO_DONE || to === "approved")) completedIds.add(a.itemId);
     }
 
     const touchedIds = new Set(activities.map((a) => a.itemId));
 
     function toRow(item: WorkItemLike, type: "task" | "issue"): ReportRow {
-      const done = item.status === "done";
+      // This report (and the web app reading it) knows the original five statuses.
+      const status: WorkStatus = legacyStatusOf(item.status);
+      const done = status === "done";
+      const finished = item.status === "done" || item.status === "approved";
       // Fallback for done items with no status_changed event in range: a month-in
       // updatedAt stands in as the completion marker.
-      const completed = completedIds.has(item.id) || (done && inMonth(item.updatedAt));
+      const completed = completedIds.has(item.id) || (finished && inMonth(item.updatedAt));
       return {
         id: item.id,
         type,
         title: item.title,
-        status: item.status,
+        status,
         priority: item.priority,
         severity: item.severity ?? null,
         dueDate: item.dueDate ? item.dueDate.toISOString() : null,
@@ -334,7 +338,7 @@ export const staffReportService = {
       return items
         .filter((item) => {
           if (completedIds.has(item.id)) return true; // completed in month
-          if (item.status === "done") return inMonth(item.updatedAt); // history fallback
+          if (legacyStatusOf(item.status) === "done") return inMonth(item.updatedAt); // history fallback
           // Still open: created in the month or touched during it.
           return inMonth(item.createdAt) || touchedIds.has(item.id);
         })

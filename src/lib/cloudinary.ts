@@ -24,7 +24,9 @@ export type ResourceType = "image" | "video" | "raw" | "auto";
 export const ALLOWED_ATTACHMENT_EXTENSIONS = [
   ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".avif",
   ".mp4", ".mov", ".webm", ".m4v",
-  ".pdf", ".doc", ".docx", ".txt", ".csv", ".md", ".json", ".log", ".zip",
+  // Voice notes and audio (recorded on phones, so mostly m4a and caf).
+  ".m4a", ".mp3", ".aac", ".wav", ".ogg", ".opus", ".caf", ".3gp",
+  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".csv", ".md", ".json", ".log", ".zip",
 ];
 export const MAX_ATTACHMENT_MB = 25;
 
@@ -66,6 +68,54 @@ export interface UploadOptions {
   tags?: string[];
   filename?: string; // used to derive the public id
   publicId?: string; // explicit public id (stable per entity, e.g. avatars)
+  delivery?: "upload" | "authenticated"; // "authenticated": no public link exists
+}
+
+export interface FileLinkSource {
+  url: string;
+  publicId?: string | null;
+  delivery?: string | null;
+  resourceType?: string | null;
+  format?: string | null;
+}
+
+// What to hand someone allowed to see a file. Private files get a link that expires,
+// made here at the moment it's sent; the stored url is never given out for them.
+export function fileLink(a: FileLinkSource, now = Date.now()): { url: string; urlExpiresAt: string | null } {
+  if (a.delivery !== "authenticated" || !a.publicId) return { url: a.url, urlExpiresAt: null };
+  const expiresAt = Math.floor(now / 1000) + env.ATTACHMENT_URL_TTL_SECONDS;
+  try {
+    ensureConfigured();
+    const url = cloudinary.utils.private_download_url(a.publicId, a.format ?? "", {
+      type: "authenticated",
+      resource_type: a.resourceType ?? "image",
+      expires_at: expiresAt,
+    });
+    return { url, urlExpiresAt: new Date(expiresAt * 1000).toISOString() };
+  } catch (err) {
+    console.error("[files] no signed link:", (err as Error).message);
+    return { url: "", urlExpiresAt: null };
+  }
+}
+
+// Moves a public file behind signed links. This ends its public link. Older rows didn't
+// record their type and "auto" uploads aren't predictable (a PDF is an image), so the
+// likely type is tried first and then the others.
+export async function moveToAuthenticated(publicId: string, guess: string): Promise<{ secureUrl: string; resourceType: string; format: string | null }> {
+  ensureConfigured();
+  const kinds = [...new Set([guess, "image", "raw", "video"])];
+  let last: unknown;
+  for (const resource_type of kinds) {
+    try {
+      const r = await cloudinary.uploader.rename(publicId, publicId, { resource_type, type: "upload", to_type: "authenticated", invalidate: true, overwrite: false });
+      return { secureUrl: r.secure_url, resourceType: r.resource_type ?? resource_type, format: r.format ?? null };
+    } catch (err) {
+      last = err;
+      const code = (err as { http_code?: number; error?: { http_code?: number } }).http_code ?? (err as { error?: { http_code?: number } }).error?.http_code;
+      if (code !== 404) throw err instanceof Error ? err : new Error(JSON.stringify(err));
+    }
+  }
+  throw last instanceof Error ? last : new Error(`File not found: ${publicId}`);
 }
 
 // Upload an in-memory buffer to a structured Cloudinary folder with tags.
@@ -76,6 +126,7 @@ export function uploadBuffer(buffer: Buffer, options: UploadOptions = {}): Promi
       {
         folder: options.folder ?? env.CLOUDINARY_UPLOAD_FOLDER,
         resource_type: options.resourceType ?? "auto",
+        ...(options.delivery ? { type: options.delivery } : {}),
         public_id: options.publicId ?? (options.filename ? buildPublicId(options.filename) : undefined),
         tags: options.tags,
         overwrite: true,
