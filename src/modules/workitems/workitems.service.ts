@@ -7,20 +7,26 @@ import {
   PullRequest,
   Task,
   type ItemType,
+  type TaskStatus,
 } from "../../models";
 import { notFound } from "../../lib/errors";
 import { fetchPullRequest } from "../../lib/github";
 import { setIssueState } from "../../lib/github.features";
 import { githubService } from "../github/github.service";
-import { serializeWorkItem, workItemInclude } from "../shared/serializers";
+import { serializeWorkItem, taskInclude, workItemInclude } from "../shared/serializers";
+import { taskHooks, type TaskCreateExtras } from "../tasks/tasks.service";
 import { logActivity, notify } from "../shared/events";
+import { assertCanSeeRecord, viewerFor, visibleIds } from "../access/visibility";
 
-export interface WorkItemCreateInput {
+export interface WorkItemCreateInput extends TaskCreateExtras {
+  // Client-generated id (offline-created items keep the id they were given on
+  // the device). Omitted by the web app: the database generates one.
+  id?: string;
   projectId: string;
   departmentId?: string | null; // the department "lane" within the project
   title: string;
   description?: string;
-  status?: "todo" | "in_progress" | "in_review" | "blocked" | "done";
+  status?: TaskStatus;
   priority?: "low" | "medium" | "high" | "urgent";
   assigneeIds?: string[];
   labelIds?: string[];
@@ -28,7 +34,7 @@ export interface WorkItemCreateInput {
   severity?: "minor" | "major" | "critical"; // issues only
 }
 
-export interface WorkItemUpdateInput {
+export interface WorkItemUpdateInput extends Omit<TaskCreateExtras, "templateId" | "sourceType" | "sourceId"> {
   title?: string;
   description?: string;
   departmentId?: string | null;
@@ -44,54 +50,73 @@ export interface WorkItemUpdateInput {
 export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue>, type: ItemType) {
   // Loosely-typed handle for create/association mixins shared by both models.
   const M = model as any;
+  const itemInclude = type === "task" ? taskInclude : workItemInclude;
 
   async function reload(id: string) {
-    const item = await M.findByPk(id, { include: workItemInclude });
+    const item = await M.findByPk(id, { include: itemInclude });
     if (!item) throw notFound(`${type} not found`);
     return serializeWorkItem(item as Task | Issue, type);
   }
 
   return {
-    async list(filter: { projectId?: string; departmentId?: string; assigneeId?: string } = {}) {
-      const where: Record<string, unknown> = {};
+    // Every caller says who is asking. Only what concerns them comes back.
+    async list(viewerId: string, filter: { projectId?: string; departmentId?: string; assigneeId?: string } = {}) {
+      const where: Record<string, unknown> = { id: visibleIds(await viewerFor(viewerId), type) };
       if (filter.projectId) where.projectId = filter.projectId;
       if (filter.departmentId) where.departmentId = filter.departmentId;
       const rows = await M.findAll({
         where,
-        include: workItemInclude,
+        include: itemInclude,
         order: [["createdAt", "DESC"]],
       });
       return (rows as (Task | Issue)[]).map((r) => serializeWorkItem(r, type));
     },
 
+    // For internal use, such as the GitHub sync. People go through view().
     byId: (id: string) => reload(id),
 
-    async create(input: WorkItemCreateInput, reporterId: string) {
+    async view(id: string, viewerId: string) {
+      await assertCanSeeRecord(viewerId, type, id);
+      return reload(id);
+    },
+
+    // strict: enforce task.assign when assigning other people (mobile and sync).
+    async create(input: WorkItemCreateInput, reporterId: string, opts: { strict?: boolean } = {}) {
+      const prepared = type === "task" ? await taskHooks.prepareCreate(input, reporterId, !!opts.strict) : null;
+      const assigneeIds = prepared?.assigneeIds ?? input.assigneeIds ?? [];
+      const labelIds = prepared?.labelIds ?? input.labelIds ?? [];
       const item = await M.create({
+        ...(input.id ? { id: input.id } : {}),
         projectId: input.projectId,
-        departmentId: input.departmentId ?? null,
+        departmentId: prepared?.departmentId ?? input.departmentId ?? null,
         title: input.title.trim(),
-        description: input.description?.trim() ?? "",
+        description: (prepared?.description ?? input.description)?.trim() ?? "",
         status: input.status ?? "todo",
-        priority: input.priority ?? "medium",
+        priority: prepared?.priority ?? input.priority ?? "medium",
         reporterId,
-        dueDate: input.dueDate ? new Date(input.dueDate) : null,
+        dueDate: prepared ? prepared.dueDate : input.dueDate ? new Date(input.dueDate) : null,
+        ...(prepared?.columns ?? {}),
         ...(type === "issue" ? { severity: input.severity ?? null } : {}),
       });
-      if (input.assigneeIds?.length) await item.setAssignees(input.assigneeIds);
-      if (input.labelIds?.length) await item.setLabels(input.labelIds);
+      if (assigneeIds.length) await item.setAssignees(assigneeIds);
+      if (labelIds.length) await item.setLabels(labelIds);
 
       await logActivity({ itemId: item.id, itemType: type, actorId: reporterId, kind: "created" });
-      for (const uid of input.assigneeIds ?? []) {
+      for (const uid of assigneeIds) {
         await notify({ userId: uid, fromUserId: reporterId, kind: "assigned", itemId: item.id, itemType: type, message: `Assigned: ${item.title}` });
       }
+      if (type === "task") await taskHooks.afterCreate(item, input, assigneeIds, reporterId);
       return reload(item.id);
     },
 
-    async update(id: string, patch: WorkItemUpdateInput, actorId: string) {
+    async update(id: string, patch: WorkItemUpdateInput, actorId: string, opts: { strict?: boolean } = {}) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
+      const prepared = type === "task" ? await taskHooks.prepareUpdate(item, patch, actorId, !!opts.strict) : null;
+      const assigneeIds = prepared ? prepared.assigneeIds : patch.assigneeIds;
       await item.update({
+        ...(prepared?.columns ?? {}),
         ...(patch.title !== undefined ? { title: patch.title.trim() } : {}),
         ...(patch.description !== undefined ? { description: patch.description.trim() } : {}),
         ...(patch.departmentId !== undefined ? { departmentId: patch.departmentId } : {}),
@@ -99,22 +124,35 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
         ...(patch.dueDate !== undefined ? { dueDate: patch.dueDate ? new Date(patch.dueDate) : null } : {}),
         ...(type === "issue" && patch.severity !== undefined ? { severity: patch.severity } : {}),
       });
-      if (patch.assigneeIds) {
+      if (assigneeIds) {
         const before: string[] = (await item.getAssignees()).map((u: { id: string }) => u.id);
-        await item.setAssignees(patch.assigneeIds);
+        await item.setAssignees(assigneeIds);
         await logActivity({ itemId: id, itemType: type, actorId, kind: "assigned" });
         // Notify only the newly-added assignees.
-        for (const uid of patch.assigneeIds.filter((u) => !before.includes(u))) {
+        for (const uid of assigneeIds.filter((u) => !before.includes(u))) {
           await notify({ userId: uid, fromUserId: actorId, kind: "assigned", itemId: id, itemType: type, message: `Assigned: ${item.title}` });
         }
       }
       if (patch.labelIds) await item.setLabels(patch.labelIds);
+      // Assignees and labels live in join tables, which don't touch the item's
+      // updated_at. Bump it so offline clients see the change on their next sync.
+      if (assigneeIds || patch.labelIds || patch.dependsOnIds) {
+        item.changed("updatedAt", true);
+        await item.save();
+      }
+      if (prepared) await taskHooks.afterUpdate(item, patch, prepared.reviewerChanged, actorId);
       return reload(id);
     },
 
-    async setStatus(id: string, status: WorkItemCreateInput["status"], actorId: string) {
+    async setStatus(id: string, status: WorkItemCreateInput["status"], actorId: string, opts: { note?: string; blockedReason?: string } = {}) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
+      if (type === "task") {
+        // Rules, history and notifications all live in the task workflow.
+        await taskHooks.setStatus(item, status!, actorId, opts);
+        return reload(id);
+      }
       const from = item.status;
       if (from === status) return reload(id);
       await item.update({ status });
@@ -138,6 +176,7 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
     },
 
     async requestFeedback(id: string, fromUserId: string, actorId: string) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       await item.update({ feedbackAwaitingFrom: fromUserId, feedbackRequestedBy: actorId, feedbackRequestedAt: new Date() });
@@ -147,6 +186,7 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
     },
 
     async provideFeedback(id: string, actorId: string, body: string) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       await item.update({ feedbackAwaitingFrom: null, feedbackRequestedBy: null, feedbackRequestedAt: null });
@@ -156,6 +196,7 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
     },
 
     async linkPullRequest(id: string, pr: { number: number; title: string; url: string; status?: "open" | "merged" | "closed" | "draft" }, actorId: string) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       // Enrich from GitHub when the URL is a real PR (falls back to provided data).
@@ -177,6 +218,7 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
 
     // Link a documentation/reference URL to the item (Google Doc, Notion, spec…).
     async linkDoc(id: string, doc: { title: string; url: string }, actorId: string) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       await DocumentationLink.create({
@@ -190,7 +232,8 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
     },
 
     // Remove a linked documentation URL.
-    async unlinkDoc(id: string, docId: string) {
+    async unlinkDoc(id: string, docId: string, actorId: string) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       await DocumentationLink.destroy({ where: { id: docId, itemId: id, itemType: type } });
@@ -199,7 +242,8 @@ export function makeWorkItemService(model: ModelStatic<Task> | ModelStatic<Issue
 
     // Re-fetch live CI/review state for every linked PR. Lets the UI self-heal
     // when GitHub webhooks aren't delivered, so check state can't get stuck.
-    async refreshPullRequests(id: string) {
+    async refreshPullRequests(id: string, actorId: string) {
+      await assertCanSeeRecord(actorId, type, id);
       const item = await M.findByPk(id);
       if (!item) throw notFound(`${type} not found`);
       const prs = await PullRequest.findAll({ where: { itemId: id, itemType: type } });

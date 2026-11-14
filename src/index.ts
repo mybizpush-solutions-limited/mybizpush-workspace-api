@@ -9,11 +9,16 @@ import { startAnalyticsScheduler } from "./modules/analytics/analytics.scheduler
 import { startBackupScheduler } from "./modules/databases/databases.scheduler";
 import { startCommitsScheduler } from "./modules/github/commits.scheduler";
 import { startMeetingReportsScheduler } from "./modules/reports/meetingReports.scheduler";
+import { closeQueues, startWorkers, stopWorkers } from "./jobs";
 import { startServerScheduler } from "./modules/servers/servers.scheduler";
 // Importing the models registers them with Sequelize and wires associations.
 import "./models";
+import { attachRealtime, closeRealtime } from "./realtime/gateway";
+import { closeEmitter } from "./realtime/events";
+import { registerTombstoneHooks } from "./modules/sync/tombstones";
 
 async function start() {
+  registerTombstoneHooks();
   await assertDbConnection();
   console.info("✓ Database connected");
 
@@ -21,17 +26,23 @@ async function start() {
   const server = app.listen(env.PORT, () => {
     console.info(`🚀 MyBizPush Dev Space API listening on http://localhost:${env.PORT}`);
   });
+  attachRealtime(server);
 
   startDigestScheduler();
   startAnalyticsScheduler();
   startBackupScheduler();
   startCommitsScheduler();
   startMeetingReportsScheduler();
+  if (env.RUN_JOB_WORKERS) startWorkers();
   startServerScheduler();
 
   const shutdown = async (signal: string) => {
     console.info(`\n${signal} received — shutting down…`);
     server.close();
+    await stopWorkers();
+    await closeQueues();
+    await closeRealtime();
+    await closeEmitter();
     await Promise.allSettled([sequelize.close(), redis.quit()]);
     process.exit(0);
   };

@@ -24,6 +24,13 @@ export interface PublicUser {
   googleConnected: boolean;
   githubConnected: boolean;
   chiefBadge: boolean;
+  // Staff administration (A106); additive.
+  phone: string | null;
+  employeeId: string | null;
+  employmentStatus: "active" | "on_leave" | "contract" | "probation";
+  status: "active" | "suspended";
+  dateJoined: string | null;
+  reportsToId: string | null;
   mfaEnabled: boolean;
 }
 
@@ -47,6 +54,12 @@ export function toPublicUser(user: User): PublicUser {
     googleConnected: Boolean(user.get("googleAccount")),
     githubConnected: Boolean(user.get("githubAccount")),
     chiefBadge: user.chiefBadge,
+    phone: user.phone ?? null,
+    employeeId: user.employeeId ?? null,
+    employmentStatus: user.employmentStatus ?? "active",
+    status: user.status ?? "active",
+    dateJoined: user.dateJoined ?? null,
+    reportsToId: user.reportsToId ?? null,
     mfaEnabled: user.totpEnabled,
   };
 }

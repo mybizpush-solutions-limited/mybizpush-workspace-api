@@ -5,9 +5,12 @@ import { asyncHandler, badRequest } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { meService } from "./me.service";
+import { homeService } from "./home.service";
 import { profileService } from "./profile.service";
 import { departmentsService } from "../departments/departments.service";
 import { authService } from "../auth/auth.service";
+import { ACTIVITY_KINDS } from "../../models";
+import { activityFeed } from "./activity.feed";
 
 // "My work" aggregations backing the dashboard and the My Queue view, plus the
 // caller's own self-service profile / membership / onboarding actions.
@@ -31,6 +34,25 @@ meRouter.get("/reported", asyncHandler(async (req, res) => {
   res.json({ items: await meService.reported(req.auth!.sub) });
 }));
 
+// ---- Home, workspace switcher, badges (A108) -------------------------------
+meRouter.get("/contexts", asyncHandler(async (req, res) => {
+  res.json(await homeService.contexts(req.auth!.sub));
+}));
+
+meRouter.post("/contexts/recent", validateBody(z.object({ type: z.enum(["organization", "product"]), id: z.string().uuid().nullable() })), asyncHandler(async (req, res) => {
+  await homeService.rememberContext(req.auth!.sub, req.body);
+  res.status(204).end();
+}));
+
+meRouter.get("/dashboard", asyncHandler(async (req, res) => {
+  const productId = typeof req.query.productId === "string" ? req.query.productId : undefined;
+  res.json(await homeService.dashboard(req.auth!.sub, productId));
+}));
+
+meRouter.get("/badges", asyncHandler(async (req, res) => {
+  res.json(await homeService.badges(req.auth!.sub));
+}));
+
 // ---- Self-service profile + onboarding ------------------------------------
 const profileSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
@@ -50,6 +72,34 @@ meRouter.patch(
     res.json({ user: await profileService.updateProfile(req.auth!.sub, req.body) });
   }),
 );
+
+// The profile sheet (ME-02, AUTH-08). Only ever the caller's own.
+meRouter.patch(
+  "/profile",
+  validateBody(
+    z.object({
+      name: z.string().trim().min(1).max(120).optional(),
+      phone: z.string().trim().max(32).nullable().optional(),
+      secondaryEmail: z.string().trim().email().nullable().optional(),
+      jobTitles: z.array(z.string().trim().min(1).max(40)).max(50).optional(),
+    }),
+  ),
+  asyncHandler(async (req, res) => {
+    res.json(await profileService.updateFull(req.auth!.sub, req.body));
+  }),
+);
+
+meRouter.get("/activity", asyncHandler(async (req, res) => {
+  const q = z
+    .object({
+      productId: z.string().uuid().optional(),
+      kind: z.enum(ACTIVITY_KINDS).optional(),
+      before: z.string().max(200).optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    })
+    .parse(req.query);
+  res.json(await activityFeed(req.auth!.sub, q));
+}));
 
 meRouter.post(
   "/avatar",

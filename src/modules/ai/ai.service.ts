@@ -15,6 +15,7 @@ import {
   type ItemType,
 } from "../../models";
 import { AppError, notFound } from "../../lib/errors";
+import { assertCanSeeRecord, canSeeRecord } from "../access/visibility";
 import type { Auth } from "../../lib/permissions";
 import { describeActor, resolveActor, type ActorContext } from "./ai.context";
 import { claimAction, stageAction, toView, type PendingActionView } from "./ai.actions";
@@ -81,9 +82,9 @@ export interface ChatInput {
   context?: ChatContext;
 }
 
-async function describeContext(context: ChatContext): Promise<string> {
+async function describeContext(context: ChatContext, viewerId: string): Promise<string> {
   const parts: string[] = [];
-  if (context.itemId && context.itemType) {
+  if (context.itemId && context.itemType && (await canSeeRecord(viewerId, context.itemType, context.itemId))) {
     const item =
       context.itemType === "task"
         ? await Task.findByPk(context.itemId)
@@ -181,7 +182,7 @@ export const aiService = {
   // built server-side; the client only ever sends the conversation.
   async chat(auth: Auth, input: ChatInput): Promise<ChatResult> {
     const actor = await resolveActor(auth);
-    const contextNote = input.context ? await describeContext(input.context) : "";
+    const contextNote = input.context ? await describeContext(input.context, actor.id) : "";
 
     const messages: ChatMessage[] = [
       {
@@ -226,7 +227,8 @@ export const aiService = {
   },
 
   // Summarize a specific task/issue using its description + recent comments.
-  async summarizeItem(itemId: string, itemType: ItemType): Promise<string> {
+  async summarizeItem(itemId: string, itemType: ItemType, viewerId: string): Promise<string> {
+    await assertCanSeeRecord(viewerId, itemType, itemId);
     const item = itemType === "task" ? await Task.findByPk(itemId) : await Issue.findByPk(itemId);
     if (!item) throw notFound(`${itemType} not found`);
     const comments = await Comment.findAll({
@@ -252,7 +254,8 @@ export const aiService = {
   // Code) that already has the repo checked out. Pulls in the linked repo(s),
   // the item details, discussion, and any linked PRs / GitHub issue so the agent
   // has the full picture without needing the app.
-  async agentBrief(itemId: string, itemType: ItemType): Promise<string> {
+  async agentBrief(itemId: string, itemType: ItemType, viewerId: string): Promise<string> {
+    await assertCanSeeRecord(viewerId, itemType, itemId);
     const item = itemType === "task" ? await Task.findByPk(itemId) : await Issue.findByPk(itemId);
     if (!item) throw notFound(`${itemType} not found`);
 

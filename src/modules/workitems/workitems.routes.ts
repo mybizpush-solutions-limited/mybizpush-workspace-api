@@ -1,26 +1,27 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
-import { issuesService, tasksService, type makeWorkItemService } from "./workitems.service";
+import { taskCreateFields, taskStatusSchema, taskUpdateFields } from "../tasks/tasks.schemas";
+import { issuesService, tasksService, type makeWorkItemService, type WorkItemCreateInput } from "./workitems.service";
 
 const STATUS = z.enum(["todo", "in_progress", "in_review", "blocked", "done"]);
 const PRIORITY = z.enum(["low", "medium", "high", "urgent"]);
 const SEVERITY = z.enum(["minor", "major", "critical"]);
 
-function buildSchemas(withSeverity: boolean) {
+// Exported for offline sync (sync.service), which replays the same writes.
+export function buildSchemas(withSeverity: boolean) {
   const create = z.object({
     projectId: z.string().uuid(),
     departmentId: z.string().uuid().nullable().optional(),
     title: z.string().trim().min(1).max(200),
     description: z.string().trim().max(8000).optional(),
-    status: STATUS.optional(),
     priority: PRIORITY.optional(),
     assigneeIds: z.array(z.string().uuid()).optional(),
     labelIds: z.array(z.string().uuid()).optional(),
     dueDate: z.string().datetime().optional(),
-    ...(withSeverity ? { severity: SEVERITY.optional() } : {}),
+    ...(withSeverity ? { status: STATUS.optional(), severity: SEVERITY.optional() } : taskCreateFields),
   });
   const update = z.object({
     title: z.string().trim().min(1).max(200).optional(),
@@ -30,12 +31,12 @@ function buildSchemas(withSeverity: boolean) {
     assigneeIds: z.array(z.string().uuid()).optional(),
     labelIds: z.array(z.string().uuid()).optional(),
     dueDate: z.string().datetime().nullable().optional(),
-    ...(withSeverity ? { severity: SEVERITY.optional() } : {}),
+    ...(withSeverity ? { severity: SEVERITY.optional() } : taskUpdateFields),
   });
   return { create, update };
 }
 
-const statusSchema = z.object({ status: STATUS });
+export const statusSchema = z.object({ status: STATUS });
 const feedbackRequestSchema = z.object({ fromUserId: z.string().uuid() });
 const feedbackProvideSchema = z.object({ body: z.string().trim().min(1).max(8000) });
 const prSchema = z.object({
@@ -49,6 +50,8 @@ const docSchema = z.object({
   url: z.string().url(),
 });
 
+const isMobile = (req: Request) => req.get("x-client")?.toLowerCase() === "mobile";
+
 // One router shape for both tasks and issues.
 function makeWorkItemRouter(service: ReturnType<typeof makeWorkItemService>, withSeverity: boolean) {
   const router = Router();
@@ -60,24 +63,25 @@ function makeWorkItemRouter(service: ReturnType<typeof makeWorkItemService>, wit
     asyncHandler(async (req, res) => {
       const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
       const departmentId = typeof req.query.departmentId === "string" ? req.query.departmentId : undefined;
-      res.json({ items: await service.list({ projectId, departmentId }) });
+      res.json({ items: await service.list(req.auth!.sub, { projectId, departmentId }) });
     }),
   );
 
   router.get("/:id", asyncHandler(async (req, res) => {
-    res.json({ item: await service.byId(req.params.id!) });
+    res.json({ item: await service.view(req.params.id!, req.auth!.sub) });
   }));
 
   router.post("/", validateBody(create), asyncHandler(async (req, res) => {
-    res.status(201).json({ item: await service.create(req.body, req.auth!.sub) });
+    res.status(201).json({ item: await service.create(req.body as WorkItemCreateInput, req.auth!.sub, { strict: isMobile(req) }) });
   }));
 
   router.patch("/:id", validateBody(update), asyncHandler(async (req, res) => {
-    res.json({ item: await service.update(req.params.id!, req.body, req.auth!.sub) });
+    res.json({ item: await service.update(req.params.id!, req.body, req.auth!.sub, { strict: isMobile(req) }) });
   }));
 
-  router.post("/:id/status", validateBody(statusSchema), asyncHandler(async (req, res) => {
-    res.json({ item: await service.setStatus(req.params.id!, req.body.status, req.auth!.sub) });
+  router.post("/:id/status", validateBody(withSeverity ? statusSchema : taskStatusSchema), asyncHandler(async (req, res) => {
+    const { status, note, blockedReason } = req.body;
+    res.json({ item: await service.setStatus(req.params.id!, status, req.auth!.sub, { note, blockedReason }) });
   }));
 
   router.post("/:id/feedback/request", validateBody(feedbackRequestSchema), asyncHandler(async (req, res) => {
@@ -94,7 +98,7 @@ function makeWorkItemRouter(service: ReturnType<typeof makeWorkItemService>, wit
 
   // Re-fetch live CI/review state for the item's linked PRs (manual/auto refresh).
   router.post("/:id/pull-requests/refresh", asyncHandler(async (req, res) => {
-    res.json({ item: await service.refreshPullRequests(req.params.id!) });
+    res.json({ item: await service.refreshPullRequests(req.params.id!, req.auth!.sub) });
   }));
 
   router.post("/:id/docs", validateBody(docSchema), asyncHandler(async (req, res) => {
@@ -102,7 +106,7 @@ function makeWorkItemRouter(service: ReturnType<typeof makeWorkItemService>, wit
   }));
 
   router.delete("/:id/docs/:docId", asyncHandler(async (req, res) => {
-    res.json({ item: await service.unlinkDoc(req.params.id!, req.params.docId!) });
+    res.json({ item: await service.unlinkDoc(req.params.id!, req.params.docId!, req.auth!.sub) });
   }));
 
   return router;

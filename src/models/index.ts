@@ -6,6 +6,16 @@ import {
   type InferCreationAttributes,
 } from "sequelize";
 import { sequelize } from "../db/sequelize";
+import { TASK_STATUSES, type TaskStatus } from "./task-status";
+import { MeetingAttendee, type MeetingScope, type MeetingStatus, type MeetingType } from "./calendar";
+
+export * from "./task-status";
+export * from "./chat";
+export * from "./calendar";
+export * from "./performance";
+export * from "./marketing";
+export * from "./integrations";
+export * from "./account";
 
 // Domain enums (kept in sync with ui/src/types/index.ts).
 export const ACCESS_LEVELS = ["member", "admin", "chief", "executive_admin"] as const;
@@ -17,14 +27,35 @@ export function isOrgManager(level: string): boolean {
 export const WORK_STATUSES = ["todo", "in_progress", "in_review", "blocked", "done"] as const;
 export const PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_TYPES = ["task", "issue"] as const;
+// Anything comments, attachments, activity and notifications can hang off.
+// ITEM_TYPES (work items) stay the narrower set used by PRs, docs and GitHub
+// links. New record types arrive with their modules (API-CHANGES A008).
+export const RECORD_TYPES = [
+  ...ITEM_TYPES,
+  "meeting",
+  "announcement",
+  "query",
+  "content",
+  "campaign",
+  "conversation",
+  "message",
+  "appraisal",
+  "target",
+  "project",
+  "product",
+] as const;
 export const ISSUE_SEVERITIES = ["minor", "major", "critical"] as const;
 export const ACTIVITY_KINDS = [
   "created", "status_changed", "assigned", "commented",
   "feedback_requested", "feedback_provided", "pr_linked",
+  "submitted", "reviewed", "dependency_changed",
 ] as const;
 export const NOTIFICATION_KINDS = [
   "assigned", "mentioned", "feedback_requested", "status_changed", "commented",
+  "submitted", "approved", "rejected", "revision_requested", "reviewer_assigned", "blocked", "deadline",
+  "message", "announcement", "meeting", "query", "target", "appraisal", "campaign", "content", "integration_failure",
 ] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 export const PR_STATUSES = ["open", "merged", "closed", "draft"] as const;
 export const DIGEST_FREQUENCIES = ["off", "daily", "weekly"] as const;
 // Selectable team roles (kept in sync with ui/src/types/index.ts `Role`).
@@ -34,9 +65,14 @@ export const ROLES = [
 ] as const;
 
 export type AccessLevel = (typeof ACCESS_LEVELS)[number];
+export const EMPLOYMENT_STATUSES = ["active", "on_leave", "contract", "probation"] as const;
+export type EmploymentStatus = (typeof EMPLOYMENT_STATUSES)[number];
+export const ACCOUNT_STATUSES = ["active", "suspended"] as const;
+export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 export type WorkStatus = (typeof WORK_STATUSES)[number];
 export type Priority = (typeof PRIORITIES)[number];
 export type ItemType = (typeof ITEM_TYPES)[number];
+export type RecordType = (typeof RECORD_TYPES)[number];
 
 // ---- User -----------------------------------------------------------------
 export class User extends Model<InferAttributes<User>, InferCreationAttributes<User>> {
@@ -55,6 +91,15 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   // Cosmetic golden "Chief" badge — auto for the chief access level, but can be
   // granted independently to any user by an executive admin.
   declare chiefBadge: CreationOptional<boolean>;
+  // Staff administration (A106).
+  declare phone: CreationOptional<string | null>;
+  declare employeeId: CreationOptional<string | null>;
+  declare employmentStatus: CreationOptional<EmploymentStatus>;
+  declare status: CreationOptional<AccountStatus>;
+  declare suspendedAt: CreationOptional<Date | null>;
+  declare suspendedReason: CreationOptional<string | null>;
+  declare dateJoined: CreationOptional<string | null>;
+  declare reportsToId: CreationOptional<string | null>;
   // False until a sign-in proves the password meets the 12-character policy —
   // bcrypt can't be inspected, so it can only be judged from the plaintext.
   declare passwordMeetsPolicy: CreationOptional<boolean>;
@@ -81,11 +126,19 @@ User.init(
     roles: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
     onboarded: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     chiefBadge: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    phone: { type: DataTypes.STRING(32), allowNull: true },
+    employeeId: { type: DataTypes.STRING(40), allowNull: true, unique: true },
+    employmentStatus: { type: DataTypes.ENUM(...EMPLOYMENT_STATUSES), allowNull: false, defaultValue: "active" },
+    status: { type: DataTypes.ENUM(...ACCOUNT_STATUSES), allowNull: false, defaultValue: "active" },
+    suspendedAt: { type: DataTypes.DATE, allowNull: true },
+    suspendedReason: { type: DataTypes.STRING(240), allowNull: true },
+    dateJoined: { type: DataTypes.DATEONLY, allowNull: true },
     passwordMeetsPolicy: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     totpSecretEncrypted: { type: DataTypes.TEXT, allowNull: true },
     totpEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     totpConfirmedAt: { type: DataTypes.DATE, allowNull: true },
     totpLastStep: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 },
+    reportsToId: { type: DataTypes.UUID, allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },
@@ -182,6 +235,8 @@ export class Project extends Model<InferAttributes<Project>, InferCreationAttrib
   // Sequelize, Postgres)". Surfaced to the AI so briefs target the real stack.
   declare techStack: CreationOptional<string>;
   declare managerId: CreationOptional<string | null>;
+  // The product this project belongs to (A101); null until linked.
+  declare productId: CreationOptional<string | null>;
   declare progress: CreationOptional<number>;
   declare avatarUrl: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
@@ -195,6 +250,7 @@ Project.init(
     description: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
     techStack: { type: DataTypes.STRING(400), allowNull: false, defaultValue: "" },
     managerId: { type: DataTypes.UUID, allowNull: true },
+    productId: { type: DataTypes.UUID, allowNull: true },
     progress: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0, max: 100 } },
     avatarUrl: { type: DataTypes.STRING, allowNull: true },
     createdAt: DataTypes.DATE,
@@ -225,13 +281,27 @@ export class Task extends Model<InferAttributes<Task>, InferCreationAttributes<T
   declare departmentId: CreationOptional<string | null>; // which department "lane"
   declare title: string;
   declare description: CreationOptional<string>;
-  declare status: CreationOptional<WorkStatus>;
+  declare status: CreationOptional<TaskStatus>;
   declare priority: CreationOptional<Priority>;
   declare reporterId: CreationOptional<string | null>;
   declare dueDate: CreationOptional<Date | null>;
   declare feedbackAwaitingFrom: CreationOptional<string | null>;
   declare feedbackRequestedBy: CreationOptional<string | null>;
   declare feedbackRequestedAt: CreationOptional<Date | null>;
+  // Task workflow (A201, A202).
+  declare reviewerId: CreationOptional<string | null>;
+  declare productId: CreationOptional<string | null>;
+  declare teamId: CreationOptional<string | null>;
+  declare startDate: CreationOptional<Date | null>;
+  declare expectedDeliverable: CreationOptional<string>;
+  declare templateId: CreationOptional<string | null>;
+  declare blockedReason: CreationOptional<string | null>;
+  declare revisionCount: CreationOptional<number>;
+  declare submittedAt: CreationOptional<Date | null>;
+  declare reviewedAt: CreationOptional<Date | null>;
+  declare completedAt: CreationOptional<Date | null>;
+  declare sourceType: CreationOptional<string | null>;
+  declare sourceId: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -242,13 +312,26 @@ Task.init(
     departmentId: { type: DataTypes.UUID, allowNull: true },
     title: { type: DataTypes.STRING, allowNull: false },
     description: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
-    status: { type: DataTypes.ENUM(...WORK_STATUSES), allowNull: false, defaultValue: "todo" },
+    status: { type: DataTypes.ENUM(...TASK_STATUSES), allowNull: false, defaultValue: "todo" },
     priority: { type: DataTypes.ENUM(...PRIORITIES), allowNull: false, defaultValue: "medium" },
     reporterId: { type: DataTypes.UUID, allowNull: true },
     dueDate: { type: DataTypes.DATE, allowNull: true },
     feedbackAwaitingFrom: { type: DataTypes.UUID, allowNull: true },
     feedbackRequestedBy: { type: DataTypes.UUID, allowNull: true },
     feedbackRequestedAt: { type: DataTypes.DATE, allowNull: true },
+    reviewerId: { type: DataTypes.UUID, allowNull: true },
+    productId: { type: DataTypes.UUID, allowNull: true },
+    teamId: { type: DataTypes.UUID, allowNull: true },
+    startDate: { type: DataTypes.DATE, allowNull: true },
+    expectedDeliverable: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    templateId: { type: DataTypes.UUID, allowNull: true },
+    blockedReason: { type: DataTypes.STRING(500), allowNull: true },
+    revisionCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    submittedAt: { type: DataTypes.DATE, allowNull: true },
+    reviewedAt: { type: DataTypes.DATE, allowNull: true },
+    completedAt: { type: DataTypes.DATE, allowNull: true },
+    sourceType: { type: DataTypes.STRING(30), allowNull: true },
+    sourceId: { type: DataTypes.STRING(80), allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },
@@ -298,32 +381,34 @@ Issue.init(
 export class Comment extends Model<InferAttributes<Comment>, InferCreationAttributes<Comment>> {
   declare id: CreationOptional<string>;
   declare itemId: string;
-  declare itemType: ItemType;
+  declare itemType: RecordType;
   declare authorId: CreationOptional<string | null>;
   declare body: string;
   // Set when this comment is mirrored to/from a GitHub issue comment — used to
   // dedupe the echo webhook and prevent app↔GitHub comment loops.
   declare githubCommentId: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
 }
 Comment.init(
   {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     itemId: { type: DataTypes.UUID, allowNull: false },
-    itemType: { type: DataTypes.ENUM(...ITEM_TYPES), allowNull: false },
+    itemType: { type: DataTypes.ENUM(...RECORD_TYPES), allowNull: false },
     authorId: { type: DataTypes.UUID, allowNull: true },
     body: { type: DataTypes.TEXT, allowNull: false },
     githubCommentId: { type: DataTypes.STRING, allowNull: true },
     createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
   },
-  { sequelize, tableName: "comments", updatedAt: false },
+  { sequelize, tableName: "comments" },
 );
 
 // ---- Activity -------------------------------------------------------------
 export class Activity extends Model<InferAttributes<Activity>, InferCreationAttributes<Activity>> {
   declare id: CreationOptional<string>;
   declare itemId: string;
-  declare itemType: ItemType;
+  declare itemType: RecordType;
   declare actorId: CreationOptional<string | null>;
   declare kind: (typeof ACTIVITY_KINDS)[number];
   declare data: CreationOptional<Record<string, unknown> | null>;
@@ -333,7 +418,7 @@ Activity.init(
   {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     itemId: { type: DataTypes.UUID, allowNull: false },
-    itemType: { type: DataTypes.ENUM(...ITEM_TYPES), allowNull: false },
+    itemType: { type: DataTypes.ENUM(...RECORD_TYPES), allowNull: false },
     actorId: { type: DataTypes.UUID, allowNull: true },
     kind: { type: DataTypes.ENUM(...ACTIVITY_KINDS), allowNull: false },
     data: { type: DataTypes.JSONB, allowNull: true },
@@ -438,24 +523,33 @@ GithubIssueLink.init(
 export class Attachment extends Model<InferAttributes<Attachment>, InferCreationAttributes<Attachment>> {
   declare id: CreationOptional<string>;
   declare itemId: string;
-  declare itemType: ItemType;
+  declare itemType: RecordType;
   declare name: string;
   declare size: CreationOptional<number>;
   declare type: CreationOptional<string>;
   declare url: string;
   declare publicId: CreationOptional<string | null>;
+  declare uploadedBy: CreationOptional<string | null>;
+  // "authenticated" files are only reachable through a signed link (A1003).
+  declare delivery: CreationOptional<"upload" | "authenticated">;
+  declare resourceType: CreationOptional<string | null>;
+  declare format: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
 }
 Attachment.init(
   {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     itemId: { type: DataTypes.UUID, allowNull: false },
-    itemType: { type: DataTypes.ENUM(...ITEM_TYPES), allowNull: false },
+    itemType: { type: DataTypes.ENUM(...RECORD_TYPES), allowNull: false },
     name: { type: DataTypes.STRING, allowNull: false },
     size: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 },
     type: { type: DataTypes.STRING, allowNull: false, defaultValue: "" },
     url: { type: DataTypes.STRING, allowNull: false },
     publicId: { type: DataTypes.STRING, allowNull: true },
+    uploadedBy: { type: DataTypes.UUID, allowNull: true },
+    delivery: { type: DataTypes.STRING(14), allowNull: false, defaultValue: "upload" },
+    resourceType: { type: DataTypes.STRING(8), allowNull: true },
+    format: { type: DataTypes.STRING(20), allowNull: true },
     createdAt: DataTypes.DATE,
   },
   { sequelize, tableName: "attachments", updatedAt: false },
@@ -467,11 +561,13 @@ export class Notification extends Model<InferAttributes<Notification>, InferCrea
   declare userId: string;
   declare kind: (typeof NOTIFICATION_KINDS)[number];
   declare itemId: string;
-  declare itemType: ItemType;
+  declare itemType: RecordType;
   declare fromUserId: CreationOptional<string | null>;
   declare message: string;
+  declare data: CreationOptional<Record<string, unknown> | null>;
   declare read: CreationOptional<boolean>;
   declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
 }
 Notification.init(
   {
@@ -479,13 +575,15 @@ Notification.init(
     userId: { type: DataTypes.UUID, allowNull: false },
     kind: { type: DataTypes.ENUM(...NOTIFICATION_KINDS), allowNull: false },
     itemId: { type: DataTypes.UUID, allowNull: false },
-    itemType: { type: DataTypes.ENUM(...ITEM_TYPES), allowNull: false },
+    itemType: { type: DataTypes.ENUM(...RECORD_TYPES), allowNull: false },
     fromUserId: { type: DataTypes.UUID, allowNull: true },
     message: { type: DataTypes.TEXT, allowNull: false },
+    data: { type: DataTypes.JSONB, allowNull: true },
     read: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
   },
-  { sequelize, tableName: "notifications", updatedAt: false },
+  { sequelize, tableName: "notifications" },
 );
 
 // ---- Meeting --------------------------------------------------------------
@@ -510,7 +608,23 @@ export class Meeting extends Model<InferAttributes<Meeting>, InferCreationAttrib
   declare recurrence: CreationOptional<RecurrenceRule | null>;
   // Third-party invitees by email (not app users) — added to the Google invite.
   declare externalEmails: CreationOptional<string[]>;
+  declare type: CreationOptional<MeetingType>;
+  declare scopeType: CreationOptional<MeetingScope | null>;
+  declare scopeId: CreationOptional<string | null>;
+  declare status: CreationOptional<MeetingStatus>;
+  declare locationType: CreationOptional<"online" | "in_person" | "hybrid">;
+  declare location: CreationOptional<string | null>;
+  declare hasMeetLink: CreationOptional<boolean>;
+  declare agenda: CreationOptional<{ title: string; durationMinutes?: number; ownerId?: string }[]>;
+  declare reminderMinutes: CreationOptional<number[]>;
+  declare groups: CreationOptional<{ type: string; id: string }[]>;
+  declare cancelReason: CreationOptional<string | null>;
+  declare cancelledAt: CreationOptional<Date | null>;
+  declare syncState: CreationOptional<"not_linked" | "synced" | "conflict">;
+  declare googleSnapshot: CreationOptional<{ title: string; startsAt: string; endsAt: string } | null>;
+  declare syncConflict: CreationOptional<{ reason: "changed_in_google" | "write_failed"; detectedAt: string; google: { title: string; startsAt: string; endsAt: string } | null } | null>;
   declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
 }
 Meeting.init(
   {
@@ -524,9 +638,25 @@ Meeting.init(
     googleEventId: { type: DataTypes.STRING, allowNull: true },
     recurrence: { type: DataTypes.JSONB, allowNull: true },
     externalEmails: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
+    type: { type: DataTypes.STRING(12), allowNull: false, defaultValue: "other" },
+    scopeType: { type: DataTypes.STRING(14), allowNull: true },
+    scopeId: { type: DataTypes.UUID, allowNull: true },
+    status: { type: DataTypes.STRING(10), allowNull: false, defaultValue: "scheduled" },
+    locationType: { type: DataTypes.STRING(10), allowNull: false, defaultValue: "online" },
+    location: { type: DataTypes.STRING(300), allowNull: true },
+    hasMeetLink: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    agenda: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    reminderMinutes: { type: DataTypes.ARRAY(DataTypes.INTEGER), allowNull: false, defaultValue: [15] },
+    groups: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    cancelReason: { type: DataTypes.STRING(500), allowNull: true },
+    cancelledAt: { type: DataTypes.DATE, allowNull: true },
+    syncState: { type: DataTypes.STRING(10), allowNull: false, defaultValue: "not_linked" },
+    googleSnapshot: { type: DataTypes.JSONB, allowNull: true },
+    syncConflict: { type: DataTypes.JSONB, allowNull: true },
     createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
   },
-  { sequelize, tableName: "meetings", updatedAt: false },
+  { sequelize, tableName: "meetings" },
 );
 
 // ---- ProjectRepo (GitHub repos linked to a project) ------------------------
@@ -572,6 +702,9 @@ export class GoogleAccount extends Model<
   declare scope: CreationOptional<string | null>;
   declare tokenType: CreationOptional<string | null>;
   declare expiryDate: CreationOptional<Date | null>;
+  declare gmailRefreshToken: CreationOptional<string | null>; // encrypted
+  declare gmailEmail: CreationOptional<string | null>;
+  declare gmailScopes: CreationOptional<string | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
 }
@@ -584,6 +717,9 @@ GoogleAccount.init(
     scope: { type: DataTypes.TEXT, allowNull: true },
     tokenType: { type: DataTypes.STRING, allowNull: true },
     expiryDate: { type: DataTypes.DATE, allowNull: true },
+    gmailRefreshToken: { type: DataTypes.TEXT, allowNull: true },
+    gmailEmail: { type: DataTypes.STRING, allowNull: true },
+    gmailScopes: { type: DataTypes.STRING(500), allowNull: true },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },
@@ -636,6 +772,10 @@ export class NotificationPreference extends Model<
   declare mentions: CreationOptional<boolean>;
   declare events: CreationOptional<boolean>;
   declare digestFrequency: CreationOptional<(typeof DIGEST_FREQUENCIES)[number]>;
+  declare quietEnabled: CreationOptional<boolean>;
+  declare quietStart: CreationOptional<string>;
+  declare quietEnd: CreationOptional<string>;
+  declare quietTimezone: CreationOptional<string>;
 }
 NotificationPreference.init(
   {
@@ -646,6 +786,10 @@ NotificationPreference.init(
     mentions: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     events: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     digestFrequency: { type: DataTypes.ENUM(...DIGEST_FREQUENCIES), allowNull: false, defaultValue: "daily" },
+    quietEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    quietStart: { type: DataTypes.STRING(5), allowNull: false, defaultValue: "22:00" },
+    quietEnd: { type: DataTypes.STRING(5), allowNull: false, defaultValue: "07:00" },
+    quietTimezone: { type: DataTypes.STRING(60), allowNull: false, defaultValue: "Africa/Lagos" },
   },
   { sequelize, tableName: "notification_preferences", timestamps: false },
 );
@@ -671,6 +815,319 @@ BlacklistedEmail.init(
     updatedAt: DataTypes.DATE,
   },
   { sequelize, tableName: "blacklisted_emails" },
+);
+
+// ---- AuditLog --------------------------------------------------------------
+// Append-only record of administrative and permission changes. Written through
+// lib/audit.ts; never updated or deleted by the application.
+export class AuditLog extends Model<InferAttributes<AuditLog>, InferCreationAttributes<AuditLog>> {
+  declare id: CreationOptional<string>;
+  declare actorId: CreationOptional<string | null>;
+  declare action: string;
+  declare targetType: string;
+  declare targetId: CreationOptional<string | null>;
+  declare scopeType: CreationOptional<string | null>;
+  declare scopeId: CreationOptional<string | null>;
+  declare before: CreationOptional<Record<string, unknown> | null>;
+  declare after: CreationOptional<Record<string, unknown> | null>;
+  declare ip: CreationOptional<string | null>;
+  declare userAgent: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+}
+AuditLog.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    actorId: { type: DataTypes.UUID, allowNull: true },
+    action: { type: DataTypes.STRING(80), allowNull: false },
+    targetType: { type: DataTypes.STRING(40), allowNull: false },
+    targetId: { type: DataTypes.STRING(80), allowNull: true },
+    scopeType: { type: DataTypes.STRING(20), allowNull: true },
+    scopeId: { type: DataTypes.STRING(80), allowNull: true },
+    before: { type: DataTypes.JSONB, allowNull: true },
+    after: { type: DataTypes.JSONB, allowNull: true },
+    ip: { type: DataTypes.STRING, allowNull: true },
+    userAgent: { type: DataTypes.STRING(400), allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "audit_logs", updatedAt: false },
+);
+
+// ---- Product -----------------------------------------------------------------
+// The business umbrella (A101): people, projects, marketing, content, social.
+export const PRODUCT_STAGES = ["in_development", "live", "paused"] as const;
+export type ProductStage = (typeof PRODUCT_STAGES)[number];
+
+export class Product extends Model<InferAttributes<Product>, InferCreationAttributes<Product>> {
+  declare id: CreationOptional<string>;
+  declare name: string;
+  declare slug: string;
+  declare description: CreationOptional<string>;
+  declare logoUrl: CreationOptional<string | null>;
+  declare tint: CreationOptional<string | null>;
+  declare stage: CreationOptional<ProductStage>;
+  declare ownerId: CreationOptional<string | null>;
+  declare senderName: CreationOptional<string | null>;
+  declare senderEmail: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+Product.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    name: { type: DataTypes.STRING(120), allowNull: false },
+    slug: { type: DataTypes.STRING(120), allowNull: false, unique: true },
+    description: { type: DataTypes.STRING(400), allowNull: false, defaultValue: "" },
+    logoUrl: { type: DataTypes.STRING, allowNull: true },
+    tint: { type: DataTypes.STRING(9), allowNull: true },
+    stage: { type: DataTypes.ENUM(...PRODUCT_STAGES), allowNull: false, defaultValue: "in_development" },
+    ownerId: { type: DataTypes.UUID, allowNull: true },
+    senderName: { type: DataTypes.STRING(120), allowNull: true },
+    senderEmail: { type: DataTypes.STRING(254), allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "products" },
+);
+
+export class ProductMember extends Model<InferAttributes<ProductMember>, InferCreationAttributes<ProductMember>> {
+  declare productId: string;
+  declare userId: string;
+  declare title: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+}
+ProductMember.init(
+  {
+    productId: { type: DataTypes.UUID, allowNull: false, primaryKey: true },
+    userId: { type: DataTypes.UUID, allowNull: false, primaryKey: true },
+    title: { type: DataTypes.STRING(80), allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "product_members", updatedAt: false },
+);
+
+// ---- Team --------------------------------------------------------------------
+// Cross-department working group (A102).
+export class Team extends Model<InferAttributes<Team>, InferCreationAttributes<Team>> {
+  declare id: CreationOptional<string>;
+  declare name: string;
+  declare slug: string;
+  declare description: CreationOptional<string>;
+  declare leadId: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+Team.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    name: { type: DataTypes.STRING(120), allowNull: false },
+    slug: { type: DataTypes.STRING(120), allowNull: false, unique: true },
+    description: { type: DataTypes.STRING(400), allowNull: false, defaultValue: "" },
+    leadId: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "teams" },
+);
+
+// ---- Access control (A103) --------------------------------------------------
+export const ACCESS_SCOPES = ["organization", "department", "team", "product", "project"] as const;
+export type AccessScope = (typeof ACCESS_SCOPES)[number];
+
+export class AccessRole extends Model<InferAttributes<AccessRole>, InferCreationAttributes<AccessRole>> {
+  declare id: CreationOptional<string>;
+  declare key: string;
+  declare name: string;
+  declare description: CreationOptional<string>;
+  declare isSystem: CreationOptional<boolean>;
+  declare defaultScope: CreationOptional<AccessScope>;
+  declare permissions: CreationOptional<string[]>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+AccessRole.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    key: { type: DataTypes.STRING(60), allowNull: false, unique: true },
+    name: { type: DataTypes.STRING(80), allowNull: false },
+    description: { type: DataTypes.STRING(240), allowNull: false, defaultValue: "" },
+    isSystem: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    defaultScope: { type: DataTypes.ENUM(...ACCESS_SCOPES), allowNull: false, defaultValue: "organization" },
+    permissions: { type: DataTypes.ARRAY(DataTypes.STRING(60)), allowNull: false, defaultValue: [] },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "access_roles" },
+);
+
+export class AccessAssignment extends Model<InferAttributes<AccessAssignment>, InferCreationAttributes<AccessAssignment>> {
+  declare id: CreationOptional<string>;
+  declare roleId: string;
+  declare subjectType: "user" | "department" | "team";
+  declare subjectId: string;
+  declare scopeType: AccessScope;
+  declare scopeId: CreationOptional<string | null>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+}
+AccessAssignment.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    roleId: { type: DataTypes.UUID, allowNull: false },
+    subjectType: { type: DataTypes.ENUM("user", "department", "team"), allowNull: false },
+    subjectId: { type: DataTypes.UUID, allowNull: false },
+    scopeType: { type: DataTypes.ENUM(...ACCESS_SCOPES), allowNull: false },
+    scopeId: { type: DataTypes.UUID, allowNull: true },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "access_assignments", updatedAt: false },
+);
+
+export class AccessOverride extends Model<InferAttributes<AccessOverride>, InferCreationAttributes<AccessOverride>> {
+  declare id: CreationOptional<string>;
+  declare userId: string;
+  declare permission: string;
+  declare effect: "grant" | "deny";
+  declare scopeType: AccessScope;
+  declare scopeId: CreationOptional<string | null>;
+  declare reason: CreationOptional<string | null>;
+  declare expiresAt: CreationOptional<Date | null>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+}
+AccessOverride.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    userId: { type: DataTypes.UUID, allowNull: false },
+    permission: { type: DataTypes.STRING(60), allowNull: false },
+    effect: { type: DataTypes.ENUM("grant", "deny"), allowNull: false },
+    scopeType: { type: DataTypes.ENUM(...ACCESS_SCOPES), allowNull: false },
+    scopeId: { type: DataTypes.UUID, allowNull: true },
+    reason: { type: DataTypes.STRING(240), allowNull: true },
+    expiresAt: { type: DataTypes.DATE, allowNull: true },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "access_overrides", updatedAt: false },
+);
+AccessAssignment.belongsTo(AccessRole, { as: "role", foreignKey: "roleId" });
+
+// ---- Invitation ----------------------------------------------------------------
+// A pending invite to join the workspace (A106). Only a hash of the token is
+// stored; the link in the email carries the raw token.
+export class Invitation extends Model<InferAttributes<Invitation>, InferCreationAttributes<Invitation>> {
+  declare id: CreationOptional<string>;
+  declare email: string;
+  declare name: CreationOptional<string | null>;
+  declare tokenHash: string;
+  declare invitedBy: CreationOptional<string | null>;
+  declare departmentId: CreationOptional<string | null>;
+  declare teamId: CreationOptional<string | null>;
+  declare productId: CreationOptional<string | null>;
+  declare productTitle: CreationOptional<string | null>;
+  declare roleId: CreationOptional<string | null>;
+  declare jobTitles: CreationOptional<string[]>;
+  declare source: CreationOptional<string>;
+  declare expiresAt: Date;
+  declare acceptedAt: CreationOptional<Date | null>;
+  declare acceptedUserId: CreationOptional<string | null>;
+  declare revokedAt: CreationOptional<Date | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+Invitation.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    email: { type: DataTypes.STRING, allowNull: false },
+    name: { type: DataTypes.STRING(120), allowNull: true },
+    tokenHash: { type: DataTypes.STRING(64), allowNull: false, unique: true },
+    invitedBy: { type: DataTypes.UUID, allowNull: true },
+    departmentId: { type: DataTypes.UUID, allowNull: true },
+    teamId: { type: DataTypes.UUID, allowNull: true },
+    productId: { type: DataTypes.UUID, allowNull: true },
+    productTitle: { type: DataTypes.STRING(80), allowNull: true },
+    roleId: { type: DataTypes.UUID, allowNull: true },
+    jobTitles: { type: DataTypes.ARRAY(DataTypes.STRING(40)), allowNull: false, defaultValue: [] },
+    source: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "manual" },
+    expiresAt: { type: DataTypes.DATE, allowNull: false },
+    acceptedAt: { type: DataTypes.DATE, allowNull: true },
+    acceptedUserId: { type: DataTypes.UUID, allowNull: true },
+    revokedAt: { type: DataTypes.DATE, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "invitations" },
+);
+
+// ---- LoginEvent ------------------------------------------------------------
+// One row per sign-in attempt (success or failure), for the "login history"
+// screen and security review. userId is null when the email matched no account.
+export const LOGIN_EVENT_KINDS = ["login", "register", "failed"] as const;
+export type LoginEventKind = (typeof LOGIN_EVENT_KINDS)[number];
+
+export class LoginEvent extends Model<InferAttributes<LoginEvent>, InferCreationAttributes<LoginEvent>> {
+  declare id: CreationOptional<string>;
+  declare userId: CreationOptional<string | null>;
+  declare email: string;
+  declare kind: LoginEventKind;
+  declare sessionId: CreationOptional<string | null>;
+  declare ip: CreationOptional<string | null>;
+  declare userAgent: CreationOptional<string | null>;
+  declare device: CreationOptional<string | null>;
+  declare platform: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+}
+LoginEvent.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    userId: { type: DataTypes.UUID, allowNull: true },
+    email: { type: DataTypes.STRING, allowNull: false },
+    kind: { type: DataTypes.ENUM(...LOGIN_EVENT_KINDS), allowNull: false },
+    sessionId: { type: DataTypes.STRING, allowNull: true },
+    ip: { type: DataTypes.STRING, allowNull: true },
+    userAgent: { type: DataTypes.STRING(400), allowNull: true },
+    device: { type: DataTypes.STRING(120), allowNull: true },
+    platform: { type: DataTypes.STRING(20), allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "login_events", updatedAt: false },
+);
+
+// ---- DeviceToken -----------------------------------------------------------
+// A phone that can receive push notifications for a user (Expo push token).
+// A token belongs to whoever last registered it on that device; disabledAt is
+// set when Expo reports the app was uninstalled (DeviceNotRegistered).
+export const DEVICE_PLATFORMS = ["ios", "android", "web"] as const;
+export type DevicePlatform = (typeof DEVICE_PLATFORMS)[number];
+
+export class DeviceToken extends Model<InferAttributes<DeviceToken>, InferCreationAttributes<DeviceToken>> {
+  declare id: CreationOptional<string>;
+  declare userId: string;
+  declare token: string;
+  declare platform: DevicePlatform;
+  declare deviceName: CreationOptional<string | null>;
+  declare appVersion: CreationOptional<string | null>;
+  declare lastSeenAt: CreationOptional<Date>;
+  declare disabledAt: CreationOptional<Date | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+DeviceToken.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    userId: { type: DataTypes.UUID, allowNull: false },
+    token: { type: DataTypes.STRING(255), allowNull: false, unique: true },
+    platform: { type: DataTypes.ENUM(...DEVICE_PLATFORMS), allowNull: false },
+    deviceName: { type: DataTypes.STRING(120), allowNull: true },
+    appVersion: { type: DataTypes.STRING(40), allowNull: true },
+    lastSeenAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    disabledAt: { type: DataTypes.DATE, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "device_tokens" },
 );
 
 // ---- CustomRole ------------------------------------------------------------
@@ -1094,7 +1551,6 @@ const TaskLabels = through("task_labels");
 const IssueAssignees = through("issue_assignees");
 const IssueLabels = through("issue_labels");
 const CommentMentions = through("comment_mentions");
-const MeetingAttendees = through("meeting_attendees");
 
 // ---- Associations ---------------------------------------------------------
 Department.belongsTo(User, { as: "head", foreignKey: "headId" });
@@ -1138,7 +1594,7 @@ Comment.belongsTo(User, { as: "author", foreignKey: "authorId" });
 Comment.belongsToMany(User, { through: CommentMentions, as: "mentions", foreignKey: "commentId", otherKey: "userId" });
 
 Meeting.belongsTo(User, { as: "organizer", foreignKey: "organizerId" });
-Meeting.belongsToMany(User, { through: MeetingAttendees, as: "attendees", foreignKey: "meetingId", otherKey: "userId" });
+Meeting.belongsToMany(User, { through: MeetingAttendee, as: "attendees", foreignKey: "meetingId", otherKey: "userId" });
 
 User.hasOne(NotificationPreference, { as: "preferences", foreignKey: "userId" });
 NotificationPreference.belongsTo(User, { foreignKey: "userId" });
@@ -1150,6 +1606,20 @@ User.hasOne(GithubAccount, { as: "githubAccount", foreignKey: "userId" });
 GithubAccount.belongsTo(User, { foreignKey: "userId" });
 
 Project.hasMany(ProjectRepo, { as: "repos", foreignKey: "projectId" });
+
+// Products and teams (A101, A102).
+const TeamMembers = through("team_members");
+const TeamProjects = through("team_projects");
+Product.belongsTo(User, { as: "owner", foreignKey: "ownerId" });
+Product.hasMany(Project, { as: "projects", foreignKey: "productId" });
+Project.belongsTo(Product, { as: "product", foreignKey: "productId" });
+Product.belongsToMany(User, { through: ProductMember, as: "members", foreignKey: "productId", otherKey: "userId" });
+User.belongsToMany(Product, { through: ProductMember, as: "products", foreignKey: "userId", otherKey: "productId" });
+Team.belongsTo(User, { as: "lead", foreignKey: "leadId" });
+Team.belongsToMany(User, { through: TeamMembers, as: "members", foreignKey: "teamId", otherKey: "userId" });
+User.belongsToMany(Team, { through: TeamMembers, as: "teams", foreignKey: "userId", otherKey: "teamId" });
+Team.belongsToMany(Project, { through: TeamProjects, as: "projects", foreignKey: "teamId", otherKey: "projectId" });
+Project.belongsToMany(Team, { through: TeamProjects, as: "teams", foreignKey: "projectId", otherKey: "teamId" });
 ProjectRepo.belongsTo(Project, { foreignKey: "projectId" });
 
 BlogChannel.belongsTo(Project, { as: "project", foreignKey: "projectId" });
@@ -1323,6 +1793,169 @@ ProjectCommit.belongsTo(User, { as: "author", foreignKey: "authorUserId" });
 ProjectCommit.belongsTo(Project, { as: "project", foreignKey: "projectId" });
 Project.hasMany(ProjectCommit, { as: "commits", foreignKey: "projectId" });
 
+// ---- Task workflow (A202, A203, A204) --------------------------------------
+export class TaskTemplate extends Model<InferAttributes<TaskTemplate>, InferCreationAttributes<TaskTemplate>> {
+  declare id: CreationOptional<string>;
+  declare name: string;
+  declare title: CreationOptional<string>;
+  declare description: CreationOptional<string>;
+  declare expectedDeliverable: CreationOptional<string>;
+  declare priority: CreationOptional<Priority | null>;
+  declare productId: CreationOptional<string | null>;
+  declare projectId: CreationOptional<string | null>;
+  declare departmentId: CreationOptional<string | null>;
+  declare reviewerId: CreationOptional<string | null>;
+  declare defaultDueDays: CreationOptional<number | null>;
+  declare checklist: CreationOptional<string[]>;
+  declare labelIds: CreationOptional<string[]>;
+  declare createdBy: CreationOptional<string | null>;
+  declare archivedAt: CreationOptional<Date | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+TaskTemplate.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    name: { type: DataTypes.STRING(120), allowNull: false },
+    title: { type: DataTypes.STRING, allowNull: false, defaultValue: "" },
+    description: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    expectedDeliverable: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    priority: { type: DataTypes.STRING(10), allowNull: true },
+    productId: { type: DataTypes.UUID, allowNull: true },
+    projectId: { type: DataTypes.UUID, allowNull: true },
+    departmentId: { type: DataTypes.UUID, allowNull: true },
+    reviewerId: { type: DataTypes.UUID, allowNull: true },
+    defaultDueDays: { type: DataTypes.INTEGER, allowNull: true },
+    checklist: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    labelIds: { type: DataTypes.ARRAY(DataTypes.UUID), allowNull: false, defaultValue: [] },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    archivedAt: { type: DataTypes.DATE, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "task_templates" },
+);
+
+export class TaskGroupAssignment extends Model<InferAttributes<TaskGroupAssignment>, InferCreationAttributes<TaskGroupAssignment>> {
+  declare id: CreationOptional<string>;
+  declare taskId: string;
+  declare groupType: string;
+  declare groupId: string;
+  declare userIds: CreationOptional<string[]>;
+  declare createdBy: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+TaskGroupAssignment.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    taskId: { type: DataTypes.UUID, allowNull: false },
+    groupType: { type: DataTypes.STRING(12), allowNull: false },
+    groupId: { type: DataTypes.UUID, allowNull: false },
+    userIds: { type: DataTypes.ARRAY(DataTypes.UUID), allowNull: false, defaultValue: [] },
+    createdBy: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "task_group_assignments" },
+);
+
+export const SUBMISSION_STATUSES = ["pending", "approved", "rejected", "revision_required", "withdrawn"] as const;
+export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
+
+export class TaskSubmission extends Model<InferAttributes<TaskSubmission>, InferCreationAttributes<TaskSubmission>> {
+  declare id: CreationOptional<string>;
+  declare taskId: string;
+  declare round: CreationOptional<number>;
+  declare submittedBy: CreationOptional<string | null>;
+  declare reviewerId: CreationOptional<string | null>;
+  declare notes: CreationOptional<string>;
+  declare links: CreationOptional<{ title?: string; url: string }[]>;
+  declare evidence: CreationOptional<{ label: string; done: boolean }[]>;
+  declare attachmentIds: CreationOptional<string[]>;
+  declare status: CreationOptional<SubmissionStatus>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+TaskSubmission.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    taskId: { type: DataTypes.UUID, allowNull: false },
+    round: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+    submittedBy: { type: DataTypes.UUID, allowNull: true },
+    reviewerId: { type: DataTypes.UUID, allowNull: true },
+    notes: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    links: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    evidence: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    attachmentIds: { type: DataTypes.ARRAY(DataTypes.UUID), allowNull: false, defaultValue: [] },
+    status: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "pending" },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "task_submissions" },
+);
+
+export const REVIEW_DECISIONS = ["approve", "reject", "request_revision", "reassign"] as const;
+export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
+
+export class TaskReview extends Model<InferAttributes<TaskReview>, InferCreationAttributes<TaskReview>> {
+  declare id: CreationOptional<string>;
+  declare taskId: string;
+  declare submissionId: CreationOptional<string | null>;
+  declare reviewerId: CreationOptional<string | null>;
+  declare decision: ReviewDecision;
+  declare feedback: CreationOptional<string>;
+  declare newReviewerId: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+TaskReview.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    taskId: { type: DataTypes.UUID, allowNull: false },
+    submissionId: { type: DataTypes.UUID, allowNull: true },
+    reviewerId: { type: DataTypes.UUID, allowNull: true },
+    decision: { type: DataTypes.STRING(20), allowNull: false },
+    feedback: { type: DataTypes.TEXT, allowNull: false, defaultValue: "" },
+    newReviewerId: { type: DataTypes.UUID, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "task_reviews" },
+);
+
+export class TaskStatusHistory extends Model<InferAttributes<TaskStatusHistory>, InferCreationAttributes<TaskStatusHistory>> {
+  declare id: CreationOptional<string>;
+  declare taskId: string;
+  declare fromStatus: CreationOptional<string | null>;
+  declare toStatus: string;
+  declare actorId: CreationOptional<string | null>;
+  declare note: CreationOptional<string | null>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+TaskStatusHistory.init(
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    taskId: { type: DataTypes.UUID, allowNull: false },
+    fromStatus: { type: DataTypes.STRING(20), allowNull: true },
+    toStatus: { type: DataTypes.STRING(20), allowNull: false },
+    actorId: { type: DataTypes.UUID, allowNull: true },
+    note: { type: DataTypes.TEXT, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: "task_status_history" },
+);
+
+const TaskDependencies = through("task_dependencies");
+Task.belongsToMany(Task, { through: TaskDependencies, as: "dependencies", foreignKey: "taskId", otherKey: "dependsOnId" });
+Task.belongsToMany(Task, { through: TaskDependencies, as: "dependents", foreignKey: "dependsOnId", otherKey: "taskId" });
+Task.hasMany(TaskGroupAssignment, { as: "groupAssignments", foreignKey: "taskId" });
+Task.hasMany(TaskSubmission, { as: "submissions", foreignKey: "taskId" });
+Task.belongsTo(User, { as: "reviewer", foreignKey: "reviewerId" });
+TaskSubmission.belongsTo(Task, { foreignKey: "taskId" });
+TaskReview.belongsTo(Task, { foreignKey: "taskId" });
 // ---- Servers ---------------------------------------------------------------
 // The VPSs behind our projects, reached over SSH by the server console. See
 // modules/servers/bootstrap.ts for what the console can and can't do on a box.

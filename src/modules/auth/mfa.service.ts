@@ -4,15 +4,18 @@ import { Op } from "sequelize";
 import { badRequest, notFound, unauthorized, AppError } from "../../lib/errors";
 import { decryptSecret, encryptSecret } from "../../lib/crypto";
 import { generateTotpSecret, otpauthUri, verifyTotp } from "../../lib/totp";
-import { revokeAllRefreshTokens } from "../../lib/jwt";
+import { revokeAllRefreshTokens, type ClientInfo } from "../../lib/jwt";
+import { audit } from "../../lib/audit";
 import { redis } from "../../redis/client";
 import { sequelize } from "../../db/sequelize";
 import { MfaRecoveryCode, User } from "../../models";
 import {
+  assertActive,
   completeSession,
   consumeChallenge,
   failChallenge,
   readChallenge,
+  recordLogin,
   type AuthStep,
 } from "./session";
 
@@ -137,9 +140,10 @@ export const mfaService = {
   // Enrollment, step 2: a valid code proves the app holds the secret. MFA turns
   // on, recovery codes are issued (shown this once), every other session is
   // signed out — none of them passed a second factor — and this one begins.
-  async confirmSetup(challengeToken: string, code: string): Promise<AuthStep> {
+  async confirmSetup(challengeToken: string, code: string, client?: ClientInfo): Promise<AuthStep> {
     const challenge = await readChallenge(challengeToken, "mfa_setup");
     const user = await loadUser(challenge.userId);
+    assertActive(user);
     if (user.totpEnabled) throw badRequest("Two-factor authentication is already on");
 
     const step = verifyTotp(secretOf(user), code.trim());
@@ -156,24 +160,28 @@ export const mfaService = {
     await consumeChallenge(challengeToken);
     await revokeAllRefreshTokens(user.id);
     console.info(`[mfa] enrolled ${user.id}`);
+    await audit({ actorId: user.id, action: "user.mfa.enroll", target: { type: "user", id: user.id } });
 
-    return { ...(await completeSession(user)), recoveryCodes };
+    return { ...(await completeSession(user, client)), recoveryCodes };
   },
 
   // Sign-in second factor.
-  async verifyChallenge(challengeToken: string, code: string): Promise<AuthStep> {
+  async verifyChallenge(challengeToken: string, code: string, client?: ClientInfo): Promise<AuthStep> {
     const challenge = await readChallenge(challengeToken, "mfa_challenge");
     await assertNotLockedOut(challenge.userId);
     const user = await loadUser(challenge.userId);
+    assertActive(user); // they may have been suspended since entering the password
 
     if (!(await verifySecondFactor(user, code))) {
       await recordFailure(user.id);
       await failChallenge(challengeToken, challenge);
+      recordLogin("failed", user.email, user.id, client);
       throw badRequest("That code isn't right");
     }
-    await consumeChallenge(challengeToken);
+    // One challenge makes one session, even if two requests arrive together.
+    if (!(await consumeChallenge(challengeToken))) throw unauthorized("Your sign-in session expired. Please sign in again.");
     await redis.del(`${FAIL_PREFIX}${user.id}`);
-    return completeSession(user);
+    return completeSession(user, client);
   },
 
   async status(userId: string) {

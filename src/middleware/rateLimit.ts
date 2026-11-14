@@ -4,10 +4,10 @@ import { AppError } from "../lib/errors";
 
 // Fixed-window rate limiter backed by Redis. Keyed by client IP + a prefix so
 // different routes get independent budgets. Fails open if Redis is unavailable.
-export function rateLimit(opts: { windowSec: number; max: number; keyPrefix: string }) {
+export function rateLimit(opts: { windowSec: number; max: number; keyPrefix: string; key?: (req: Request) => string }) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown";
-    const key = `rl:${opts.keyPrefix}:${ip}`;
+    const key = `rl:${opts.keyPrefix}:${opts.key ? opts.key(req) : ip}`;
     try {
       const count = await redis.incr(key);
       if (count === 1) await redis.expire(key, opts.windowSec);

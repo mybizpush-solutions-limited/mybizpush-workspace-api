@@ -1,22 +1,17 @@
 import { forbidden, notFound } from "./errors";
 import { Department, Project, User, isOrgManager } from "../models";
+import { can } from "../modules/access/engine";
 
 export type Auth = { sub: string; accessLevel: string };
 
-// "Can this person run the project?" — its manager, the head of any department
-// working on it, or an org manager (chief / executive admin). This is the gate
-// for editing a project and for appointing its blog editors.
+// "Can this person run the project?" Decided by the permission engine
+// (project.manage at the project or any scope above it). Parity with the old
+// rule: org managers hold it org wide; project managers and the heads of
+// departments working on the project hold it through derived roles (A104).
 export async function canManageProject(projectId: string, auth: Auth): Promise<boolean> {
-  if (isOrgManager(auth.accessLevel)) return true;
-  const project = await Project.findByPk(projectId, {
-    include: [
-      { model: Department, as: "departments", attributes: ["headId"], through: { attributes: [] } },
-    ],
-  });
-  if (!project) throw notFound("Project not found");
-  if (project.managerId === auth.sub) return true;
-  const depts = (project.get("departments") as Department[] | undefined) ?? [];
-  return depts.some((d) => d.headId === auth.sub);
+  const exists = await Project.count({ where: { id: projectId } });
+  if (!exists) throw notFound("Project not found");
+  return can(auth, "project.manage", { type: "project", id: projectId });
 }
 
 export async function assertCanManageProject(projectId: string, auth: Auth): Promise<void> {

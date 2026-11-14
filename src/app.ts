@@ -14,12 +14,13 @@ import { commentsRouter } from "./modules/comments/comments.routes";
 import { activityRouter } from "./modules/activity/activity.routes";
 import { notificationsRouter } from "./modules/notifications/notifications.routes";
 import { preferencesRouter } from "./modules/preferences/preferences.routes";
-import { meetingsRouter } from "./modules/meetings/meetings.routes";
+import { calendarRouter, meetingsRouter } from "./modules/meetings/meetings.routes";
 import { labelsRouter } from "./modules/labels/labels.routes";
 import { rolesRouter } from "./modules/roles/roles.routes";
 import { meRouter } from "./modules/me/me.routes";
 import { attachmentsRouter } from "./modules/attachments/attachments.routes";
 import { aiRouter } from "./modules/ai/ai.routes";
+import { aiCommandsRouter } from "./modules/ai/commands/commands.routes";
 import { digestsRouter } from "./modules/digests/digests.routes";
 import { googleRouter } from "./modules/google/google.routes";
 import { githubRouter } from "./modules/github/github.routes";
@@ -31,6 +32,23 @@ import { databasesRouter } from "./modules/databases/databases.routes";
 import { serversRouter } from "./modules/servers/servers.routes";
 import { reportsRouter } from "./modules/reports/reports.routes";
 import { meetingReportsRouter } from "./modules/reports/meetingReports.routes";
+import { auditRouter } from "./modules/audit/audit.routes";
+import { productsRouter } from "./modules/products/products.routes";
+import { teamsRouter } from "./modules/teams/teams.routes";
+import { accessRouter } from "./modules/access/access.routes";
+import { invitationsPublicRouter, staffRouter } from "./modules/staff/staff.routes";
+import { lookupRouter, searchRouter } from "./modules/lookup/lookup.routes";
+import { jobsRouter } from "./modules/jobs/jobs.routes";
+import { devicesRouter } from "./modules/devices/devices.routes";
+import { syncRouter } from "./modules/sync/sync.routes";
+import { tasksExtRouter } from "./modules/tasks/tasks.routes";
+import { groupsRouter } from "./modules/groups/groups.routes";
+import { conversationsRouter, messagesRouter } from "./modules/chat/chat.routes";
+import { announcementsRouter } from "./modules/announcements/announcements.routes";
+import { emailWebhookRouter, marketingRouter, trackingRouter } from "./modules/marketing/marketing.routes";
+import { gmailRouter, integrationsRouter, productGithubRouter } from "./modules/integrations/integrations.routes";
+import { metaRouter, organizationRouter } from "./modules/organization/organization.routes";
+import { appraisalsRouter, queriesRouter, reportsV2Router, targetsRouter } from "./modules/performance/performance.routes";
 
 // All versioned business endpoints live under this prefix.
 export const API_PREFIX = "/api/v1";
@@ -80,16 +98,37 @@ export function createApp() {
   // Report endpoints share the /projects prefix (distinct sub-paths) so URLs
   // read /api/v1/projects/:id/report/staff/:userId.
   v1.use("/projects", reportsRouter);
+  // Goes first: it owns /tasks/templates, /tasks/reports and /tasks/workflow, and
+  // falls through to the shared router for everything else.
+  v1.use("/tasks", tasksExtRouter);
   v1.use("/tasks", tasksRouter);
+  v1.use("/groups", groupsRouter);
+  v1.use("/conversations", conversationsRouter);
+  v1.use("/messages", messagesRouter);
+  v1.use("/announcements", announcementsRouter);
+  v1.use("/queries", queriesRouter);
+  v1.use("/targets", targetsRouter);
+  v1.use("/appraisals", appraisalsRouter);
+  v1.use("/reports", reportsV2Router);
+  v1.use("/t", trackingRouter);
+  v1.use("/webhooks", emailWebhookRouter);
+  v1.use("/organization", organizationRouter);
+  v1.use("/meta", metaRouter);
+  v1.use("/integrations", integrationsRouter);
+  v1.use("/gmail", gmailRouter);
+  v1.use("/products", productGithubRouter);
+  v1.use(marketingRouter);
   v1.use("/issues", issuesRouter);
   v1.use("/comments", commentsRouter);
   v1.use("/activity", activityRouter);
   v1.use("/notifications", notificationsRouter);
   v1.use("/preferences", preferencesRouter);
   v1.use("/meetings", meetingsRouter);
+  v1.use("/calendar", calendarRouter);
   v1.use("/labels", labelsRouter);
   v1.use("/roles", rolesRouter);
   v1.use("/attachments", attachmentsRouter);
+  v1.use("/ai", aiCommandsRouter);
   v1.use("/ai", aiRouter);
   v1.use("/digests", digestsRouter);
   v1.use("/google", googleRouter);
@@ -99,6 +138,17 @@ export function createApp() {
   v1.use("/databases", databasesRouter);
   v1.use("/servers", serversRouter);
   v1.use("/meeting-reports", meetingReportsRouter);
+  v1.use("/audit", auditRouter);
+  v1.use("/products", productsRouter);
+  v1.use("/teams", teamsRouter);
+  v1.use("/access", accessRouter);
+  v1.use("/staff", staffRouter);
+  v1.use("/invitations", invitationsPublicRouter);
+  v1.use("/lookup", lookupRouter);
+  v1.use("/search", searchRouter);
+  v1.use("/jobs", jobsRouter);
+  v1.use("/devices", devicesRouter);
+  v1.use("/sync", syncRouter);
   app.use(API_PREFIX, v1);
 
   // Fallbacks

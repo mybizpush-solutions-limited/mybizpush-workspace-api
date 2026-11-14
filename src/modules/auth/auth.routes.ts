@@ -35,7 +35,12 @@ authRouter.post("/login", loginLimiter, validateBody(loginSchema), asyncHandler(
 // Sign-in steps after the password. Each takes the challenge token the previous
 // step returned; none accepts a bearer token, and only /mfa/confirm and
 // /mfa/verify can end in a session.
-const mfaLimiter = rateLimit({ windowSec: 600, max: 20, keyPrefix: "mfa" });
+// Sign-in steps can only be limited by address, and a whole office shares one,
+// so this allows more: each challenge already ends after 5 wrong codes and each
+// account locks after 10 (mfa.service), which is what stops guessing. Signed-in
+// calls are limited per person instead, so a colleague isn't affected.
+const mfaLimiter = rateLimit({ windowSec: 600, max: 100, keyPrefix: "mfa" });
+const mfaAccountLimiter = rateLimit({ windowSec: 600, max: 20, keyPrefix: "mfa-account", key: (req) => req.auth?.sub ?? req.ip ?? "unknown" });
 authRouter.post(
   "/password/complete-change",
   loginLimiter,
@@ -51,7 +56,7 @@ authRouter.get("/mfa/status", requireAuth, asyncHandler(authController.mfaStatus
 authRouter.post(
   "/mfa/recovery-codes",
   requireAuth,
-  mfaLimiter,
+  mfaAccountLimiter,
   validateBody(mfaCodeSchema),
   asyncHandler(authController.mfaRegenerateRecoveryCodes),
 );
@@ -59,6 +64,12 @@ authRouter.post(
 authRouter.post("/refresh", asyncHandler(authController.refresh));
 authRouter.post("/logout", asyncHandler(authController.logout));
 authRouter.get("/me", requireAuth, asyncHandler(authController.me));
+
+// Sessions and devices (A002). "Others" keeps the caller's own session.
+authRouter.get("/sessions", requireAuth, asyncHandler(authController.sessions));
+authRouter.post("/sessions/revoke-others", requireAuth, asyncHandler(authController.revokeOtherSessions));
+authRouter.delete("/sessions/:id", requireAuth, asyncHandler(authController.revokeSession));
+authRouter.get("/login-history", requireAuth, asyncHandler(authController.loginHistory));
 
 authRouter.post(
   "/forgot-password",

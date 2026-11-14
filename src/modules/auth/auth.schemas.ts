@@ -2,7 +2,7 @@ import { z } from "zod";
 import { passwordPolicyFailures, passwordPolicyMessage } from "../../lib/passwordPolicy";
 
 // Every password a user sets goes through the shared policy.
-const newPassword = z
+export const newPassword = z
   .string()
   .max(200)
   .superRefine((value, ctx) => {

@@ -6,7 +6,7 @@
  * Run with: npm run seed
  */
 import { sequelize } from "./sequelize";
-import { Department, Issue, Label, Project, Task, User } from "../models";
+import { Department, Issue, Label, Product, ProductMember, Project, Task, User } from "../models";
 import { NotificationPreference } from "../models";
 import { hashPassword } from "../lib/password";
 import "../models";
@@ -129,6 +129,15 @@ async function seed() {
     });
     if (created) await (issue as any).setAssignees(spec.assignees.map((e) => users[e]!.id));
   }
+
+  // The only sending address the owner has given. Other products stay empty and use
+  // the organization default.
+  const owner = users["ada@mybizpush.com"]!.id;
+  const [product] = await Product.findOrCreate({
+    where: { name: "MyBizPush" },
+    defaults: { name: "MyBizPush", slug: "mybizpush", description: "The MyBizPush platform.", stage: "live", ownerId: owner, senderName: "MyBizPush", senderEmail: "info@mybizpush.com" },
+  });
+  await ProductMember.findOrCreate({ where: { productId: product.id, userId: owner }, defaults: { productId: product.id, userId: owner, title: "Owner" } });
 
   console.info("✅ Seed complete. Login with any seeded email and password: Password123!");
   await sequelize.close();

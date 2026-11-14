@@ -17,6 +17,7 @@ import {
   searchUserOpenPrs,
 } from "../../lib/github.features";
 import { GithubAccount } from "../../models";
+import { withResult } from "../integrations/integrations.pure";
 import { githubService } from "./github.service";
 import { githubOauthService } from "./github.oauth.service";
 import { githubSyncService } from "./github.sync.service";
@@ -29,7 +30,8 @@ githubRouter.get(
   "/auth-url",
   requireAuth,
   asyncHandler(async (req, res) => {
-    res.json({ url: await githubOauthService.createAuthUrl(req.auth!.sub) });
+    const returnTo = typeof req.query.returnTo === "string" ? req.query.returnTo : undefined;
+    res.json({ url: await githubOauthService.createAuthUrl(req.auth!.sub, { returnTo }) });
   }),
 );
 
@@ -162,11 +164,12 @@ githubRouter.get(
   asyncHandler(async (req, res) => {
     const code = typeof req.query.code === "string" ? req.query.code : "";
     const state = typeof req.query.state === "string" ? req.query.state : "";
+    const returnTo = await githubOauthService.peekReturnTo(state).catch(() => null);
     try {
       await githubOauthService.handleCallback(code, state);
-      res.redirect(`${env.APP_URL}/profile?github=connected`);
+      res.redirect(returnTo ? withResult(returnTo, "github", "connected") : `${env.APP_URL}/profile?github=connected`);
     } catch {
-      res.redirect(`${env.APP_URL}/profile?github=error`);
+      res.redirect(returnTo ? withResult(returnTo, "github", "error") : `${env.APP_URL}/profile?github=error`);
     }
   }),
 );

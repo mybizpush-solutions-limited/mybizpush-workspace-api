@@ -3,7 +3,7 @@ import multer from "multer";
 import { asyncHandler, badRequest } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { MAX_ATTACHMENT_MB } from "../../lib/cloudinary";
-import type { ItemType } from "../../models";
+import { RECORD_TYPES, type RecordType } from "../../models";
 import { attachmentsService } from "./attachments.service";
 
 export const attachmentsRouter = Router();
@@ -15,10 +15,10 @@ const upload = multer({
   limits: { fileSize: MAX_ATTACHMENT_MB * 1024 * 1024 },
 });
 
-function parseItem(itemId: unknown, itemType: unknown): { itemId: string; itemType: ItemType } {
+function parseItem(itemId: unknown, itemType: unknown): { itemId: string; itemType: RecordType } {
   if (typeof itemId !== "string" || !itemId) throw badRequest("itemId is required");
-  if (itemType !== "task" && itemType !== "issue") throw badRequest("itemType must be 'task' or 'issue'");
-  return { itemId, itemType };
+  if (!RECORD_TYPES.includes(itemType as RecordType)) throw badRequest(`itemType must be one of ${RECORD_TYPES.join(", ")}`);
+  return { itemId, itemType: itemType as RecordType };
 }
 
 attachmentsRouter.get(
@@ -26,7 +26,7 @@ attachmentsRouter.get(
   asyncHandler(async (req, res) => {
     const itemId = typeof req.query.itemId === "string" ? req.query.itemId : undefined;
     if (!itemId) throw badRequest("itemId query param is required");
-    res.json({ attachments: await attachmentsService.forItem(itemId) });
+    res.json({ attachments: await attachmentsService.forItem(itemId, req.auth!.sub) });
   }),
 );
 
@@ -51,10 +51,17 @@ attachmentsRouter.post(
   }),
 );
 
+attachmentsRouter.get(
+  "/:id/url",
+  asyncHandler(async (req, res) => {
+    res.json(await attachmentsService.link(req.params.id!, req.auth!.sub));
+  }),
+);
+
 attachmentsRouter.delete(
   "/:id",
   asyncHandler(async (req, res) => {
-    await attachmentsService.remove(req.params.id!);
+    await attachmentsService.remove(req.params.id!, req.auth!.sub);
     res.status(204).end();
   }),
 );
