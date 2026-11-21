@@ -5,7 +5,6 @@ import { uploadBuffer } from "../../lib/cloudinary";
 import { isOAuthConfigured } from "../../lib/github";
 import { isGoogleConfigured } from "../../lib/google";
 import { usersRepo, type PublicUser } from "../users/users.repo";
-import { rolesService } from "../roles/roles.service";
 
 const ALLOWED_AVATAR_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
 const MAX_AVATAR_MB = 8;
@@ -25,20 +24,12 @@ async function publicUser(userId: string): Promise<PublicUser> {
 }
 
 export const profileService = {
-  // Patch the caller's own name / roles. Roles are validated against the shared
-  // catalog (built-ins + exec-added roles) so the picker can't smuggle in
-  // arbitrary strings, and are stored in their canonical spelling.
-  async updateProfile(
-    userId: string,
-    patch: { name?: string; roles?: string[] },
-  ): Promise<PublicUser> {
+  // Patch the caller's own name. Job titles are set by staff admins only.
+  async updateProfile(userId: string, patch: { name?: string }): Promise<PublicUser> {
     const user = await User.findByPk(userId);
     if (!user) throw notFound("User not found");
 
     if (patch.name !== undefined) user.name = patch.name;
-    if (patch.roles !== undefined) {
-      user.roles = await rolesService.normalize(patch.roles);
-    }
     await user.save();
     return publicUser(userId);
   },
@@ -46,7 +37,7 @@ export const profileService = {
   // A new secondary address starts proving itself, and takes effect only once the
   // code comes back: it can sign in, so it can't just be claimed. Checked first, so
   // a rejected address doesn't leave half of the form saved.
-  async updateFull(userId: string, patch: { name?: string; phone?: string | null; secondaryEmail?: string | null; jobTitles?: string[] }) {
+  async updateFull(userId: string, patch: { name?: string; phone?: string | null; secondaryEmail?: string | null }) {
     const user = await User.findByPk(userId);
     if (!user) throw notFound("User not found");
     // Loaded here because the auth service reaches back into the users modules.
@@ -58,7 +49,7 @@ export const profileService = {
       await authService.requestSecondaryEmailOtp(userId, patch.secondaryEmail);
       secondaryEmailPending = patch.secondaryEmail.toLowerCase();
     }
-    await this.updateProfile(userId, { name: patch.name, roles: patch.jobTitles });
+    await this.updateProfile(userId, { name: patch.name });
     if (patch.phone !== undefined) await User.update({ phone: patch.phone }, { where: { id: userId } });
     return { user: await publicUser(userId), secondaryEmailPending };
   },

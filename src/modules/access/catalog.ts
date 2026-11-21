@@ -29,6 +29,7 @@ export const CATALOG: Resource[] = [
   { resource: "target", label: "Targets", actions: { create: "Create", assign: "Assign", update: "Update", evaluate: "Evaluate" } },
   { resource: "query", label: "Staff queries", actions: { issue: "Issue", respond: "Respond", review: "Review", resolve: "Resolve", view: "View all" } },
   { resource: "hr", label: "HR records", actions: { view: "View", edit: "Edit" } },
+  { resource: "attendance", label: "Attendance", actions: { view: "View everyone's", manage: "Manage offices" } },
   { resource: "report", label: "Reports", actions: { view: "View", generate: "Generate", export: "Export" } },
   { resource: "campaign", label: "Campaigns", actions: { create: "Create", import: "Import leads", approve: "Approve", send: "Send", view: "View analytics" } },
   { resource: "content", label: "Content", actions: { create: "Create", approve: "Approve", publish: "Publish" } },
@@ -113,7 +114,7 @@ export const SEED_ROLES: SeedRole[] = [
     description: "Staff records, queries and appraisals",
     system: false,
     defaultScope: "organization",
-    permissions: [...orgWork, "staff.create", "staff.edit", "staff.suspend", "staff.export", "staff.import", "hr.view", "hr.edit", "query.issue", "query.review", "query.resolve", "query.view", "announcement.draft", "announcement.publish", "event.create", "event.edit", "event.delete"],
+    permissions: [...orgWork, "staff.create", "staff.edit", "staff.suspend", "staff.export", "staff.import", "hr.view", "hr.edit", "query.issue", "query.review", "query.resolve", "query.view", "attendance.view", "attendance.manage", "announcement.draft", "announcement.publish", "event.create", "event.edit", "event.delete"],
   },
   { key: "email_marketer", name: "Email marketer", description: "Leads and campaigns for a product", system: false, defaultScope: "product", permissions: [...work, "campaign.create", "campaign.import", "campaign.send", "campaign.view", "content.create"] },
 ];

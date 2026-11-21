@@ -18,7 +18,9 @@ import {
   Team,
   User,
   type EmploymentStatus,
+  type WorkMode,
 } from "./staff.models";
+import { rolesService } from "../roles/roles.service";
 import { usersRepo, type PublicUser } from "../users/users.repo";
 import { usersService } from "../users/users.service";
 import { invalidateAccess } from "../access/engine";
@@ -79,7 +81,16 @@ export function serializeInvitation(inv: Invitation) {
 export const staffService = {
   async updateProfile(
     id: string,
-    patch: { name?: string; phone?: string | null; employeeId?: string | null; employmentStatus?: EmploymentStatus; dateJoined?: string | null; reportsToId?: string | null },
+    patch: {
+      name?: string;
+      phone?: string | null;
+      employeeId?: string | null;
+      employmentStatus?: EmploymentStatus;
+      dateJoined?: string | null;
+      reportsToId?: string | null;
+      workMode?: WorkMode;
+      jobTitles?: string[];
+    },
   ): Promise<{ before: PublicUser; after: PublicUser }> {
     const before = await usersRepo.publicById(id);
     if (!before) throw notFound("User not found");
@@ -96,6 +107,8 @@ export const staffService = {
         ...(patch.employmentStatus !== undefined ? { employmentStatus: patch.employmentStatus } : {}),
         ...(patch.dateJoined !== undefined ? { dateJoined: patch.dateJoined } : {}),
         ...(patch.reportsToId !== undefined ? { reportsToId: patch.reportsToId } : {}),
+        ...(patch.workMode !== undefined ? { workMode: patch.workMode } : {}),
+        ...(patch.jobTitles !== undefined ? { roles: await rolesService.normalize(patch.jobTitles) } : {}),
       },
       { where: { id } },
     );
