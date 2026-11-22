@@ -10,4 +10,5 @@ export {
   Team,
   User,
   type EmploymentStatus,
+  type WorkMode,
 } from "../../models";

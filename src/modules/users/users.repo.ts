@@ -28,6 +28,7 @@ export interface PublicUser {
   phone: string | null;
   employeeId: string | null;
   employmentStatus: "active" | "on_leave" | "contract" | "probation";
+  workMode: "onsite" | "remote" | "hybrid";
   status: "active" | "suspended";
   dateJoined: string | null;
   reportsToId: string | null;
@@ -57,6 +58,7 @@ export function toPublicUser(user: User): PublicUser {
     phone: user.phone ?? null,
     employeeId: user.employeeId ?? null,
     employmentStatus: user.employmentStatus ?? "active",
+    workMode: user.workMode ?? "onsite",
     status: user.status ?? "active",
     dateJoined: user.dateJoined ?? null,
     reportsToId: user.reportsToId ?? null,
