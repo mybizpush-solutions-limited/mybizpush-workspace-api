@@ -8,6 +8,7 @@ import {
 import { sequelize } from "../db/sequelize";
 import { TASK_STATUSES, type TaskStatus } from "./task-status";
 import { MeetingAttendee, type MeetingScope, type MeetingStatus, type MeetingType } from "./calendar";
+import { AttendanceRecord, Office, WORK_MODES, type WorkMode } from "./attendance";
 
 export * from "./task-status";
 export * from "./chat";
@@ -16,6 +17,7 @@ export * from "./performance";
 export * from "./marketing";
 export * from "./integrations";
 export * from "./account";
+export * from "./attendance";
 
 // Domain enums (kept in sync with ui/src/types/index.ts).
 export const ACCESS_LEVELS = ["member", "admin", "chief", "executive_admin"] as const;
@@ -95,6 +97,8 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   declare phone: CreationOptional<string | null>;
   declare employeeId: CreationOptional<string | null>;
   declare employmentStatus: CreationOptional<EmploymentStatus>;
+  // Onsite and hybrid staff check in at an office by QR code; remote staff don't.
+  declare workMode: CreationOptional<WorkMode>;
   declare status: CreationOptional<AccountStatus>;
   declare suspendedAt: CreationOptional<Date | null>;
   declare suspendedReason: CreationOptional<string | null>;
@@ -129,6 +133,7 @@ User.init(
     phone: { type: DataTypes.STRING(32), allowNull: true },
     employeeId: { type: DataTypes.STRING(40), allowNull: true, unique: true },
     employmentStatus: { type: DataTypes.ENUM(...EMPLOYMENT_STATUSES), allowNull: false, defaultValue: "active" },
+    workMode: { type: DataTypes.ENUM(...WORK_MODES), allowNull: false, defaultValue: "onsite" },
     status: { type: DataTypes.ENUM(...ACCOUNT_STATUSES), allowNull: false, defaultValue: "active" },
     suspendedAt: { type: DataTypes.DATE, allowNull: true },
     suspendedReason: { type: DataTypes.STRING(240), allowNull: true },
@@ -1553,6 +1558,8 @@ const IssueLabels = through("issue_labels");
 const CommentMentions = through("comment_mentions");
 
 // ---- Associations ---------------------------------------------------------
+AttendanceRecord.belongsTo(User, { as: "user", foreignKey: "userId" });
+AttendanceRecord.belongsTo(Office, { as: "office", foreignKey: "officeId" });
 Department.belongsTo(User, { as: "head", foreignKey: "headId" });
 Department.belongsToMany(User, { through: DepartmentMembers, as: "members", foreignKey: "departmentId", otherKey: "userId" });
 User.belongsToMany(Department, { through: DepartmentMembers, as: "departments", foreignKey: "userId", otherKey: "departmentId" });
