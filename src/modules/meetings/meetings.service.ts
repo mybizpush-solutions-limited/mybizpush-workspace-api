@@ -135,13 +135,23 @@ const fieldColumns = (f: MeetingFields) => ({
   ...(f.groups !== undefined ? { groups: f.groups } : {}),
 });
 
+// Attendee rows carry only userId; attach the person so clients can show who it is.
+async function attendeesWithPeople(meetingId: string) {
+  const rows = await MeetingAttendee.findAll({ where: { meetingId } });
+  const users = await User.findAll({ where: { id: rows.map((r) => r.userId) }, attributes: ["id", "name", "email", "avatarUrl", "avatarColor"] });
+  const byId = new Map(users.map((u) => [u.id, u]));
+  return rows.map((row) => {
+    const u = byId.get(row.userId);
+    return { ...serializeMeetingAttendee(row), user: u ? { id: u.id, name: u.name, email: u.email, avatarUrl: u.avatarUrl ?? null, avatarColor: u.avatarColor } : null };
+  });
+}
+
 async function reloadFull(id: string, withDetail = true) {
   const meeting = await Meeting.findByPk(id, withAttendees);
   if (!meeting) throw notFound("Meeting not found");
   const base = serializeMeeting(meeting);
   if (!withDetail) return base;
-  const rows = await MeetingAttendee.findAll({ where: { meetingId: id } });
-  return { ...base, attendees: rows.map(serializeMeetingAttendee) };
+  return { ...base, attendees: await attendeesWithPeople(id) };
 }
 
 const meetingFormat = (m: Meeting) => `${m.title}, ${m.startsAt.toISOString()}`;
@@ -442,7 +452,7 @@ export const meetingsService = {
       await MeetingAttendee.update({ attendance: e.status, attendanceMarkedBy: actorId }, { where: { meetingId, userId: e.userId } });
     }
     await announce(meetingId, meeting.organizerId);
-    return (await MeetingAttendee.findAll({ where: { meetingId } })).map(serializeMeetingAttendee);
+    return attendeesWithPeople(meetingId);
   },
 };
 
