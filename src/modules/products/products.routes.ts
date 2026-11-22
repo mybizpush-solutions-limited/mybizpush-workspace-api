@@ -1,6 +1,7 @@
 import { Router } from "express";
+import multer from "multer";
 import { z } from "zod";
-import { asyncHandler } from "../../lib/errors";
+import { asyncHandler, badRequest } from "../../lib/errors";
 import { audit } from "../../lib/audit";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
@@ -66,6 +67,19 @@ productsRouter.post(
     const product = await productsService.create(req.body, req.auth!);
     await audit({ req, action: "product.create", target: { type: "product", id: product.id }, after: { name: product.name, ownerId: product.ownerId, projectIds: product.projectIds, senderName: product.senderName, senderEmail: product.senderEmail } });
     res.status(201).json({ product });
+  }),
+);
+
+const logoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024 } });
+
+productsRouter.post(
+  "/:id/logo",
+  logoUpload.single("file"),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw badRequest("An image is required (multipart field 'file')");
+    const product = await productsService.setLogo(req.params.id!, { buffer: req.file.buffer, originalname: req.file.originalname, size: req.file.size }, req.auth!);
+    await audit({ req, action: "product.logo", target: { type: "product", id: product.id } });
+    res.json({ product });
   }),
 );
 

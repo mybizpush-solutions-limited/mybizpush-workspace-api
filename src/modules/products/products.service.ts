@@ -3,6 +3,7 @@ import { sequelize } from "../../db/sequelize";
 import { forbidden, notFound, badRequest } from "../../lib/errors";
 import { uniqueSlug } from "../../lib/slug";
 import { env } from "../../config/env";
+import { uploadBuffer } from "../../lib/cloudinary";
 import { AppError } from "../../lib/errors";
 import { SENDER_DOMAIN_ERROR, senderDomainAllowed } from "../marketing/campaign.render";
 import { productOwnDomains } from "../organization/organization.service";
@@ -158,6 +159,20 @@ export const productsService = {
       return p;
     });
     return this.byId(product.id);
+  },
+
+  // Product mark shown in the workspace switcher; one asset per product, replaced on each upload.
+  async setLogo(id: string, file: { buffer: Buffer; originalname: string; size: number }, auth: Auth): Promise<PublicProduct> {
+    await assertCanManage(id, auth);
+    const ext = file.originalname.slice(file.originalname.lastIndexOf(".")).toLowerCase();
+    if (![".png", ".jpg", ".jpeg", ".webp"].includes(ext)) throw badRequest("Logo must be a PNG, JPG or WebP image");
+    if (file.size > 4 * 1024 * 1024) throw badRequest("Logo must be 4MB or smaller");
+    const p = await Product.findByPk(id);
+    if (!p) throw notFound("Product not found");
+    const result = await uploadBuffer(file.buffer, { folder: `${env.CLOUDINARY_UPLOAD_FOLDER}/product-logos`, resourceType: "image", tags: ["product-logo", id], publicId: id });
+    p.logoUrl = result.secure_url;
+    await p.save();
+    return this.byId(id);
   },
 
   async update(
