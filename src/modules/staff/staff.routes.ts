@@ -6,7 +6,7 @@ import { audit } from "../../lib/audit";
 import { requireAuth, requirePermission } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { rateLimit } from "../../middleware/rateLimit";
-import { EMPLOYMENT_STATUSES } from "../../models";
+import { EMPLOYMENT_STATUSES, WORK_MODES } from "../../models";
 import { newPassword } from "../auth/auth.schemas";
 import { nextStep } from "../auth/session";
 import { serializeInvitation, staffService } from "./staff.service";
@@ -25,6 +25,9 @@ const profileSchema = z.object({
   employmentStatus: z.enum(EMPLOYMENT_STATUSES).optional(),
   dateJoined: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   reportsToId: z.string().uuid().nullable().optional(),
+  workMode: z.enum(WORK_MODES).optional(),
+  // Validated against the shared job-title catalog in staffService.updateProfile.
+  jobTitles: z.array(z.string().trim().min(1).max(40)).max(50).optional(),
 });
 
 const inviteOne = z.object({

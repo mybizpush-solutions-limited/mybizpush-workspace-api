@@ -41,6 +41,7 @@ import { lookupRouter, searchRouter } from "./modules/lookup/lookup.routes";
 import { jobsRouter } from "./modules/jobs/jobs.routes";
 import { devicesRouter } from "./modules/devices/devices.routes";
 import { syncRouter } from "./modules/sync/sync.routes";
+import { attendanceRouter } from "./modules/attendance/attendance.routes";
 import { tasksExtRouter } from "./modules/tasks/tasks.routes";
 import { groupsRouter } from "./modules/groups/groups.routes";
 import { conversationsRouter, messagesRouter } from "./modules/chat/chat.routes";
@@ -149,6 +150,7 @@ export function createApp() {
   v1.use("/jobs", jobsRouter);
   v1.use("/devices", devicesRouter);
   v1.use("/sync", syncRouter);
+  v1.use("/attendance", attendanceRouter);
   app.use(API_PREFIX, v1);
 
   // Fallbacks

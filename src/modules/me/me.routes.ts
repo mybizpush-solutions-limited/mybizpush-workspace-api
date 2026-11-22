@@ -54,10 +54,9 @@ meRouter.get("/badges", asyncHandler(async (req, res) => {
 }));
 
 // ---- Self-service profile + onboarding ------------------------------------
+// Job titles are assigned by staff admins (PATCH /staff/:id), never by the person.
 const profileSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
-  // Validated against the shared role catalog in profileService.updateProfile.
-  roles: z.array(z.string().trim().min(1).max(40)).max(50).optional(),
 });
 
 const avatarUpload = multer({
@@ -81,7 +80,6 @@ meRouter.patch(
       name: z.string().trim().min(1).max(120).optional(),
       phone: z.string().trim().max(32).nullable().optional(),
       secondaryEmail: z.string().trim().email().nullable().optional(),
-      jobTitles: z.array(z.string().trim().min(1).max(40)).max(50).optional(),
     }),
   ),
   asyncHandler(async (req, res) => {
