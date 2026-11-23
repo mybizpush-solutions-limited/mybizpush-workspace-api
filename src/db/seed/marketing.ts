@@ -5,7 +5,7 @@ import { dayAt, hash } from "./time";
 
 // Lead addresses use the reserved .example domain so nothing can ever be delivered.
 const LEADS: [name: string, company: string, list: string, tags: string[]][] = [
-  ["Adaeze Nwankwo", "Kudi Foods", "lagos", ["restaurant", "customer-story"]],
+  ["Adaeze Nwankwo", "Sample Foods Ltd", "lagos", ["restaurant", "customer-story"]],
   ["Babatunde Cole", "Cole and Sons Pharmacy", "lagos", ["pharmacy"]],
   ["Ngozi Ibe", "Glow Beauty Lounge", "lagos", ["beauty"]],
   ["Olumide Ajayi", "Ajayi Logistics", "lagos", ["logistics", "high-intent"]],
@@ -31,7 +31,7 @@ const LISTS = {
 const CONTENT = [
   { title: "How Lagos SMEs automate WhatsApp follow ups", type: "blog" as const, platform: "website" as const, status: "in_progress", writer: "bolu", designer: null, publishIn: 5 },
   { title: "Growth plan pricing carousel", type: "social_post" as const, platform: "instagram" as const, status: "in_design", writer: "seyi", designer: "bisi", publishIn: 3 },
-  { title: "Customer story: Kudi Foods", type: "video" as const, platform: "youtube" as const, status: "in_review", writer: "bolu", designer: "tobi", publishIn: 8 },
+  { title: "Customer story video", type: "video" as const, platform: "youtube" as const, status: "in_review", writer: "bolu", designer: "tobi", publishIn: 8 },
   { title: "November product update newsletter", type: "newsletter" as const, platform: "email" as const, status: "scheduled", writer: "amaka", designer: "bisi", publishIn: 2 },
   { title: "Black Friday teaser", type: "social_post" as const, platform: "x" as const, status: "published", writer: "seyi", designer: "bisi", publishIn: -3 },
   { title: "Webinar: selling on autopilot recap", type: "blog" as const, platform: "website" as const, status: "idea", writer: "bolu", designer: null, publishIn: null },
@@ -40,7 +40,7 @@ const CONTENT = [
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 export async function seedMarketing(ctx: SeedContext): Promise<void> {
-  const product = ctx.product("mybizpush");
+  const product = ctx.product("plemuz");
   const marketer = ctx.id("amaka");
   const lists = new Map<string, string>();
   for (const [key, spec] of Object.entries(LISTS)) {
