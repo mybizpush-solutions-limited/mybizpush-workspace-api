@@ -53,7 +53,7 @@ export async function buildDigest(userId: string, prefs: Prefs, windowDays: numb
       section(
         "Pending work",
         due.map((it) => {
-          const when = it.dueDate ? ` — due ${new Date(it.dueDate).toLocaleDateString()}` : "";
+          const when = it.dueDate ? `, due ${new Date(it.dueDate).toLocaleDateString()}` : "";
           return `<strong>${it.title}</strong> (${it.type}, ${it.status})${when}`;
         }),
       ),
@@ -81,7 +81,7 @@ export async function buildDigest(userId: string, prefs: Prefs, windowDays: numb
     blocks.push(
       section(
         "Upcoming meetings",
-        meetings.map((m) => `<strong>${m.title}</strong> — ${new Date(m.startsAt).toLocaleString()} · <a href="${m.meetUrl}">join</a>`),
+        meetings.map((m) => `<strong>${m.title}</strong>, ${new Date(m.startsAt).toLocaleString()} · <a href="${m.meetUrl}">join</a>`),
       ),
     );
   }
@@ -98,13 +98,13 @@ export async function buildDigest(userId: string, prefs: Prefs, windowDays: numb
   const body = blocks.filter(Boolean).join("");
   const hasContent = body.length > 0;
   const html = renderEmail({
-    preheader: hasContent ? "Here's what needs you." : "You're all clear — nothing needs you right now.",
+    preheader: hasContent ? "Here's what needs you." : "You're all clear, nothing needs you right now.",
     heading: "Your digest",
     bodyHtml:
       `<p style="margin:0 0 4px;">Here's what needs you.</p>` +
       (hasContent
         ? body
-        : `<p style="margin:12px 0 0;">You're all clear — nothing needs you right now. 🎉</p>`) +
+        : `<p style="margin:12px 0 0;">You're all clear, nothing needs you right now. 🎉</p>`) +
       `<p style="margin:24px 0 0;font-size:12px;color:${BRAND.muted};"><a href="${env.APP_URL}/profile" style="color:${BRAND.purple};text-decoration:none;">Manage your email preferences</a></p>`,
   });
 

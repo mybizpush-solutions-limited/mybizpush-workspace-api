@@ -14,7 +14,7 @@ export function rateLimit(opts: { windowSec: number; max: number; keyPrefix: str
       if (count > opts.max) {
         const ttl = await redis.ttl(key);
         res.setHeader("Retry-After", String(Math.max(ttl, 1)));
-        return next(new AppError(429, "Too many requests — please slow down", "rate_limited"));
+        return next(new AppError(429, "Too many requests, please slow down", "rate_limited"));
       }
       return next();
     } catch {

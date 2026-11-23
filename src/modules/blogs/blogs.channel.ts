@@ -499,7 +499,7 @@ export class BlogChannelClient {
         res.status === 401 || res.status === 403 ? 403 : res.status,
         detail
           ? `${this.channel.name} blog API: ${detail}`
-          : `The ${this.channel.name} blog API returned ${res.status} with an empty body — it likely crashed. Check its logs.`,
+          : `The ${this.channel.name} blog API returned ${res.status} with an empty body, it likely crashed. Check its logs.`,
         "channel_error",
       );
     }

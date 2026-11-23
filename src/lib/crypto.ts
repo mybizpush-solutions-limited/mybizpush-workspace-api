@@ -28,7 +28,7 @@ function key(): Buffer {
   if (!raw) {
     if (!warned) {
       console.warn(
-        "[crypto] SECRET_ENCRYPTION_KEY is not set — deriving the encryption key from " +
+        "[crypto] SECRET_ENCRYPTION_KEY is not set, deriving the encryption key from " +
           "JWT_ACCESS_SECRET. Set a dedicated key before storing production credentials; " +
           "rotating the JWT secret would otherwise orphan them.",
       );
@@ -80,7 +80,7 @@ export function decryptSecret(payload: string): string {
     // Wrong key, or the payload was tampered with — both mean "we can't use this".
     throw new AppError(
       500,
-      "Could not decrypt the stored credential — the encryption key may have changed",
+      "Could not decrypt the stored credential, the encryption key may have changed",
       "decrypt_failed",
     );
   }
