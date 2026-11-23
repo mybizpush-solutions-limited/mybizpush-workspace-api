@@ -18,6 +18,7 @@ export * from "./marketing";
 export * from "./integrations";
 export * from "./account";
 export * from "./attendance";
+export * from "./profileChanges";
 
 // Domain enums (kept in sync with ui/src/types/index.ts).
 export const ACCESS_LEVELS = ["member", "admin", "chief", "executive_admin"] as const;
@@ -45,6 +46,7 @@ export const RECORD_TYPES = [
   "target",
   "project",
   "product",
+  "profile_change",
 ] as const;
 export const ISSUE_SEVERITIES = ["minor", "major", "critical"] as const;
 export const ACTIVITY_KINDS = [

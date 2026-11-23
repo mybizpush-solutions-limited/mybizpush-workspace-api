@@ -6,9 +6,10 @@ import { audit } from "../../lib/audit";
 import { requireAuth, requirePermission } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { rateLimit } from "../../middleware/rateLimit";
-import { EMPLOYMENT_STATUSES, WORK_MODES } from "../../models";
+import { EMPLOYMENT_STATUSES, User, WORK_MODES } from "../../models";
 import { newPassword } from "../auth/auth.schemas";
 import { nextStep } from "../auth/session";
+import { profileChangesService } from "./profileChanges.service";
 import { serializeInvitation, staffService } from "./staff.service";
 import { fixRow, getImport, preview, saveImport, summarize } from "./staff.import";
 import { EXPORT_GROUPS, buildRows, toCsv, toXlsx, type ExportGroup } from "./staff.export";
@@ -43,6 +44,39 @@ const inviteOne = z.object({
 const inviteSchema = z.object({ invites: z.array(inviteOne).min(1).max(50), send: z.boolean().default(true) });
 
 staffRouter.use(requireAuth);
+
+staffRouter.get(
+  "/profile-requests",
+  asyncHandler(async (req, res) => {
+    const status = req.query.status === "all" ? "all" : "pending";
+    res.json({ requests: await profileChangesService.list(req.auth!, status) });
+  }),
+);
+
+for (const decision of ["approve", "reject"] as const) {
+  staffRouter.post(
+    `/profile-requests/:id/${decision}`,
+    validateBody(z.object({ note: z.string().trim().max(500).optional() })),
+    asyncHandler(async (req, res) => {
+      const approve = decision === "approve";
+      const request = await profileChangesService.decide(req.auth!, req.params.id!, approve, req.body.note);
+      await audit({ req, action: approve ? "staff.profile_approved" : "staff.profile_rejected", target: { type: "user", id: request.user?.id ?? req.params.id! }, after: { requestId: req.params.id, changes: request.changes } });
+      res.json({ request });
+    }),
+  );
+}
+
+staffRouter.patch(
+  "/:id/email",
+  rateLimit({ windowSec: 3600, max: 20, keyPrefix: "staff-email", key: (req) => req.auth?.sub ?? req.ip ?? "anon" }),
+  validateBody(z.object({ email: z.string().trim().toLowerCase().email() })),
+  asyncHandler(async (req, res) => {
+    const before = (await User.findByPk(req.params.id!, { attributes: ["email"] }))?.email ?? null;
+    const result = await profileChangesService.changeEmail(req.auth!, req.params.id!, req.body.email);
+    await audit({ req, action: "staff.email_changed", target: { type: "user", id: req.params.id! }, before: { email: before }, after: { email: result.email, routing: result.routing } });
+    res.json(result);
+  }),
+);
 
 staffRouter.patch(
   "/:id",

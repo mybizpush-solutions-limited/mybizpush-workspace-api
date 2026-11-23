@@ -15,7 +15,7 @@ export const ORG: Scope = { type: "organization", id: null };
 type Resource = { resource: string; label: string; actions: Record<string, string> };
 
 export const CATALOG: Resource[] = [
-  { resource: "staff", label: "Staff", actions: { view: "View", create: "Invite", edit: "Edit", suspend: "Suspend", export: "Export", import: "Import" } },
+  { resource: "staff", label: "Staff", actions: { view: "View", create: "Invite", edit: "Edit", suspend: "Suspend", export: "Export", import: "Import", approve_changes: "Approve profile changes and change emails" } },
   { resource: "department", label: "Departments", actions: { view: "View", create: "Create", edit: "Edit", delete: "Delete", manage_members: "Manage members" } },
   { resource: "team", label: "Teams", actions: { view: "View", create: "Create", edit: "Edit", delete: "Delete" } },
   { resource: "product", label: "Products", actions: { view: "View", create: "Create", edit: "Edit", manage_members: "Manage people", manage_projects: "Manage projects" } },
@@ -78,7 +78,7 @@ export const SEED_ROLES: SeedRole[] = [
     description: "Operations, databases and integrations",
     system: true,
     defaultScope: "organization",
-    permissions: [...orgWork, "database.manage", "integration.manage", "staff.view", "audit.view", "report.generate"],
+    permissions: [...orgWork, "database.manage", "integration.manage", "staff.view", "staff.approve_changes", "audit.view", "report.generate"],
   },
   { key: "member", name: "Member", description: "Default for every staff member", system: true, defaultScope: "organization", permissions: [...orgWork, "staff.view", "department.view", "team.view", "product.view", "project.view"] },
   {
@@ -114,7 +114,7 @@ export const SEED_ROLES: SeedRole[] = [
     description: "Staff records, queries and appraisals",
     system: false,
     defaultScope: "organization",
-    permissions: [...orgWork, "staff.create", "staff.edit", "staff.suspend", "staff.export", "staff.import", "hr.view", "hr.edit", "query.issue", "query.review", "query.resolve", "query.view", "attendance.view", "attendance.manage", "announcement.draft", "announcement.publish", "event.create", "event.edit", "event.delete"],
+    permissions: [...orgWork, "staff.create", "staff.edit", "staff.approve_changes", "staff.suspend", "staff.export", "staff.import", "hr.view", "hr.edit", "query.issue", "query.review", "query.resolve", "query.view", "attendance.view", "attendance.manage", "announcement.draft", "announcement.publish", "event.create", "event.edit", "event.delete"],
   },
   { key: "email_marketer", name: "Email marketer", description: "Leads and campaigns for a product", system: false, defaultScope: "product", permissions: [...work, "campaign.create", "campaign.import", "campaign.send", "campaign.view", "content.create"] },
 ];
