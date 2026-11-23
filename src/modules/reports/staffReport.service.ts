@@ -102,7 +102,7 @@ export interface StaffReportPayload {
       overdue: number;
       byStatus: Record<WorkStatus, number>;
     };
-    completionRate: number; // percent, 0–100
+    completionRate: number; // percent, 0-100
     activityEvents: number;
   };
   tasks: ReportRow[];
@@ -165,7 +165,7 @@ export const staffReportService = {
   //  - the timeline is every activity event on the staff member's items in the
   //    month, oldest first.
   async build(projectId: string, userId: string, month: string): Promise<StaffReportPayload> {
-    if (!isMonth(month)) throw notFound("Invalid month — expected YYYY-MM");
+    if (!isMonth(month)) throw notFound("Invalid month, expected YYYY-MM");
 
     const [project, staff] = await Promise.all([Project.findByPk(projectId), User.findByPk(userId)]);
     if (!project) throw notFound("Project not found");

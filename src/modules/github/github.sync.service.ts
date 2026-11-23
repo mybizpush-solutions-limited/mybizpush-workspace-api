@@ -225,7 +225,7 @@ export const githubSyncService = {
       else await Department.create({ slug, name: team.name ?? slug, description: team.description ?? "" });
       return 1;
     }
-    return 0; // deleted — keep the department and its data
+    return 0; // deleted, keep the department and its data
   },
 
   // `organization`: member_added/removed → keep each account's org-member flag fresh.

@@ -46,7 +46,7 @@ export const usersService = {
     const user = await User.findByPk(targetId);
     if (!user) throw notFound("User not found");
     if (user.accessLevel === "executive_admin") {
-      throw forbidden("Executives can't be deleted from here — change their access level first");
+      throw forbidden("Executives can't be deleted from here, change their access level first");
     }
 
     const emails = [user.email, user.secondaryEmail].filter((e): e is string => Boolean(e));

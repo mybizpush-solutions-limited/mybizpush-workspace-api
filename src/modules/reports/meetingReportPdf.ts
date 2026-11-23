@@ -146,7 +146,7 @@ function actionTable(doc: PDFKit.PDFDocument, items: MeetingReportData["actionIt
     const a = items[i]!;
     const actionText = a.action.trim();
     const ownerText = a.owner || "Unassigned";
-    const dueText = a.due || "—";
+    const dueText = a.due || "Not set";
     // Measure every column's wrapped height at its final width up front, so the
     // whole row can be kept together on one page.
     doc.font("reg").fontSize(8.8);

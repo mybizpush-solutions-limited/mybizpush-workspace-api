@@ -25,7 +25,7 @@ import { getTool, parseToolArgs, toolDefinitions } from "./ai.tools";
 // consistently guesses PHP/Laravel. Every prompt carries it; briefs additionally
 // carry the project's own declared stack, which always wins over this default.
 const STACK_GUARDRAIL =
-  "Tech stack rules — follow these exactly. Every MyBizPush project is Node.js with " +
+  "Tech stack rules, follow these exactly. Every MyBizPush project is Node.js with " +
   "TypeScript (Express, Sequelize, Postgres on the API; React/Vite or Next.js on the " +
   "frontend), with one exception: the Hyparrow API is written in Go (Gin + GORM). " +
   "Never assume PHP/Laravel, Ruby on Rails, Django, or Spring, and never emit commands " +
@@ -34,10 +34,11 @@ const STACK_GUARDRAIL =
   "If you genuinely cannot tell which stack applies, say so instead of guessing.";
 
 const SYSTEM_PROMPT =
-  "You are the MyBizPush Dev Space assistant — a concise, practical copilot inside an internal " +
+  "You are the MyBizPush Dev Space assistant, a concise, practical copilot inside an internal " +
   "work-management tool organized as Departments → Projects → Tasks & Issues. Help the team " +
   "summarize issues, draft replies, break work into steps, and surface blockers. Keep answers " +
-  "brief and actionable; use short bullet lists when helpful.\n\n" +
+  "brief and actionable; use short bullet lists when helpful. Never use em dashes or en dashes; " +
+  "use commas, colons or full stops instead.\n\n" +
   STACK_GUARDRAIL;
 
 // The agent variant. The rules here exist because of how the loop is wired:
@@ -50,7 +51,7 @@ const AGENT_PROMPT =
   "- Look things up instead of asking. If someone asks what they have today, call " +
   "get_my_work rather than asking which project they mean.\n" +
   "- Never invent ids, names, statuses, or dates. If a tool returns nothing, say so.\n" +
-  "- Tools that change data are not executed when you call them — they are queued for the " +
+  "- Tools that change data are not executed when you call them, they are queued for the " +
   "person to approve. So describe what you have queued in the future or conditional tense " +
   "('I've queued…', 'once you confirm…'). Never say a change has been made, and never " +
   "claim to have seen its result.\n" +
@@ -275,7 +276,7 @@ export const aiService = {
       ? prs.map((p) => `- #${p.number} ${p.title} [${p.status}] ${p.url}`).join("\n")
       : "(none)";
     const ghIssue = ghLink
-      ? `${ghLink.fullName} #${ghLink.number} (${ghLink.state}) — ${ghLink.url}`
+      ? `${ghLink.fullName} #${ghLink.number} (${ghLink.state}), ${ghLink.url}`
       : "(not linked to a GitHub issue)";
 
     // The project's declared stack, or the org default. Stated explicitly so the
@@ -292,7 +293,7 @@ export const aiService = {
       `with: a one-line Goal; Context; concrete Acceptance criteria; a suggested step-by-step ` +
       `Plan; and any relevant links. Be specific and actionable; do not invent details that ` +
       `aren't provided. Use Markdown.\n\n` +
-      `Do NOT instruct the agent to perform any git actions — no creating branches, committing, ` +
+      `Do NOT instruct the agent to perform any git actions, no creating branches, committing, ` +
       `pushing, or opening/creating pull requests. All git operations are left for the user to ` +
       `perform manually. The brief must stop at making the code changes and writing the ` +
       `reference docs below.\n\n` +
@@ -303,7 +304,7 @@ export const aiService = {
       `The Backend reference documents the details of the files that were actually changed for ` +
       `this ${itemType}: each file touched and what changed in it, plus the relevant endpoints, ` +
       `models/migrations, services, validation, and data flow. ` +
-      `The Frontend reference is the API reference the frontend needs to integrate this feature — ` +
+      `The Frontend reference is the API reference the frontend needs to integrate this feature, ` +
       `the endpoints the UI should call (HTTP method and path), request and response payload ` +
       `shapes, auth requirements, and error responses. It documents the API contract consumable ` +
       `by the frontend, NOT frontend code changes, so never leave it empty or write "No changes"; ` +
@@ -323,6 +324,6 @@ export const aiService = {
     return chatCompletion([
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: prompt },
-    ]);
+    ], { maxTokens: 4000 });
   },
 };

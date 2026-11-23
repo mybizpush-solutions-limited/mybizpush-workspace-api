@@ -146,7 +146,7 @@ const readTools: Tool[] = [
     name: "search_work_items",
     description:
       "Search tasks and issues across the workspace by any combination of text, project, " +
-      "department, status, priority, and assignee. Returns compact rows — call " +
+      "department, status, priority, and assignee. Returns compact rows, call " +
       "get_work_item for the full record of one.",
     parameters: z.object({
       query: z.string().trim().min(1).max(200).optional(),
@@ -230,7 +230,7 @@ const readTools: Tool[] = [
   {
     name: "get_work_item",
     description:
-      "The full record of one task or issue — description, assignees, labels, linked PRs " +
+      "The full record of one task or issue, description, assignees, labels, linked PRs " +
       "and GitHub issue, plus its comment thread.",
     parameters: z.object({ itemId: uuid, itemType: ITEM_TYPE }),
     jsonSchema: {
@@ -321,7 +321,7 @@ const readTools: Tool[] = [
   {
     name: "list_people",
     description:
-      "The team roster — names, emails, roles, access level, and department membership. " +
+      "The team roster, names, emails, roles, access level, and department membership. " +
       "Use it to turn a person's name into a user id.",
     parameters: z.object({ query: z.string().trim().min(1).optional() }),
     jsonSchema: {
@@ -701,7 +701,7 @@ const writeTools: Tool[] = [
   {
     name: "create_blog_post",
     description:
-      "Create a draft blog post on a project's channel. Drafts are safe — publishing " +
+      "Create a draft blog post on a project's channel. Drafts are safe, publishing " +
       "still requires the normal review and approval flow.",
     parameters: z.object({
       project: z.string().trim().min(1),
@@ -749,7 +749,7 @@ const writeTools: Tool[] = [
   {
     name: "update_blog_post",
     description:
-      "Edit an existing blog post — body, title, subtitle, or SEO fields. Editing a post " +
+      "Edit an existing blog post, body, title, subtitle, or SEO fields. Editing a post " +
       "invalidates any automated review it already passed, so it will need re-reviewing.",
     parameters: z.object({
       project: z.string().trim().min(1),
@@ -803,7 +803,7 @@ const writeTools: Tool[] = [
     name: "run_blog_ai_review",
     description:
       "Run the automated safety/SEO pre-publication review on a post. This is the " +
-      "publishing system's own reviewer, not this assistant — it returns a verdict, " +
+      "publishing system's own reviewer, not this assistant, it returns a verdict, " +
       "scores, and findings. Slow (up to two minutes).",
     parameters: z.object({ project: z.string().trim().min(1), postId: z.string().trim().min(1) }),
     jsonSchema: {
@@ -853,7 +853,7 @@ export function parseToolArgs(tool: Tool, raw: string): unknown {
     const detail = result.error.issues
       .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
       .join("; ");
-    throw badRequest(`${tool.name} was called with invalid arguments — ${detail}`);
+    throw badRequest(`${tool.name} was called with invalid arguments, ${detail}`);
   }
   return result.data;
 }
