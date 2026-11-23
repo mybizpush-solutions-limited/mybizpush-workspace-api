@@ -87,7 +87,7 @@ function assertPublishable(post: { imageUrl?: string; status?: PostInput["status
   if (!post.status || post.status === "draft") return;
   if (!post.imageUrl?.trim()) {
     throw badRequest(
-      "A cover image is required before a post can be submitted or published — it's used as the link preview image.",
+      "A cover image is required before a post can be submitted or published, it's used as the link preview image.",
     );
   }
 }
@@ -116,12 +116,12 @@ async function onPublished(
         description:
           (url
             ? `The post is live at ${url}\n\n`
-            : `The post is live — open it from the blog console to copy its URL.\n\n`) +
+            : `The post is live, open it from the blog console to copy its URL.\n\n`) +
           `Get it indexed so it can be found in search:\n\n` +
-          `1. **Google** — open Search Console for this site, paste the URL into the "Inspect any URL" bar at the top, then click **Request indexing**.\n` +
-          `2. **Bing / DuckDuckGo / Yahoo** — open Bing Webmaster Tools → **URL Submission** and submit the same URL. This covers Bing-powered engines.\n` +
+          `1. **Google**, open Search Console for this site, paste the URL into the "Inspect any URL" bar at the top, then click **Request indexing**.\n` +
+          `2. **Bing / DuckDuckGo / Yahoo**, open Bing Webmaster Tools → **URL Submission** and submit the same URL. This covers Bing-powered engines.\n` +
           `3. Confirm the post appears in the site's sitemap (\`/sitemap.xml\`) so it gets recrawled automatically from now on.\n` +
-          `4. Share the link once somewhere public — an external link is the strongest crawl signal.\n\n` +
+          `4. Share the link once somewhere public, an external link is the strongest crawl signal.\n\n` +
           `Close this task once the URL shows as submitted.`,
         priority: "medium",
         assigneeIds: [auth.sub],

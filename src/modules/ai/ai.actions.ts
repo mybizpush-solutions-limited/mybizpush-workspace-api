@@ -55,13 +55,13 @@ export async function claimAction(actionId: string, userId: string): Promise<Pen
 
 export async function discardAction(actionId: string, userId: string): Promise<void> {
   const raw = await redis.get(key(actionId));
-  if (!raw) return; // already gone — nothing to cancel
+  if (!raw) return; // already gone, nothing to cancel
 
   let owner: string | undefined;
   try {
     owner = (JSON.parse(raw) as PendingAction).userId;
   } catch {
-    await redis.del(key(actionId)); // unreadable and unrunnable — just drop it
+    await redis.del(key(actionId)); // unreadable and unrunnable, just drop it
     return;
   }
   if (owner !== userId) throw forbidden("That action belongs to someone else");

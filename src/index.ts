@@ -37,7 +37,7 @@ async function start() {
   startServerScheduler();
 
   const shutdown = async (signal: string) => {
-    console.info(`\n${signal} received — shutting down…`);
+    console.info(`\n${signal} received, shutting down…`);
     server.close();
     await stopWorkers();
     await closeQueues();

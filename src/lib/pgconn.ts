@@ -77,7 +77,7 @@ export function resolveSslMode(derived: string, ssl?: boolean): string {
 // message that reads like an internal assertion.
 export function annotateConnectionError(message: string): string {
   if (/does not support SSL/i.test(message)) {
-    return `${message} — turn SSL off for this database and try again.`;
+    return `${message}, turn SSL off for this database and try again.`;
   }
   // pg_dump refuses to dump a server newer than itself. The fix is always on
   // the API host, never on the database being backed up.
@@ -87,7 +87,7 @@ export function annotateConnectionError(message: string): string {
     const versions = server && client ? ` (server ${server}, pg_dump ${client})` : "";
     return (
       `${message}\n\nThe API server's pg_dump is older than this database${versions}. ` +
-      `Rebuild the API image with a matching client — \`ARG PG_MAJOR\` in the Dockerfile — ` +
+      `Rebuild the API image with a matching client, \`ARG PG_MAJOR\` in the Dockerfile, ` +
       `or point PG_DUMP_PATH at a newer pg_dump. A newer client can dump older servers, so it's safe to go up.`
     );
   }

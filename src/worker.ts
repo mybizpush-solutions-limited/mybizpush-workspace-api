@@ -16,7 +16,7 @@ async function start() {
   startWorkers();
 
   const shutdown = async (signal: string) => {
-    console.info(`\n${signal} received — stopping workers…`);
+    console.info(`\n${signal} received, stopping workers…`);
     await stopWorkers();
     await closeQueues();
     await Promise.allSettled([sequelize.close(), redis.quit()]);

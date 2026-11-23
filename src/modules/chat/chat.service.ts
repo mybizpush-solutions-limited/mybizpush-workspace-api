@@ -356,7 +356,13 @@ export const chatService = {
 
   async members(id: string, userId: string) {
     await requireMember(id, userId);
-    return (await ConversationMember.findAll({ where: { conversationId: id, leftAt: null }, order: [["createdAt", "ASC"]] })).map(serializeMember);
+    const rows = await ConversationMember.findAll({ where: { conversationId: id, leftAt: null }, order: [["createdAt", "ASC"]] });
+    const people = await User.findAll({ where: { id: rows.map((m) => m.userId) }, attributes: ["id", "name", "avatarUrl", "avatarColor"] });
+    const byId = new Map(people.map((u) => [u.id, u]));
+    return rows.map((m) => {
+      const u = byId.get(m.userId);
+      return { ...serializeMember(m), user: u ? { id: u.id, name: u.name, avatarUrl: u.avatarUrl ?? null, avatarColor: u.avatarColor } : null };
+    });
   },
 
   async addMembers(id: string, input: { userIds?: string[]; groups?: GroupRef[]; role?: MemberRole }, userId: string) {

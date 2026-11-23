@@ -113,7 +113,7 @@ function metrics(doc: PDFKit.PDFDocument, p: StaffReportPayload) {
   doc.moveDown(0.5);
   const gap = 10;
   const bw = (CW - 2 * gap) / 3;
-  const y0 = doc.y; // freeze the baseline — doc.text would otherwise advance it
+  const y0 = doc.y; // freeze the baseline, doc.text would otherwise advance it
   cells.forEach((c, i) => {
     const col = i % 3;
     const row = Math.floor(i / 3);
@@ -181,7 +181,7 @@ function itemTable(doc: PDFKit.PDFDocument, rows: ReportRow[], type: "task" | "i
     doc.text(
       r.dueDate
         ? new Date(r.dueDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" })
-        : "—",
+        : "Not set",
       dueX,
       y + 1.5,
       { lineBreak: false },

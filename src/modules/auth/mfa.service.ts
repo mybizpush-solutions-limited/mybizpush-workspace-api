@@ -113,7 +113,7 @@ async function verifySecondFactor(user: User, input: string): Promise<boolean> {
 
 async function loadUser(userId: string): Promise<User> {
   const user = await User.findByPk(userId);
-  if (!user) throw unauthorized("Your sign-in session expired — please sign in again");
+  if (!user) throw unauthorized("Your sign-in session expired, please sign in again");
   return user;
 }
 

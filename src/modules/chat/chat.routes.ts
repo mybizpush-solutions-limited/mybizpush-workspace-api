@@ -2,16 +2,28 @@ import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
+import { rateLimit } from "../../middleware/rateLimit";
 import { validateBody } from "../../middleware/validate";
 import { CHANNEL_SCOPES, MEMBER_NOTIFY, MEMBER_ROLES, MESSAGE_TYPES } from "../../models";
 import { GROUP_TYPES } from "../groups/groups.merge";
 import { channelReport } from "./chat.reports";
 import { chatService } from "./chat.service";
+import { linkPreview } from "./linkPreview";
 
 export const conversationsRouter = Router();
 export const messagesRouter = Router();
 conversationsRouter.use(requireAuth);
 messagesRouter.use(requireAuth);
+
+messagesRouter.get(
+  "/link-preview",
+  rateLimit({ windowSec: 60, max: 60, keyPrefix: "link-preview", key: (req) => req.auth?.sub ?? req.ip ?? "anon" }),
+  asyncHandler(async (req, res) => {
+    const url = z.string().url().max(2000).parse(req.query.url);
+    res.set("Cache-Control", "private, max-age=3600");
+    res.json({ preview: await linkPreview(url) });
+  }),
+);
 
 const uuid = z.string().uuid();
 const groups = z.array(z.object({ type: z.enum(GROUP_TYPES), id: uuid })).max(20);
