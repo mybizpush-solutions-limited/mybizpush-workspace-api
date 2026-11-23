@@ -14,8 +14,8 @@ const report = {
 
 test("nested values become a summary, lists become tables", () => {
   const out = flatten(report);
-  assert.equal(out[0]!.title, "Summary");
-  assert.deepEqual(out.map((s) => s.title), ["Summary", "Team"]);
+  assert.equal(out[0]!.title, "Key numbers");
+  assert.deepEqual(out.map((s) => s.title), ["Key numbers", "Team"]);
   assert.ok(out[0]!.rows.some((r) => r.Measure === "Open" && r.Section === "Tasks" && r.Value === "2"));
 });
 
@@ -27,7 +27,7 @@ test("ids and image links aren't exported", () => {
 
 test("a section left out by the requester or hidden by the API stays out", () => {
   const out = flatten(report, ["tasks"]);
-  assert.deepEqual(out.map((s) => s.title), ["Summary"]);
+  assert.deepEqual(out.map((s) => s.title), ["Key numbers"]);
   assert.ok(out[0]!.rows.every((r) => r.Section === "Tasks"));
   assert.ok(!JSON.stringify(flatten(report)).includes("Hr"));
 });

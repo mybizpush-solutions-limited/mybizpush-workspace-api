@@ -212,7 +212,7 @@ const exportParams = z.object({
 });
 reportsV2Router.post(
   "/exports",
-  validateBody(z.object({ reportType: z.enum(REPORT_TYPES), params: exportParams.optional(), format: z.enum(EXPORT_FORMATS), sections: z.array(z.string().max(40)).max(20).optional() })),
+  validateBody(z.object({ reportType: z.enum(REPORT_TYPES), params: exportParams.optional(), format: z.enum(EXPORT_FORMATS), sections: z.array(z.string().max(40)).max(20).optional(), fresh: z.boolean().optional() })),
   asyncHandler(async (req, res) => {
     res.status(202).json({ export: await reportExports.request(req.body, req.auth!.sub, req) });
   }),

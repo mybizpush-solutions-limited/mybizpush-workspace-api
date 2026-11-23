@@ -17,6 +17,13 @@ import { reportsService } from "./reports.service";
 // in the file is limited exactly as the report is.
 
 const KEEP_DAYS = 14;
+// Asking for the same report again within this window returns the file already made.
+const REUSE_HOURS = 6;
+
+function sameParams(a: unknown, b: unknown) {
+  const canonical = (v: unknown) => JSON.stringify(Object.entries((v ?? {}) as Record<string, unknown>).filter(([, x]) => x !== undefined && x !== null && x !== "").sort(([x], [y]) => x.localeCompare(y)));
+  return canonical(a) === canonical(b);
+}
 type Req = Parameters<typeof audit>[0]["req"];
 
 export interface ExportParams {
@@ -113,6 +120,16 @@ async function toPdf(title: string, sections: Section[], range: string): Promise
   doc.font("reg").fontSize(9).fillColor(GREY).text(range, M, doc.y, { width: CW });
   for (const s of sections) {
     h1(doc, s.title);
+    if (s.columns.length === 1) {
+      doc.font("reg").fontSize(10).fillColor(INK);
+      for (const r of s.rows) {
+        const text = `•  ${r[s.columns[0]!] ?? ""}`;
+        need(doc, doc.heightOfString(text, { width: CW }) + 4);
+        doc.text(text, M, doc.y, { width: CW });
+        doc.moveDown(0.3);
+      }
+      continue;
+    }
     const width = CW / Math.max(1, s.columns.length);
     const drawRow = (values: string[], bold: boolean) => {
       doc.font(bold ? "bold" : "reg").fontSize(8).fillColor(bold ? GREY : INK);
@@ -131,9 +148,17 @@ async function toPdf(title: string, sections: Section[], range: string): Promise
 }
 
 export const reportExports = {
-  async request(input: { reportType: ReportType; params?: ExportParams; format: ExportFormat; sections?: string[] }, userId: string, req?: Req) {
-    if (reachIsEmpty(await reachFor(userId, "report.export"))) throw forbidden("You don't have permission to export reports");
+  async request(input: { reportType: ReportType; params?: ExportParams; format: ExportFormat; sections?: string[]; fresh?: boolean }, userId: string, req?: Req) {
+    const ownReport = input.reportType === "staff" && input.params?.userId === userId;
+    if (!ownReport && reachIsEmpty(await reachFor(userId, "report.export"))) throw forbidden("You don't have permission to export reports");
     const params: ExportParams = { ...(input.params ?? {}), ...(input.sections ? { sections: input.sections } : {}) };
+    const recent = await ReportExport.findAll({
+      where: { requestedBy: userId, reportType: input.reportType, format: input.format, status: { [Op.in]: ["queued", "running", "done"] }, createdAt: { [Op.gt]: new Date(Date.now() - REUSE_HOURS * 3_600_000) } },
+      order: [["createdAt", "DESC"]],
+      limit: 20,
+    });
+    const reusable = input.fresh ? undefined : recent.find((row) => sameParams(row.params, params));
+    if (reusable) return { ...serializeExport(reusable), reused: true };
     // Refuse now rather than fail later in the background.
     await build(input.reportType, params, userId);
     const row = await ReportExport.create({ requestedBy: userId, reportType: input.reportType, params: params as Record<string, unknown>, format: input.format });
