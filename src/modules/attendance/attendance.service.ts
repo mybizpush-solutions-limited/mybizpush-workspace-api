@@ -153,7 +153,7 @@ export const attendanceService = {
     };
   },
 
-  toCsv(report: Awaited<ReturnType<typeof attendanceService.report>>): string {
+  toCsv(report: { rows: Array<{ name: string; workMode: string; daysAttended: number; onTime: number; late: number; hoursOnSite: number }> }): string {
     const escape = (value: string | number) => {
       // A leading quote stops spreadsheets running a name like "=cmd()" as a formula.
       const text = /^[=+\-@]/.test(String(value)) && typeof value === "string" ? `'${value}` : String(value);

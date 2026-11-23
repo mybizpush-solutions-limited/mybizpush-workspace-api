@@ -18,7 +18,7 @@ function cell(v: unknown): string {
 }
 
 // Keys that identify rather than inform, or that only the app can use.
-const SKIP = new Set(["avatarUrl", "userId", "projectId", "productId", "departmentId", "headId", "id"]);
+const SKIP = new Set(["avatarUrl", "userId", "projectId", "productId", "departmentId", "headId", "id", "itemType"]);
 
 function tableFrom(title: string, rows: Record<string, unknown>[]): Section | null {
   if (!rows.length) return null;
@@ -58,7 +58,10 @@ export function flatten(report: Record<string, unknown>, sections?: string[]): S
       summary.push({ Section: "Report", Measure: label(key), Value: cell(value) });
     }
   }
-  if (summary.length) out.unshift({ title: "Summary", columns: ["Section", "Measure", "Value"], rows: summary });
+  if (summary.length) out.unshift({ title: "Key numbers", columns: ["Section", "Measure", "Value"], rows: summary });
+  // The written summary reads first, ahead of the numbers and lists.
+  const highlights = out.findIndex((s) => s.title === "Highlights");
+  if (highlights > 0) out.unshift(...out.splice(highlights, 1));
   return out;
 }
 

@@ -6,6 +6,7 @@ import { can } from "../access/engine";
 import type { Scope } from "../access/catalog";
 import { canOverUser, projectsInReach, reachFor, reachIsEmpty } from "../access/reach";
 import { taskReports } from "../tasks/task.reports";
+import { creativeOutput, meetingsAttended, staffHighlights, teamHighlights, workDetail } from "./report.detail";
 
 // Reports (API-CHANGES A504, SCREENS 7.5). Data outside what the viewer may see is
 // removed here, not hidden in the app. Exports build on these same functions, so
@@ -160,9 +161,14 @@ export const reportsService = {
     const memberRows = await query<{ user_id: string }>(`SELECT user_id FROM department_members WHERE department_id = :id`, { id });
     const memberIds = new Set(memberRows.map((m) => m.user_id));
     const args = { from: range.from, to: range.to, id };
+    const work = await workDetail(where, range);
     return {
       range: rangeJson(range),
       department: { id: department.id, name: department.name, headId: department.headId ?? null },
+      highlights: teamHighlights(department.name, tasks, work),
+      completedWork: work.completedWork,
+      inProgressWork: work.inProgressWork,
+      overdueWork: work.overdueWork,
       members: staffRows(summary.byAssignee.filter((a) => memberIds.has(a.userId)), await avatars([...memberIds])),
       tasks,
       targets: await targetTotals(`(t.owner_type = 'department' AND t.owner_id = :id) OR t.id IN (SELECT a.target_id FROM target_assignments a JOIN department_members dm ON dm.user_id = a.user_id WHERE dm.department_id = :id)`, args),
@@ -201,11 +207,15 @@ export const reportsService = {
     }
 
     const where = { productId: id };
-    const [tasks, summary, marketing] = await Promise.all([taskTotals(where, range), taskReports.breakdown(where, range), marketingFor(id, range)]);
+    const [tasks, summary, marketing, work] = await Promise.all([taskTotals(where, range), taskReports.breakdown(where, range), marketingFor(id, range), workDetail(where, range)]);
     return {
       range: rangeJson(range),
       slice: "full" as const,
       product: { id: product.id, name: product.name, stage: product.stage },
+      highlights: teamHighlights(product.name, tasks, work),
+      completedWork: work.completedWork,
+      inProgressWork: work.inProgressWork,
+      overdueWork: work.overdueWork,
       team: staffRows(summary.byAssignee, await avatars(summary.byAssignee.map((a) => a.userId))),
       projects: await projectRows(allProjects, range),
       tasks,
@@ -232,9 +242,14 @@ export const reportsService = {
          FROM pull_requests pr JOIN tasks t ON t.id = pr.item_id AND pr.item_type = 'task' WHERE t.project_id = :id`,
       { id },
     );
+    const work = await workDetail(where, range);
     return {
       range: rangeJson(range),
       project: { id: project.id, name: project.name, productId: project.productId ?? null },
+      highlights: teamHighlights(project.name, tasks, work),
+      completedWork: work.completedWork,
+      inProgressWork: work.inProgressWork,
+      overdueWork: work.overdueWork,
       tasks,
       issues: { open: openIssues, closed: closedIssues },
       pullRequests: { open: Number(prs?.open ?? 0), merged: Number(prs?.merged ?? 0) },
@@ -247,12 +262,12 @@ export const reportsService = {
     const staff = await User.findByPk(staffId, { attributes: ["id", "name", "avatarUrl", "email"] });
     if (!staff) throw notFound("Staff member not found");
     const self = staffId === userId;
-    // Your own report: viewing needs nothing. Exporting still needs the permission.
+    // Your own report is always yours to view and to export.
     const org = await can({ sub: userId }, permission, ORG);
     const covers = org || (await canOverUser(userId, permission, staffId));
-    if (!(self && permission === "report.view") && !covers) throw denied();
+    if (!self && !covers) throw denied();
 
-    const full = org || (self && permission === "report.view");
+    const full = org || self;
     const range = rangeOf(q);
     const assigned = sequelize.literal(`(SELECT task_id FROM task_assignees WHERE user_id = ${sequelize.escape(staffId)})`);
     // With a partial view, only the projects where the viewer holds the permission count.
@@ -262,7 +277,7 @@ export const reportsService = {
       projectLimit = projects === "all" ? null : projects;
     }
     const where: WhereOptions = { [Op.and]: [{ id: { [Op.in]: assigned } }, ...(projectLimit ? [{ projectId: projectLimit }] : [])] };
-    const tasks = await taskTotals(where, range);
+    const [tasks, work] = await Promise.all([taskTotals(where, range), workDetail(where, range)]);
     const args = { from: range.from, to: range.to, staffId, projects: projectLimit ?? [] };
 
     const [approvals] = await query<{ reviewed: string; hours: string | null }>(
@@ -285,15 +300,27 @@ export const reportsService = {
          ARRAY(SELECT t.name FROM teams t JOIN team_members tm ON tm.team_id = t.id WHERE tm.user_id = :staffId) AS teams`,
       { staffId },
     );
+    const approvalTotals = { reviewed: Number(approvals?.reviewed ?? 0), avgHours: approvals?.hours != null ? Math.round(Number(approvals.hours) * 10) / 10 : null };
+    const meetingTotals = { invited: Number(meetingRow?.invited ?? 0), attended: Number(meetingRow?.attended ?? 0) };
+    const targets = await targetTotals(`t.id IN (SELECT target_id FROM target_assignments WHERE user_id = :staffId)`, args);
+    const [creative, attended] = full ? await Promise.all([creativeOutput(staffId, range), meetingsAttended(staffId, range)]) : [null, []];
     return {
       range: rangeJson(range),
       staff: { id: staff.id, name: staff.name, avatarUrl: staff.avatarUrl ?? null },
       scope: full ? ("full" as const) : ("limited" as const),
+      highlights: staffHighlights({ name: staff.name, tasks, work, creative, meetings: meetingTotals, approvals: approvalTotals, targets }),
       assignments: full ? assignments[0] : null,
       tasks,
-      approvals: { reviewed: Number(approvals?.reviewed ?? 0), avgHours: approvals?.hours != null ? Math.round(Number(approvals.hours) * 10) / 10 : null },
-      targets: await targetTotals(`t.id IN (SELECT target_id FROM target_assignments WHERE user_id = :staffId)`, args),
-      meetings: { invited: Number(meetingRow?.invited ?? 0), attended: Number(meetingRow?.attended ?? 0) },
+      completedWork: work.completedWork,
+      inProgressWork: work.inProgressWork,
+      overdueWork: work.overdueWork,
+      creativeOutput: creative?.totals ?? null,
+      postsByPlatform: creative?.byPlatform ?? [],
+      creativeWork: creative?.items ?? [],
+      meetingsAttended: attended,
+      approvals: approvalTotals,
+      targets,
+      meetings: meetingTotals,
       hr: await this.hrSection(staffId, userId, range),
     };
   },
