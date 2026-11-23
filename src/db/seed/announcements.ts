@@ -40,8 +40,8 @@ const ANNOUNCEMENTS: AnnouncementSpec[] = [
     requireAck: true,
   },
   {
-    title: "Hyparrow public beta opens next Monday",
-    body: "Thanks to everyone who tested deploys this month. The first 300 waitlist invites go out on Monday morning. Report anything odd in hyparrow-beta.",
+    title: "Hyparrow weekly demo moves to Thursday",
+    body: "From this week the Hyparrow team demo runs on Thursdays at 2pm. Post what you plan to show in the hyparrow channel by Wednesday.",
     author: "ngozi",
     audience: { type: "product", ref: "hyparrow" },
     publishedDaysAgo: 1,

@@ -2,57 +2,76 @@ import type { AccessLevel, ProductStage, WorkMode } from "../../models";
 
 export const PRODUCTS: ProductSpec[] = [
   {
-    name: "MyBizPush",
-    slug: "mybizpush",
-    description: "The MyBizPush platform.",
+    name: "Plemuz",
+    slug: "plemuz",
+    description: "Plemuz product team workspace.",
     stage: "live",
     tint: "#D400D1",
-    owner: "ada",
-    senderName: "MyBizPush",
-    senderEmail: "info@mybizpush.com",
-    members: [
-      ["ada", "Owner"], ["sam", "Engineering lead"], ["chiamaka", "Marketing lead"], ["esther", "Product manager"],
-      ["femi", "Frontend engineer"], ["ngozi", "Backend engineer"], ["kola", "Product designer"], ["seyi", "Social media"],
-      ["amaka", "Email marketing"], ["bolu", "Content writer"], ["bisi", "Graphics designer"], ["yusuf", "Sales lead"],
-      ["kemi", "Account executive"], ["musa", "Customer success"], ["chidi", "Support"],
-    ],
-  },
-  {
-    name: "MyBizPush Workspace",
-    slug: "mybizpush-workspace",
-    description: "The internal operating system for MyBizPush: tasks, chat, calendar, people and attendance in one app.",
-    stage: "live",
-    tint: "#5B30FF",
-    owner: "sam",
-    members: [
-      ["sam", "Owner"], ["esther", "Product manager"], ["femi", "Mobile lead"], ["ifeoma", "Frontend engineer"],
-      ["zainab", "Frontend engineer"], ["kola", "Product designer"], ["uche", "QA engineer"], ["ngozi", "Backend engineer"],
-      ["funke", "People operations"], ["tunde", "Operations sponsor"],
-    ],
+    owner: "esther",
+    members: [["esther", "Owner"], ["femi", "Frontend engineer"], ["ngozi", "Backend engineer"], ["kola", "Product designer"], ["amaka", "Email marketing"], ["seyi", "Social media"], ["uche", "QA engineer"], ["yusuf", "Sales lead"]],
   },
   {
     name: "Hyparrow",
     slug: "hyparrow",
-    description: "Hosting and deployment platform for African developers. Git push to deploy, managed databases and edge caching. In public beta.",
+    description: "Hyparrow product team workspace.",
     stage: "live",
     tint: "#0EA5E9",
     owner: "ngozi",
-    members: [
-      ["ngozi", "Owner"], ["halima", "Platform engineer"], ["emeka", "Backend engineer"], ["daniel", "Backend engineer"],
-      ["uche", "QA engineer"], ["amaka", "Growth marketing"], ["tobi", "Launch video"],
-    ],
+    members: [["ngozi", "Owner"], ["halima", "Platform engineer"], ["emeka", "Backend engineer"], ["uche", "QA engineer"], ["tobi", "Video"]],
   },
   {
-    name: "BizPush Pay",
-    slug: "bizpush-pay",
-    description: "Payments and invoicing for small businesses: payment links, recurring invoices and automatic reconciliation.",
-    stage: "in_development",
+    name: "Ceremotik",
+    slug: "ceremotik",
+    description: "Ceremotik product team workspace.",
+    stage: "live",
+    tint: "#F59E0B",
+    owner: "chiamaka",
+    members: [["chiamaka", "Owner"], ["bolu", "Content writer"], ["bisi", "Graphics designer"], ["zainab", "Frontend engineer"]],
+  },
+  {
+    name: "Womaney",
+    slug: "womaney",
+    description: "Womaney product team workspace.",
+    stage: "live",
+    tint: "#EC4899",
+    owner: "amaka",
+    members: [["amaka", "Owner"], ["seyi", "Social media"], ["ifeoma", "Frontend engineer"], ["kemi", "Account executive"]],
+  },
+  {
+    name: "Hempay",
+    slug: "hempay",
+    description: "Hempay product team workspace.",
+    stage: "live",
     tint: "#10B981",
+    owner: "daniel",
+    members: [["daniel", "Owner"], ["emeka", "Backend engineer"], ["grace", "Finance advisor"], ["musa", "Customer success"]],
+  },
+  {
+    name: "Agrocom",
+    slug: "agrocom",
+    description: "Agrocom product team workspace.",
+    stage: "live",
+    tint: "#65A30D",
+    owner: "yusuf",
+    members: [["yusuf", "Owner"], ["kemi", "Account executive"], ["halima", "Platform engineer"], ["chidi", "Support"]],
+  },
+  {
+    name: "Esthipay",
+    slug: "esthipay",
+    description: "Esthipay product team workspace.",
+    stage: "live",
+    tint: "#14B8A6",
     owner: "esther",
-    members: [
-      ["esther", "Owner"], ["daniel", "Payments engineer"], ["emeka", "Backend engineer"], ["zainab", "Frontend engineer"],
-      ["kola", "Product designer"], ["grace", "Finance advisor"], ["yusuf", "Merchant partnerships"],
-    ],
+    members: [["esther", "Owner"], ["daniel", "Payments engineer"], ["zainab", "Frontend engineer"], ["grace", "Finance advisor"]],
+  },
+  {
+    name: "Conifer",
+    slug: "conifer",
+    description: "Conifer product team workspace.",
+    stage: "live",
+    tint: "#5B30FF",
+    owner: "sam",
+    members: [["sam", "Owner"], ["femi", "Mobile lead"], ["kola", "Product designer"], ["uche", "QA engineer"]],
   },
 ];
 
@@ -129,9 +148,9 @@ export const DEPARTMENTS = [
 
 export const TEAMS = [
   { slug: "mobile-squad", name: "Mobile Squad", description: "Builds the MyBizPush Workspace mobile app.", lead: "femi", members: ["femi", "ifeoma", "zainab", "kola", "uche"], projects: ["Workspace Mobile App"] },
-  { slug: "platform-core", name: "Platform Core", description: "APIs, infrastructure and reliability across products.", lead: "ngozi", members: ["ngozi", "emeka", "daniel", "halima"], projects: ["Platform", "Public API", "Edge Deploy Pipeline"] },
-  { slug: "growth-pod", name: "Growth Pod", description: "Acquisition, content and lifecycle marketing.", lead: "seyi", members: ["seyi", "amaka", "bolu", "bisi"], projects: ["Q4 Launch", "Hyparrow Beta Launch"] },
-  { slug: "payments-squad", name: "Payments Squad", description: "Ships BizPush Pay.", lead: "daniel", members: ["daniel", "emeka", "zainab", "grace"], projects: ["Invoicing MVP", "Payment Gateway Integration"] },
+  { slug: "platform-core", name: "Platform Core", description: "APIs, infrastructure and reliability across products.", lead: "ngozi", members: ["ngozi", "emeka", "daniel", "halima"], projects: ["Platform", "Public API", "Hyparrow Roadmap"] },
+  { slug: "growth-pod", name: "Growth Pod", description: "Acquisition, content and lifecycle marketing.", lead: "seyi", members: ["seyi", "amaka", "bolu", "bisi"], projects: ["Q4 Launch", "Womaney Roadmap"] },
+  { slug: "product-squad", name: "Product Squad", description: "Ships product roadmaps across the portfolio.", lead: "daniel", members: ["daniel", "emeka", "zainab", "grace"], projects: ["Hempay Roadmap", "Esthipay Roadmap"] },
   { slug: "people-ops", name: "People Ops", description: "Hiring, onboarding, policies and attendance.", lead: "funke", members: ["funke", "tunde", "grace"], projects: ["People Ops Rollout"] },
 ];
 
@@ -148,7 +167,7 @@ export const LABELS = [
 
 export interface ProjectSpec {
   name: string;
-  product: string;
+  product?: string;
   department: string;
   manager: string;
   description: string;
@@ -161,7 +180,7 @@ export interface ProjectSpec {
 
 export const PROJECTS: ProjectSpec[] = [
   {
-    name: "Platform", product: "mybizpush", department: "dev", manager: "sam", progress: 62,
+    name: "Platform", department: "dev", manager: "sam", progress: 62,
     description: "Core internal platform and API.", techStack: "Node.js + TypeScript (Express, Sequelize, Postgres, Redis)",
     members: ["femi", "ngozi", "emeka", "uche", "kola"], labels: ["backend", "frontend", "bug"],
     tasks: [
@@ -170,7 +189,7 @@ export const PROJECTS: ProjectSpec[] = [
     ],
   },
   {
-    name: "Public API", product: "mybizpush", department: "dev", manager: "ngozi", progress: 35,
+    name: "Public API", department: "dev", manager: "ngozi", progress: 35,
     description: "External-facing API and SDKs.", techStack: "Node.js + TypeScript, OpenAPI 3.1",
     members: ["emeka", "daniel", "halima"], labels: ["backend", "infra"],
     tasks: [
@@ -179,16 +198,16 @@ export const PROJECTS: ProjectSpec[] = [
     ],
   },
   {
-    name: "Q4 Launch", product: "mybizpush", department: "marketing", manager: "chiamaka", progress: 48,
+    name: "Q4 Launch", department: "marketing", manager: "chiamaka", progress: 48,
     description: "Multi-channel Q4 product launch.",
     members: ["seyi", "amaka", "bolu", "bisi", "tobi", "yusuf"], labels: ["content", "design"],
     tasks: [
-      "Launch landing page copy", "Black Friday email sequence", "Instagram reels for Growth plan", "Partner webinar with Lagos Chamber",
-      "Customer story video: Kudi Foods", "Paid social budget plan for December", "Press kit and founder quotes", "Referral program terms",
+      "Launch landing page copy", "Black Friday email sequence", "Instagram reels for Growth plan", "Partner webinar",
+      "Customer story video", "Paid social budget plan for December", "Press kit and founder quotes", "Referral program terms",
     ],
   },
   {
-    name: "Workspace Mobile App", product: "mybizpush-workspace", department: "dev", manager: "femi", progress: 71,
+    name: "Workspace Mobile App", department: "dev", manager: "femi", progress: 71,
     description: "React Native app for staff: tasks, chat, calendar, attendance.", techStack: "React Native + Expo, TypeScript, WatermelonDB sync",
     members: ["ifeoma", "zainab", "kola", "uche", "esther"], labels: ["mobile", "frontend", "bug"],
     tasks: [
@@ -198,7 +217,7 @@ export const PROJECTS: ProjectSpec[] = [
     ],
   },
   {
-    name: "People Ops Rollout", product: "mybizpush-workspace", department: "hr", manager: "funke", progress: 40,
+    name: "People Ops Rollout", department: "hr", manager: "funke", progress: 40,
     description: "Moving HR records, leave and attendance into Workspace.",
     members: ["tunde", "grace", "esther"], labels: ["content"],
     tasks: [
@@ -207,7 +226,7 @@ export const PROJECTS: ProjectSpec[] = [
     ],
   },
   {
-    name: "Brand Refresh", product: "mybizpush-workspace", department: "creatives", manager: "kola", progress: 78,
+    name: "Brand Refresh", department: "creatives", manager: "kola", progress: 78,
     description: "Brand guidelines, identity refresh.",
     members: ["bisi", "tobi", "chiamaka"], labels: ["design"],
     tasks: [
@@ -215,50 +234,28 @@ export const PROJECTS: ProjectSpec[] = [
       "Office wall graphics for Lagos HQ", "Email signature templates",
     ],
   },
-  {
-    name: "Hyparrow Beta Launch", product: "hyparrow", department: "marketing", manager: "ngozi", progress: 55,
-    description: "Public beta: docs, waitlist conversion and launch content.",
-    members: ["amaka", "tobi", "uche", "halima", "bolu"], labels: ["content", "infra"],
+  ...PRODUCTS.map((product, index): ProjectSpec => ({
+    name: `${product.name} Roadmap`,
+    product: product.slug,
+    department: "dev",
+    manager: product.owner,
+    progress: 20 + ((index * 17) % 60),
+    description: `Planned work for ${product.name} this quarter.`,
+    members: product.members.map(([person]) => person).filter((person) => person !== product.owner),
+    labels: ["backend", "frontend", "bug"],
     tasks: [
-      "Beta waitlist invite emails", "Quickstart docs for Node and Laravel", "Launch video script and edit", "Status page for beta users",
-      "Beta feedback survey", "Pricing page for paid tiers",
+      `${product.name} quarterly roadmap review`, `${product.name} onboarding flow improvements`, `${product.name} release notes`,
+      `${product.name} bug triage`, `${product.name} usage analytics dashboard`, `${product.name} QA regression pass`,
     ],
-  },
-  {
-    name: "Edge Deploy Pipeline", product: "hyparrow", department: "dev", manager: "halima", progress: 30,
-    description: "Build, deploy and cache at the edge from a git push.", techStack: "Go, Docker, Kubernetes, Cloudflare",
-    members: ["emeka", "daniel", "uche"], labels: ["infra", "backend", "bug"],
-    tasks: [
-      "Build cache for Docker layers", "Zero downtime deploy rollbacks", "Custom domains with automatic TLS", "Build logs streaming to dashboard",
-      "Deploy fails on monorepos with pnpm", "Preview environments per pull request", "Postgres add-on provisioning",
-    ],
-  },
-  {
-    name: "Invoicing MVP", product: "bizpush-pay", department: "dev", manager: "esther", progress: 25,
-    description: "Create, send and track invoices with payment links.", techStack: "Node.js + TypeScript, Postgres, React",
-    members: ["daniel", "zainab", "kola", "grace"], labels: ["payments", "frontend", "design"],
-    tasks: [
-      "Invoice editor UI", "PDF invoice template", "Recurring invoices scheduler", "VAT and withholding tax fields",
-      "Invoice reminders by email and WhatsApp", "Merchant onboarding flow", "Reconciliation report export",
-    ],
-  },
-  {
-    name: "Payment Gateway Integration", product: "bizpush-pay", department: "dev", manager: "daniel", progress: 18,
-    description: "Card, transfer and USSD collections through partner gateways.", techStack: "Node.js + TypeScript, BullMQ",
-    members: ["emeka", "uche", "yusuf"], labels: ["payments", "backend"],
-    tasks: [
-      "Gateway sandbox credentials and test plan", "Card payments with 3DS", "Bank transfer virtual accounts", "Webhook idempotency for payment events",
-      "Settlement reconciliation job", "Refunds and partial refunds",
-    ],
-  },
+  })),
 ];
 
 export const CUSTOM_TITLES = ["Product Manager", "QA Engineer", "Content Writer", "HR Officer", "Accountant", "Sales Lead", "Account Executive", "Customer Success", "Support Specialist"];
 
 export const ROLE_ASSIGNMENTS = [
   { role: "hr_officer", person: "funke", scope: "organization" as const },
-  { role: "product_manager", person: "esther", scope: "product" as const, product: "mybizpush-workspace" },
-  { role: "email_marketer", person: "amaka", scope: "product" as const, product: "mybizpush" },
-  { role: "reviewer", person: "uche", scope: "product" as const, product: "mybizpush-workspace" },
+  { role: "product_manager", person: "esther", scope: "product" as const, product: "plemuz" },
+  { role: "email_marketer", person: "amaka", scope: "product" as const, product: "plemuz" },
+  { role: "reviewer", person: "uche", scope: "product" as const, product: "conifer" },
   { role: "reviewer", person: "uche", scope: "product" as const, product: "hyparrow" },
 ];

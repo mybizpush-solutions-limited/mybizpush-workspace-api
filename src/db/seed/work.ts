@@ -189,7 +189,7 @@ export async function seedIssues(ctx: SeedContext): Promise<void> {
   const specs = [
     { project: "Public API", title: "401 returns inconsistent body", status: "todo" as const, priority: "high" as const, severity: "major" as const, reporter: "sam", assignees: ["ngozi"] },
     { project: "Platform", title: "Dock overlaps content on iPhone SE", status: "todo" as const, priority: "high" as const, severity: "minor" as const, reporter: "kola", assignees: ["femi"] },
-    { project: "Edge Deploy Pipeline", title: "Build logs cut off after 10,000 lines", status: "in_progress" as const, priority: "medium" as const, severity: "minor" as const, reporter: "uche", assignees: ["halima"] },
+    { project: "Hyparrow Roadmap", title: "Release notes page cut off on small screens", status: "in_progress" as const, priority: "medium" as const, severity: "minor" as const, reporter: "uche", assignees: ["halima"] },
     { project: "Workspace Mobile App", title: "Chat badge count stays after reading on web", status: "todo" as const, priority: "medium" as const, severity: "minor" as const, reporter: "uche", assignees: ["zainab"] },
   ];
   for (const spec of specs) {
