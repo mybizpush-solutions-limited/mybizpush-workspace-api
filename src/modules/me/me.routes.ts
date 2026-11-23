@@ -7,13 +7,21 @@ import { validateBody } from "../../middleware/validate";
 import { meService } from "./me.service";
 import { homeService } from "./home.service";
 import { profileService } from "./profile.service";
+import { profileChangesService } from "../staff/profileChanges.service";
 import { departmentsService } from "../departments/departments.service";
 import { authService } from "../auth/auth.service";
-import { ACTIVITY_KINDS } from "../../models";
+import { ACTIVITY_KINDS, User } from "../../models";
 import { activityFeed } from "./activity.feed";
 
 // "My work" aggregations backing the dashboard and the My Queue view, plus the
 // caller's own self-service profile / membership / onboarding actions.
+
+// After onboarding, a person's own edits become requests an approver signs off.
+async function onboarded(userId: string) {
+  const user = await User.findByPk(userId, { attributes: ["onboarded"] });
+  return Boolean(user?.onboarded);
+}
+
 export const meRouter = Router();
 meRouter.use(requireAuth);
 
@@ -68,6 +76,10 @@ meRouter.patch(
   "/",
   validateBody(profileSchema),
   asyncHandler(async (req, res) => {
+    if (await onboarded(req.auth!.sub)) {
+      res.status(202).json({ request: await profileChangesService.submit(req.auth!.sub, req.body) });
+      return;
+    }
     res.json({ user: await profileService.updateProfile(req.auth!.sub, req.body) });
   }),
 );
@@ -83,6 +95,10 @@ meRouter.patch(
     }),
   ),
   asyncHandler(async (req, res) => {
+    if (await onboarded(req.auth!.sub)) {
+      res.status(202).json({ request: await profileChangesService.submit(req.auth!.sub, req.body) });
+      return;
+    }
     res.json(await profileService.updateFull(req.auth!.sub, req.body));
   }),
 );
@@ -104,6 +120,10 @@ meRouter.post(
   avatarUpload.single("file"),
   asyncHandler(async (req, res) => {
     if (!req.file) throw badRequest("An image is required (multipart field 'file')");
+    if (await onboarded(req.auth!.sub)) {
+      res.status(202).json({ request: await profileChangesService.submitAvatar(req.auth!.sub, { buffer: req.file.buffer, originalname: req.file.originalname, size: req.file.size }) });
+      return;
+    }
     res.json({
       user: await profileService.setAvatar(req.auth!.sub, {
         buffer: req.file.buffer,
@@ -114,6 +134,15 @@ meRouter.post(
     });
   }),
 );
+
+meRouter.get("/profile-requests", asyncHandler(async (req, res) => {
+  res.json({ requests: await profileChangesService.mine(req.auth!.sub) });
+}));
+
+meRouter.delete("/profile-requests/:id", asyncHandler(async (req, res) => {
+  await profileChangesService.cancel(req.auth!.sub, req.params.id!);
+  res.status(204).end();
+}));
 
 // ---- Secondary (second @domain) email linking -----------------------------
 const secondaryEmailSchema = z.object({ email: z.string().trim().email() });

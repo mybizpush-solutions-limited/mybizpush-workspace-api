@@ -19,14 +19,15 @@ const renameRoleSchema = z.object({
 rolesRouter.get(
   "/",
   asyncHandler(async (_req, res) => {
-    res.json({ roles: await rolesService.list() });
+    const roles = await rolesService.list();
+    res.json({ roles, builtIn: roles.filter((name) => rolesService.isStandard(name)) });
   }),
 );
 
-// Exec-only: add a new role to the shared catalog.
+// Executives and chiefs: add a new role to the shared catalog.
 rolesRouter.post(
   "/",
-  requireAccessLevel("executive_admin"),
+  requireAccessLevel("executive_admin", "chief"),
   validateBody(addRoleSchema),
   asyncHandler(async (req, res) => {
     const roles = await rolesService.add(req.body.name, req.auth!.sub);
@@ -35,11 +36,11 @@ rolesRouter.post(
   }),
 );
 
-// Exec-only: rename a custom role (updates it on every member too). Built-in
+// Executives and chiefs: rename a custom role (updates it on every member too). Built-in
 // roles can't be renamed.
 rolesRouter.patch(
   "/",
-  requireAccessLevel("executive_admin"),
+  requireAccessLevel("executive_admin", "chief"),
   validateBody(renameRoleSchema),
   asyncHandler(async (req, res) => {
     const roles = await rolesService.rename(req.body.from, req.body.to);
@@ -54,11 +55,11 @@ rolesRouter.patch(
   }),
 );
 
-// Exec-only: remove a custom role (and strip it from every member). The role
+// Executives and chiefs: remove a custom role (and strip it from every member). The role
 // name rides in the query string since names can contain "/" and spaces.
 rolesRouter.delete(
   "/",
-  requireAccessLevel("executive_admin"),
+  requireAccessLevel("executive_admin", "chief"),
   asyncHandler(async (req, res) => {
     const name = String(req.query.name ?? "");
     const roles = await rolesService.remove(name);

@@ -12,6 +12,9 @@ const schema = z.object({
     .transform((s) => s.split(",").map((o) => o.trim()).filter(Boolean)),
 
   ALLOWED_EMAIL_DOMAIN: z.string().min(1).default("mybizpush.com"),
+  // Optional: lets staff email changes move the matching Cloudflare Email Routing rule.
+  CLOUDFLARE_API_TOKEN: z.string().optional().default(""),
+  CLOUDFLARE_ZONE_ID: z.string().optional().default(""),
   JWT_ACCESS_SECRET: z.string().min(1),
   JWT_REFRESH_SECRET: z.string().min(1),
   JWT_ACCESS_TTL: z.string().default("15m"),

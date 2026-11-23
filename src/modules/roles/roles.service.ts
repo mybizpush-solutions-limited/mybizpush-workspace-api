@@ -66,6 +66,10 @@ export const rolesService = {
 
   // Find a custom role by name (case-insensitive). Returns null for built-in
   // roles (which can't be renamed/removed) and unknown names.
+  isStandard(name: string): boolean {
+    return STANDARD_LOWER.has(name.trim().toLowerCase());
+  },
+
   async findCustom(name: string): Promise<CustomRole | null> {
     const key = name.trim().toLowerCase();
     if (!key || STANDARD_LOWER.has(key)) return null;
