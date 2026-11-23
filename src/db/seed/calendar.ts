@@ -25,14 +25,14 @@ interface MeetingSpec {
 const MEETINGS: MeetingSpec[] = [
   { title: "Engineering standup", description: "Yesterday, today, blockers.", week: 0, day: 0, time: "09:30", minutes: 15, type: "standup", organizer: "sam", scope: { type: "department", ref: "dev" }, note: "Android 10 crash is the top priority for mobile." },
   { title: "Workspace mobile sprint review", description: "Demo of build 1.2.0 and QA status.", week: 0, day: 1, time: "11:00", minutes: 45, type: "review", organizer: "femi", scope: { type: "project", ref: "Workspace Mobile App" }, agenda: ["Demo: chat threads", "Demo: QR check-in", "QA status", "Release scope for 1.2"] },
-  { title: "Hyparrow beta go or no go", description: "Decide on the public beta date.", week: 0, day: 2, time: "14:00", minutes: 60, type: "planning", organizer: "ngozi", scope: { type: "product", ref: "hyparrow" }, agenda: ["Custom domains", "Status page", "Invite batches", "Decision"] },
+  { title: "Hyparrow roadmap review", description: "Review progress and agree next priorities.", week: 0, day: 2, time: "14:00", minutes: 60, type: "planning", organizer: "ngozi", scope: { type: "product", ref: "hyparrow" }, agenda: ["Progress", "Blockers", "Next priorities", "Decisions"] },
   { title: "Marketing content planning", description: "Content calendar for December.", week: 0, day: 3, time: "12:00", minutes: 45, type: "planning", organizer: "chiamaka", scope: { type: "department", ref: "marketing" }, locationType: "in_person", location: "Lagos HQ, Ocean room" },
   { title: "Ada and Sam 1:1", description: "Weekly one on one.", week: 0, day: 3, time: "10:00", minutes: 30, type: "one_on_one", organizer: "ada", people: ["sam"] },
   { title: "Q4 all hands", description: "Quarter review, wins and plans for Q1.", week: 0, day: 4, time: "15:00", minutes: 90, type: "all_hands", organizer: "ada", scope: { type: "organization" }, locationType: "hybrid", location: "Lagos HQ, main hall", agenda: ["Q4 numbers", "Product updates", "People updates", "Questions"] },
-  { title: "BizPush Pay gateway partner call", description: "Sandbox access, settlement timelines and pricing.", week: 1, day: 0, time: "11:00", minutes: 45, type: "client", organizer: "esther", people: ["daniel", "yusuf", "grace"] },
+  { title: "Hempay partner call", description: "Partnership updates and next steps.", week: 1, day: 0, time: "11:00", minutes: 45, type: "client", organizer: "esther", people: ["daniel", "yusuf", "grace"] },
   { title: "Engineering standup", description: "Yesterday, today, blockers.", week: 1, day: 0, time: "09:30", minutes: 15, type: "standup", organizer: "sam", scope: { type: "department", ref: "dev" } },
   { title: "Workspace mobile sprint planning", description: "Plan the 1.3 sprint.", week: 1, day: 1, time: "10:00", minutes: 60, type: "planning", organizer: "femi", scope: { type: "team", ref: "mobile-squad" }, people: ["esther"] },
-  { title: "BizPush Pay leadership demo", description: "Invoice editor and payment link walkthrough.", week: 1, day: 1, time: "14:00", minutes: 45, type: "review", organizer: "esther", people: ["ada", "sam", "tunde", "daniel", "zainab"] },
+  { title: "Esthipay leadership demo", description: "Walkthrough of this sprint's work.", week: 1, day: 1, time: "14:00", minutes: 45, type: "review", organizer: "esther", people: ["ada", "sam", "tunde", "daniel", "zainab"] },
   { title: "New leave policy training", description: "What changed and how to request leave in Workspace.", week: 1, day: 2, time: "14:00", minutes: 45, type: "training", organizer: "funke", scope: { type: "organization" }, locationType: "hybrid", location: "Lagos HQ, Ocean room" },
   { title: "Brand refresh design critique", description: "Final review of guidelines and icon set.", week: 1, day: 3, time: "13:00", minutes: 60, type: "review", organizer: "kola", scope: { type: "project", ref: "Brand Refresh" } },
   { title: "Chiamaka and Seyi 1:1", description: "Monthly check in.", week: 1, day: 4, time: "11:00", minutes: 30, type: "one_on_one", organizer: "chiamaka", people: ["seyi"] },
@@ -111,7 +111,7 @@ export async function seedMeetings(ctx: SeedContext): Promise<void> {
 
 export async function seedCalendarEvents(ctx: SeedContext): Promise<void> {
   const events = [
-    { title: "Hyparrow public beta launch", description: "Public beta opens to the waitlist.", scopeType: "product" as const, scopeId: ctx.product("hyparrow").id, allDay: true, startsAt: weekSlot(1, 0, "00:00"), minutes: 24 * 60, by: "ngozi" },
+    { title: "Hyparrow release day", description: "Planned release from the Hyparrow roadmap.", scopeType: "product" as const, scopeId: ctx.product("hyparrow").id, allDay: true, startsAt: weekSlot(1, 0, "00:00"), minutes: 24 * 60, by: "ngozi" },
     { title: "Workspace mobile 1.2 release", description: "Store submission for iOS and Android.", scopeType: "project" as const, scopeId: ctx.project("Workspace Mobile App").id, allDay: true, startsAt: weekSlot(1, 4, "00:00"), minutes: 24 * 60, by: "femi" },
     { title: "November expense claims deadline", description: "Upload receipts in the finance form.", scopeType: "organization" as const, scopeId: null, allDay: false, startsAt: weekSlot(0, 4, "17:00"), minutes: 30, by: "grace" },
   ];

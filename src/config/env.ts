@@ -134,8 +134,8 @@ const schema = z.object({
     .transform((s) => s.split(",").map((p) => p.trim()).filter(Boolean)),
 
   // ---- Voice input (P8) ----
-  // none, openai or deepgram. With none, /ai/transcribe answers 503.
-  TRANSCRIBE_PROVIDER: z.enum(["none", "openai", "deepgram"]).default("none"),
+  // openrouter (uses OPENROUTER_API_KEY), openai, deepgram or none. With none, /ai/transcribe answers 503.
+  TRANSCRIBE_PROVIDER: z.enum(["none", "openrouter", "openai", "deepgram"]).default("openrouter"),
   TRANSCRIBE_API_KEY: z.string().optional().default(""),
   TRANSCRIBE_MODEL: z.string().optional().default(""),
 

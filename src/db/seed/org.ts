@@ -88,7 +88,7 @@ export async function seedStructure(ctx: SeedContext): Promise<void> {
 
   for (const spec of PROJECTS) {
     const dept = ctx.department(spec.department);
-    const product = ctx.product(spec.product);
+    const productId = spec.product ? ctx.product(spec.product).id : null;
     const [project] = await Project.findOrCreate({
       where: { name: spec.name },
       defaults: {
@@ -97,11 +97,11 @@ export async function seedStructure(ctx: SeedContext): Promise<void> {
         description: spec.description,
         techStack: spec.techStack ?? "",
         managerId: ctx.id(spec.manager),
-        productId: product.id,
+        productId,
         progress: spec.progress,
       },
     });
-    if (!project.productId) await project.update({ productId: product.id });
+    if (productId && !project.productId) await project.update({ productId });
     await setAssociation(project, "setDepartments", [dept.id]);
     await setAssociation(project, "setMembers", ctx.ids(spec.members));
     ctx.projects.set(spec.name, project);
