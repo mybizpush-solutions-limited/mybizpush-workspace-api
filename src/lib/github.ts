@@ -191,7 +191,7 @@ async function readHeaders(owner?: string): Promise<Record<string, string>> {
   try {
     token = await getInstallationToken(owner);
   } catch {
-    token = null; // not installed / unreachable — degrade to unauthenticated
+    token = null; // not installed / unreachable, degrade to unauthenticated
   }
   if (token) h.Authorization = `Bearer ${token}`;
   return h;

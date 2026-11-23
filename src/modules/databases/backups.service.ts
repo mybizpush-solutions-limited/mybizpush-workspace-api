@@ -122,9 +122,9 @@ async function executeRun(
     if (!wantsCloud) {
       backup.storageNote = "Kept on the API volume (local storage was requested)";
     } else if (!isCloudinaryConfigured()) {
-      backup.storageNote = "Kept on the API volume — Cloudinary is not configured";
+      backup.storageNote = "Kept on the API volume, Cloudinary is not configured";
     } else if (result.sizeBytes > maxBytes) {
-      backup.storageNote = `Kept on the API volume — ${formatBytes(result.sizeBytes)} exceeds the ${env.BACKUP_CLOUDINARY_MAX_MB}MB Cloudinary limit`;
+      backup.storageNote = `Kept on the API volume, ${formatBytes(result.sizeBytes)} exceeds the ${env.BACKUP_CLOUDINARY_MAX_MB}MB Cloudinary limit`;
     } else {
       try {
         const uploaded = await uploadFile(filePath, {
@@ -147,7 +147,7 @@ async function executeRun(
         }
       } catch (err) {
         // An upload failure must not lose the dump we just spent minutes taking.
-        backup.storageNote = `Kept on the API volume — Cloudinary upload failed: ${(err as Error).message}`.slice(0, 300);
+        backup.storageNote = `Kept on the API volume, Cloudinary upload failed: ${(err as Error).message}`.slice(0, 300);
       }
     }
 
@@ -321,7 +321,7 @@ export const backupsService = {
     const [count] = await DatabaseBackup.update(
       {
         status: "failed",
-        error: "Interrupted — the API restarted while this backup was running",
+        error: "Interrupted, the API restarted while this backup was running",
         finishedAt: new Date(),
       },
       { where: { status: "running", startedAt: { [Op.lt]: cutoff } } },

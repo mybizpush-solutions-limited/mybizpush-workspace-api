@@ -86,7 +86,7 @@ export function describeActor(actor: ActorContext, now: Date): string {
 
   return (
     `You are speaking with ${actor.name} <${actor.email}>.\n` +
-    `Their user id is ${actor.id} — use it whenever a tool needs "me".\n` +
+    `Their user id is ${actor.id}, use it whenever a tool needs "me".\n` +
     `Access level: ${actor.accessLevel}. Roles: ${actor.roles.join(", ") || "none"}.\n` +
     `Departments: ${depts}.\n` +
     `Projects: ${projects}.\n` +

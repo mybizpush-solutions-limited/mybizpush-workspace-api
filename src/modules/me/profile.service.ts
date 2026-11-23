@@ -71,7 +71,7 @@ export const profileService = {
       folder: `${env.CLOUDINARY_UPLOAD_FOLDER}/avatars`,
       resourceType: "image",
       tags: ["avatar", userId],
-      publicId: userId, // one asset per user — overwrites the previous upload
+      publicId: userId, // one asset per user, overwrites the previous upload
     });
 
     user.avatarUrl = result.secure_url;
@@ -117,7 +117,7 @@ export const profileService = {
     }
 
     if (missing.length) {
-      throw badRequest(`Finish onboarding first — still need: ${missing.join(", ")}.`);
+      throw badRequest(`Finish onboarding first, still need: ${missing.join(", ")}.`);
     }
 
     user.onboarded = true;
@@ -134,7 +134,7 @@ export const profileService = {
     const user = await User.findByPk(userId);
     if (!user) throw notFound("User not found");
     if (user.onboarded) {
-      throw badRequest("Request to join — a department head or admin will add you.");
+      throw badRequest("Request to join, a department head or admin will add you.");
     }
     // Onboarding: this is the user's single department, so it replaces any prior pick.
     await (user as any).setDepartments([departmentId]);

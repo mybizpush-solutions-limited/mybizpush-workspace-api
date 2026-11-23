@@ -90,7 +90,7 @@ export const authService = {
   // Resend a fresh code for an in-progress signup (preserves the pending data).
   async resendOtp(email: string): Promise<void> {
     const raw = await redis.get(`${REG_PREFIX}${email}`);
-    if (!raw) throw badRequest("Your sign-up session expired — please start again");
+    if (!raw) throw badRequest("Your sign-up session expired, please start again");
     const pending = JSON.parse(raw) as PendingRegistration;
     pending.otp = generateOtp();
     pending.attempts = 0;
@@ -103,14 +103,14 @@ export const authService = {
   async verifyRegistration(email: string, otp: string): Promise<AuthStep> {
     const key = `${REG_PREFIX}${email}`;
     const raw = await redis.get(key);
-    if (!raw) throw badRequest("Your code has expired — please start sign up again");
+    if (!raw) throw badRequest("Your code has expired, please start sign up again");
     const pending = JSON.parse(raw) as PendingRegistration;
 
     if (pending.otp !== otp) {
       pending.attempts += 1;
       if (pending.attempts >= OTP_MAX_ATTEMPTS) {
         await redis.del(key);
-        throw badRequest("Too many incorrect codes — please start sign up again");
+        throw badRequest("Too many incorrect codes, please start sign up again");
       }
       await redis.set(key, JSON.stringify(pending), "KEEPTTL");
       throw badRequest("That code isn't right");
@@ -251,7 +251,7 @@ export const authService = {
     if (!user) {
       // Anti-enumeration: the client still gets {ok:true}. Log server-side so we
       // can tell "no account" apart from "send failed" when debugging delivery.
-      console.info(`[reset] no account matches ${email.toLowerCase()} — nothing sent`);
+      console.info(`[reset] no account matches ${email.toLowerCase()}, nothing sent`);
       return;
     }
     // Default to the entered address; the Google fallback sends to the linked
@@ -323,7 +323,7 @@ export const authService = {
   async verifySecondaryEmail(userId: string, otp: string): Promise<PublicUser> {
     const key = `${SECEMAIL_PREFIX}${userId}`;
     const raw = await redis.get(key);
-    if (!raw) throw badRequest("Your code has expired — please try again");
+    if (!raw) throw badRequest("Your code has expired, please try again");
     const pending = JSON.parse(raw) as { email: string; otp: string };
     if (pending.otp !== otp.trim()) throw badRequest("That code isn't right");
 

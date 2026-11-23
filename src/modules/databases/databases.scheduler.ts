@@ -77,7 +77,7 @@ export function startBackupScheduler(): void {
     if (version) console.info(`[backups] pg_dump ${version} available`);
     else
       console.warn(
-        `[backups] pg_dump not found (PG_DUMP_PATH="${env.PG_DUMP_PATH}") — scheduled backups will fail until it's installed`,
+        `[backups] pg_dump not found (PG_DUMP_PATH="${env.PG_DUMP_PATH}"), scheduled backups will fail until it's installed`,
       );
   });
 
@@ -88,7 +88,7 @@ export function startBackupScheduler(): void {
   // Surface what's actually armed, so a mis-set timezone is caught early.
   DatabaseBackupSchedule.findAll({ where: { enabled: true } })
     .then((schedules) => {
-      console.info(`[backups] scheduler enabled — ${schedules.length} schedule(s) armed`);
+      console.info(`[backups] scheduler enabled, ${schedules.length} schedule(s) armed`);
       for (const s of schedules) {
         console.info(`[backups]   ${describeSchedule(s)} → next ${s.nextRunAt?.toISOString() ?? "unset"}`);
       }
