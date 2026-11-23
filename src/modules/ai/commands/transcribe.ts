@@ -1,5 +1,6 @@
 import { env } from "../../../config/env";
 import { AppError, badRequest } from "../../../lib/errors";
+import { transcribeAudio } from "../../../lib/openrouter";
 
 // Audio to text (API-CHANGES A802). The provider is chosen by config and the audio
 // is passed straight through, never stored. With no provider, the API says so and
@@ -53,14 +54,28 @@ const deepgram: Transcriber = async (file, opts) => {
   return { text: channel?.alternatives?.[0]?.transcript ?? "", language: channel?.detected_language ?? opts.language ?? null, durationMs: data.metadata?.duration != null ? Math.round(data.metadata.duration * 1000) : null };
 };
 
-const PROVIDERS: Record<string, Transcriber> = { openai, deepgram };
+// Audio container to the format names OpenRouter forwards to the model.
+const OPENROUTER_FORMATS: Record<string, string> = { ".m4a": "m4a", ".mp4": "m4a", ".mp3": "mp3", ".aac": "aac", ".wav": "wav", ".ogg": "ogg", ".opus": "ogg", ".webm": "webm" };
+
+const openrouter: Transcriber = async (file, opts) => {
+  const name = file.originalname.toLowerCase();
+  const ext = name.slice(name.lastIndexOf("."));
+  const format = OPENROUTER_FORMATS[ext];
+  if (!format) throw badRequest("Record in m4a, mp3, wav, aac, ogg or webm for voice input");
+  const text = await transcribeAudio(file.buffer, format, { model: env.TRANSCRIBE_MODEL || "google/gemini-2.5-flash", language: opts.language });
+  return { text, language: opts.language ?? null, durationMs: null };
+};
+
+const PROVIDERS: Record<string, Transcriber> = { openai, deepgram, openrouter };
+
+const keyFor = (provider: string) => (provider === "openrouter" ? env.OPENROUTER_API_KEY : env.TRANSCRIBE_API_KEY);
 
 let override: { name: string; run: Transcriber } | null = null;
 export function setTranscriber(t: { name: string; run: Transcriber } | null): void {
   override = t;
 }
 
-export const transcribeAvailable = () => !!override || (env.TRANSCRIBE_PROVIDER !== "none" && !!env.TRANSCRIBE_API_KEY && !!PROVIDERS[env.TRANSCRIBE_PROVIDER]);
+export const transcribeAvailable = () => !!override || (env.TRANSCRIBE_PROVIDER !== "none" && !!keyFor(env.TRANSCRIBE_PROVIDER) && !!PROVIDERS[env.TRANSCRIBE_PROVIDER]);
 
 export async function transcribe(file: AudioFile, opts: { language?: string } = {}): Promise<Transcript> {
   assertAudio(file.originalname);

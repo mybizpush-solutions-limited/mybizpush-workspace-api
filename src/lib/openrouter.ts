@@ -118,3 +118,21 @@ export async function chatCompletionWithTools(
   }
   return { content: undash(content), toolCalls };
 }
+
+const TRANSCRIBE_PROMPT =
+  "Transcribe the speech in this audio exactly as spoken, in the language spoken. " +
+  "Reply with the transcript only: no quotes, labels, timestamps or commentary. If nobody speaks, reply with an empty message.";
+
+// Speech to text through an audio-capable chat model, so voice input needs no separate provider key.
+export async function transcribeAudio(audio: Buffer, format: string, opts: { model: string; language?: string }): Promise<string> {
+  const data = await post({
+    model: opts.model,
+    temperature: 0,
+    max_tokens: DEFAULT_MAX_TOKENS,
+    messages: [
+      { role: "system", content: TRANSCRIBE_PROMPT + (opts.language ? ` The speaker is using language code ${opts.language}.` : "") },
+      { role: "user", content: [{ type: "input_audio", input_audio: { data: audio.toString("base64"), format } }] },
+    ],
+  });
+  return undash(data.choices?.[0]?.message?.content?.trim() ?? "");
+}
